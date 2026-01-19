@@ -31,8 +31,8 @@ build-gcc-openmp:
 
     # Verify tools and paths
     - gcc --version
-    - ls -la ${MKLROOT}/include/ | head -5
-    - ls -la ${MKLROOT}/lib/intel64/ | head -5
+    - ls ${MKLROOT}/include/*.h | wc -l
+    - ls ${MKLROOT}/lib/intel64/*.so | wc -l
 
   script:
     # Compile MCsquare with GCC + OpenMP (no Cilk Plus)
