@@ -1,0 +1,62 @@
+# GitLab CI for MCsquare - Cilk Plus to OpenMP SIMD conversion testing
+# Tests compilation with GCC and Intel MKL on x86_64 Linux
+
+stages:
+  - build
+
+variables:
+  # Avoid interactive prompts during package installation
+  DEBIAN_FRONTEND: noninteractive
+
+build-gcc-openmp:
+  stage: build
+  image: ubuntu:22.04
+  tags:
+    - saas-linux-medium-amd64  # GitLab.com shared runner, x86_64
+  before_script:
+    # Install build dependencies
+    - apt-get update
+    - apt-get install -y build-essential wget gnupg2
+
+    # Add Intel oneAPI repository for MKL
+    - wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor > /usr/share/keyrings/oneapi-archive-keyring.gpg
+    - echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" > /etc/apt/sources.list.d/oneAPI.list
+    - apt-get update
+
+    # Install Intel MKL (minimal package for linking)
+    - apt-get install -y intel-oneapi-mkl-devel
+
+    # Set up MKL environment
+    - source /opt/intel/oneapi/setvars.sh
+
+    # Verify tools
+    - gcc --version
+    - echo "MKL_ROOT=$MKLROOT"
+
+  script:
+    # Source MKL environment again (in case it didn't persist)
+    - source /opt/intel/oneapi/setvars.sh
+
+    # Compile MCsquare with GCC + OpenMP (no Cilk Plus)
+    # Based on MC2_gcc target but without -fcilkplus
+    - |
+      gcc src/*.c \
+        -fopenmp \
+        -I${MKLROOT}/include \
+        -L${MKLROOT}/lib/intel64 \
+        -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core \
+        -lgomp -lpthread -lm -ldl \
+        -O3 -m64 \
+        -o MCsquare_gcc
+
+    # Verify binary was created
+    - ls -la MCsquare_gcc
+    - file MCsquare_gcc
+
+    # Show help/version if available
+    - ./MCsquare_gcc --help || ./MCsquare_gcc -h || echo "No help flag available"
+
+  artifacts:
+    paths:
+      - MCsquare_gcc
+    expire_in: 1 week
