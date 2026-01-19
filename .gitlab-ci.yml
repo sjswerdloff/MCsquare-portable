@@ -11,8 +11,7 @@ variables:
 build-gcc-openmp:
   stage: build
   image: ubuntu:22.04
-  tags:
-    - saas-linux-medium-amd64  # GitLab.com shared runner, x86_64
+  # No tags specified - will use any available runner (project or shared)
   before_script:
     # Install build dependencies
     - apt-get update
