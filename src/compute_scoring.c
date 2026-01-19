@@ -98,13 +98,19 @@ void get_scoring_index(DATA_Scoring *scoring, VAR_COMPUTE *v_x, VAR_COMPUTE *v_y
   __assume_aligned(v_z, 64);
   __assume_aligned(v_index, 64);
 
-  v_index[vALL] = 	(int)floor( (scoring->Length[0]-v_x[vALL]+scoring->Offset[0]) / scoring->VoxelLength[0] ) 
-			+ scoring->GridSize[0] * (int)floor( (v_y[vALL]-scoring->Offset[1]) / scoring->VoxelLength[1] ) 
-			+ scoring->GridSize[0] * scoring->GridSize[1] * (int)floor( (v_z[vALL]-scoring->Offset[2]) / scoring->VoxelLength[2] );
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_index[i] = 	(int)floor( (scoring->Length[0]-v_x[i]+scoring->Offset[0]) / scoring->VoxelLength[0] ) 
+			+ scoring->GridSize[0] * (int)floor( (v_y[i]-scoring->Offset[1]) / scoring->VoxelLength[1] ) 
+			+ scoring->GridSize[0] * scoring->GridSize[1] * (int)floor( (v_z[i]-scoring->Offset[2]) / scoring->VoxelLength[2] );
+  }
 
-  if(v_x[vALL] < scoring->Offset[0] || v_y[vALL] < scoring->Offset[1] || v_z[vALL] < scoring->Offset[2] || 
-	 v_x[vALL] > scoring->Grid_end[0] || v_y[vALL] > scoring->Grid_end[1] || v_z[vALL] > scoring->Grid_end[2] ||
-	 v_index[vALL] < 0 || v_index[vALL] > scoring->Nbr_voxels) v_index[vALL] = -1;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_x[i] < scoring->Offset[0] || v_y[i] < scoring->Offset[1] || v_z[i] < scoring->Offset[2] || 
+    	 v_x[i] > scoring->Grid_end[0] || v_y[i] > scoring->Grid_end[1] || v_z[i] > scoring->Grid_end[2] ||
+    	 v_index[i] < 0 || v_index[i] > scoring->Nbr_voxels) v_index[i] = -1;
+  }
   
 }
 
@@ -206,20 +212,26 @@ void Energy_Scoring_from_index(DATA_Scoring *scoring, int *v_index, VAR_COMPUTE 
   ALIGNED_(64) VAR_COMPUTE v_scored_value[VLENGTH];
  
   // SPR is used when online dose-to-water conversion is enabled
-  if(config->Dose_weighting_algorithm == 0) v_scored_value[vALL] = v_multiplicity[vALL] * v_dE[vALL] / (v_density[vALL] * v_SPR[vALL]); // Volume weighting
-  else v_scored_value[vALL] = v_multiplicity[vALL] * v_dE[vALL] / v_SPR[vALL];  // Mass weighting
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(config->Dose_weighting_algorithm == 0) v_scored_value[i] = v_multiplicity[i] * v_dE[i] / (v_density[i] * v_SPR[i]); // Volume weighting
+      else v_scored_value[i] = v_multiplicity[i] * v_dE[i] / v_SPR[i];
+  }  // Mass weighting
     
   int i;
   for(i=0; i<VLENGTH; i++){
     if(v_scored_value[i] != 0.0 && v_index[i] >= 0) scoring->dose[v_index[i]] += v_scored_value[i];
   }
 
-  if(config->Score_Energy == 1){
-    v_scored_value[vALL] = v_multiplicity[vALL] * v_dE[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(config->Score_Energy == 1){
+        v_scored_value[i] = v_multiplicity[i] * v_dE[i];
     
-    for(i=0; i<VLENGTH; i++){
-      if(v_scored_value[i] != 0.0 && v_index[i] >= 0) scoring->energy[v_index[i]] += v_scored_value[i];
-    }
+        for(i=0; i<VLENGTH; i++){
+          if(v_scored_value[i] != 0.0 && v_index[i] >= 0) scoring->energy[v_index[i]] += v_scored_value[i];
+        }
+      }
   }
 
 }

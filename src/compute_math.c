@@ -51,7 +51,10 @@ void vec_sign(VAR_COMPUTE *v_vec, VAR_COMPUTE *v_sign){
   else v_sign[vALL] = 0;
 */
 
-  v_sign[vALL] = (v_vec[vALL] > 0.0) - (v_vec[vALL] < 0.0);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_sign[i] = (v_vec[i] > 0.0) - (v_vec[i] < 0.0);
+  }
 
   return;
 }
@@ -82,7 +85,10 @@ void vec_Linear_Interpolation(VAR_COMPUTE *v_x, VAR_COMPUTE *v_x1, VAR_COMPUTE *
   // Calcul de la pente p = (y2 - y1) / (x2 - x1)
   // Calcul de la valeur interpolée y = p*(x-x1) + y1
 
-  v_result[vALL] = ((v_y2[vALL] - v_y1[vALL]) / (v_x2[vALL] - v_x1[vALL]))*(v_x[vALL] - v_x1[vALL]) + v_y1[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_result[i] = ((v_y2[i] - v_y1[i]) / (v_x2[i] - v_x1[i]))*(v_x[i] - v_x1[i]) + v_y1[i];
+  }
 
   return;
 }
@@ -229,19 +235,24 @@ inline void my_log(VAR_COMPUTE *v_data, VAR_COMPUTE *v_result){
 	ALIGNED_(64) uint32_t i[VLENGTH]; 
 	} vx;
 
-  vx.f[vALL] = (float)v_data[vALL];
+  #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    vx.f[i] = (float)v_data[i];
+  }
 
-  union { 
-	ALIGNED_(64) uint32_t i[VLENGTH]; 
+  union {
+	ALIGNED_(64) uint32_t i[VLENGTH];
 	ALIGNED_(64) float f[VLENGTH];
 	} mx;
 
-  mx.i[vALL] = (vx.i[vALL] & 0x007FFFFF) | 0x3f000000;
-
-  v_result[vALL] = vx.i[vALL];
-  v_result[vALL] *= 1.1920928955078125e-7f;
-  v_result[vALL] = v_result[vALL] - 124.22551499f - 1.498030302f * mx.f[vALL] - 1.72587999f / (0.3520887068f + mx.f[vALL]);
-  v_result[vALL] *= 0.69314718f;
+  #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    mx.i[i] = (vx.i[i] & 0x007FFFFF) | 0x3f000000;
+    v_result[i] = vx.i[i];
+    v_result[i] *= 1.1920928955078125e-7f;
+    v_result[i] = v_result[i] - 124.22551499f - 1.498030302f * mx.f[i] - 1.72587999f / (0.3520887068f + mx.f[i]);
+    v_result[i] *= 0.69314718f;
+  }
 
   return;
 }

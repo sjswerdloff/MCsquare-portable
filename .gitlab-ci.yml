@@ -1,0 +1,116 @@
+# GitLab CI for MCsquare - Cilk Plus to OpenMP SIMD conversion testing
+# Tests compilation with GCC and Intel MKL on x86_64 Linux
+
+stages:
+  - build
+  - test
+
+variables:
+  # Avoid interactive prompts during package installation
+  DEBIAN_FRONTEND: noninteractive
+
+build-gcc-openmp:
+  stage: build
+  image: ubuntu:22.04
+  # No tags specified - will use any available runner (project or shared)
+  variables:
+    # Set MKL paths directly instead of sourcing setvars.sh
+    MKLROOT: /opt/intel/oneapi/mkl/latest
+
+  before_script:
+    # Install build dependencies
+    - apt-get update
+    - apt-get install -y build-essential wget gnupg2
+
+    # Add Intel oneAPI repository for MKL
+    - wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor > /usr/share/keyrings/oneapi-archive-keyring.gpg
+    - echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" > /etc/apt/sources.list.d/oneAPI.list
+    - apt-get update
+
+    # Install Intel MKL (minimal package for linking)
+    - apt-get install -y intel-oneapi-mkl-devel
+
+    # Verify tools and paths
+    - gcc --version
+    - ls ${MKLROOT}/include/*.h | wc -l
+    - ls ${MKLROOT}/lib/intel64/*.so | wc -l
+
+  script:
+    # Compile MCsquare with GCC + OpenMP (no Cilk Plus)
+    # Based on MC2_gcc target but without -fcilkplus
+    - |
+      gcc src/*.c \
+        -fopenmp \
+        -I${MKLROOT}/include \
+        -L${MKLROOT}/lib/intel64 \
+        -Wl,-rpath,${MKLROOT}/lib/intel64 \
+        -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core \
+        -lgomp -lpthread -lm -ldl \
+        -O3 -m64 \
+        -DVERSION="\"GitLab CI build (cilk-to-openmp-simd)\"" \
+        -o MCsquare_gcc
+
+    # Verify binary was created
+    - ls -la MCsquare_gcc
+
+    # Show version
+    - ./MCsquare_gcc || true  # MCsquare prints version then exits with usage
+
+  artifacts:
+    paths:
+      - MCsquare_gcc
+    expire_in: 1 week
+
+smoke-test:
+  stage: test
+  image: ubuntu:22.04
+  variables:
+    MKLROOT: /opt/intel/oneapi/mkl/latest
+    # Ensure MKL libraries are found at runtime
+    LD_LIBRARY_PATH: /opt/intel/oneapi/mkl/latest/lib/intel64
+
+  before_script:
+    # Install runtime dependencies
+    - apt-get update
+    - apt-get install -y wget gnupg2 libgomp1
+
+    # Add Intel oneAPI repository for MKL runtime
+    - wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor > /usr/share/keyrings/oneapi-archive-keyring.gpg
+    - echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" > /etc/apt/sources.list.d/oneAPI.list
+    - apt-get update
+
+    # Install MKL runtime libraries
+    - apt-get install -y intel-oneapi-mkl
+
+  script:
+    # Source Intel oneAPI environment (verbose output)
+    - source /opt/intel/oneapi/setvars.sh --force
+    - echo "=== MKL Environment ===" && env | grep -i mkl
+    - echo "=== LD_LIBRARY_PATH ===" && echo $LD_LIBRARY_PATH
+
+    # Create output directory and test config with reduced primaries
+    - mkdir -p smoke_test_output
+    - |
+      cat > smoke_test_config.txt << 'EOF'
+      Num_Threads         1
+      Num_Primaries       1000
+      CT_File             Sample_input_data/CT.mhd
+      HU_Density_Conversion_File   Scanners/default/HU_Density_Conversion.txt
+      HU_Material_Conversion_File  Scanners/default/HU_Material_Conversion.txt
+      BDL_Machine_Parameter_File   BDL/BDL_default_DN_RangeShifter.txt
+      BDL_Plan_File       Sample_input_data/PlanPencil.txt
+      Output_Directory    smoke_test_output
+      Dose_MHD_Output     True
+      EOF
+
+    # Run smoke test
+    - echo "Running MCsquare smoke test with 1000 primaries..."
+    - ./MCsquare_gcc smoke_test_config.txt
+
+    # Verify dose output was created
+    - echo "Checking for output files..."
+    - ls -la smoke_test_output/
+    - test -f smoke_test_output/Dose.mhd && echo "Smoke test passed - Dose.mhd created!"
+
+  dependencies:
+    - build-gcc-openmp

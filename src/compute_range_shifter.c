@@ -147,7 +147,11 @@ void Simulate_RangeShifter(Hadron_buffer *hadron_list, ControlPoint_parameters *
       } // if unknown
     } // for loop VLENGTH
 
-    count = __sec_reduce_add(hadron.v_type[vALL]);
+        count = 0;
+    #pragma omp simd reduction(+:count)
+    for (int i = 0; i < VLENGTH; i++) {
+        count += hadron.v_type[i];
+    }
     if(count == 0){
       break;
     }

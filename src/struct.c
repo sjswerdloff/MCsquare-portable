@@ -15,20 +15,53 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 
 void Init_particles(Hadron *hadron){
 
-  hadron->v_x[vALL] = 0.0;
-  hadron->v_y[vALL] = 0.0;
-  hadron->v_z[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_x[i] = 0.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_y[i] = 0.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_z[i] = 0.0;
+  }
 
-  hadron->v_u[vALL] = 0.0;
-  hadron->v_v[vALL] = 0.0;
-  hadron->v_w[vALL] = 0.1;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_u[i] = 0.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_v[i] = 0.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_w[i] = 0.1;
+  }
 
-  hadron->v_T[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_T[i] = 0.0;
+  }
 
-  hadron->v_M[vALL] = 1.0;
-  hadron->v_type[vALL] = Unknown;
-  hadron->v_charge[vALL] = 1.0;
-  hadron->v_mass[vALL] = 1.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_M[i] = 1.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_type[i] = Unknown;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_charge[i] = 1.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_mass[i] = 1.0;
+  }
 
   return;
 }
@@ -130,16 +163,28 @@ void Update_Hadron(Hadron *hadron){
   __assume_aligned(&hadron->v_Te_max, 64);
 
 
-  hadron->v_E[vALL] = hadron->v_T[vALL] + hadron->v_mass[vALL] * MC2_PRO;	// Energie totale du proton
-  hadron->v_gamma[vALL] = hadron->v_E[vALL] / (hadron->v_mass[vALL] * MC2_PRO);	// Paramètre relativiste gamma du proton
-  hadron->v_beta2[vALL] = 1 - (1/(hadron->v_gamma[vALL]*hadron->v_gamma[vALL]));	// Betta au carré (v/c)^2
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_E[i] = hadron->v_T[i] + hadron->v_mass[i] * MC2_PRO;
+  }	// Energie totale du proton
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_gamma[i] = hadron->v_E[i] / (hadron->v_mass[i] * MC2_PRO);
+  }	// Paramètre relativiste gamma du proton
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_beta2[i] = 1 - (1/(hadron->v_gamma[i]*hadron->v_gamma[i]));
+  }	// Betta au carré (v/c)^2
 
   // Energie maximum transferable à l'e-
   //hadron->v_Te_max[vALL] = 	(2*MC2_ELEC * (hadron->v_gamma[vALL]*hadron->v_gamma[vALL] - 1)) / (1 + 2*hadron->v_gamma[vALL]*(MC2_ELEC/(hadron->v_mass[vALL]*MC2_PRO)) 
   //				+ (MC2_ELEC/(hadron->v_mass[vALL]*MC2_PRO)) * (MC2_ELEC/(hadron->v_mass[vALL]*MC2_PRO)));
-  hadron->v_Te_max[vALL] = 	(2*MC2_ELEC * (hadron->v_mass[vALL]*MC2_PRO)*(hadron->v_mass[vALL]*MC2_PRO) * (hadron->v_gamma[vALL]*hadron->v_gamma[vALL] - 1)) / 
-				((hadron->v_mass[vALL]*MC2_PRO)*(hadron->v_mass[vALL]*MC2_PRO) + 2*MC2_ELEC*hadron->v_gamma[vALL]*(hadron->v_mass[vALL]*MC2_PRO) 
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_Te_max[i] = 	(2*MC2_ELEC * (hadron->v_mass[i]*MC2_PRO)*(hadron->v_mass[i]*MC2_PRO) * (hadron->v_gamma[i]*hadron->v_gamma[i] - 1)) / 
+				((hadron->v_mass[i]*MC2_PRO)*(hadron->v_mass[i]*MC2_PRO) + 2*MC2_ELEC*hadron->v_gamma[i]*(hadron->v_mass[i]*MC2_PRO) 
 				+ MC2_ELEC*MC2_ELEC);
+  }
 
   return;
 }
@@ -187,23 +232,23 @@ void Copy_Hadron_struct(Hadron *destination, Hadron *origin){
   __assume_aligned(&origin->v_Te_max, 64);
 
 
-  destination->v_x[:] = origin->v_x[:];
-  destination->v_y[:] = origin->v_y[:];
-  destination->v_z[:] = origin->v_z[:];
+  memcpy(destination->v_x, origin->v_x, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_y, origin->v_y, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_z, origin->v_z, VLENGTH * sizeof(VAR_COMPUTE));
 
-  destination->v_u[:] = origin->v_u[:];
-  destination->v_v[:] = origin->v_v[:];
-  destination->v_w[:] = origin->v_w[:];
+  memcpy(destination->v_u, origin->v_u, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_v, origin->v_v, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_w, origin->v_w, VLENGTH * sizeof(VAR_COMPUTE));
 
-  destination->v_T[:] = origin->v_T[:];
-  destination->v_M[:] = origin->v_M[:];
-  destination->v_charge[:] = origin->v_charge[:];
-  destination->v_mass[:] = origin->v_mass[:];
+  memcpy(destination->v_T, origin->v_T, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_M, origin->v_M, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_charge, origin->v_charge, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_mass, origin->v_mass, VLENGTH * sizeof(VAR_COMPUTE));
 
-  destination->v_type[:] = origin->v_type[:];
+  memcpy(destination->v_type, origin->v_type, VLENGTH * sizeof(enum Hadron_type));
 
-  destination->v_E[:] = origin->v_E[:];
-  destination->v_gamma[:] = origin->v_gamma[:];
-  destination->v_beta2[:] = origin->v_beta2[:];
-  destination->v_Te_max[:] = origin->v_Te_max[:];
+  memcpy(destination->v_E, origin->v_E, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_gamma, origin->v_gamma, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_beta2, origin->v_beta2, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_Te_max, origin->v_Te_max, VLENGTH * sizeof(VAR_COMPUTE));
 }
