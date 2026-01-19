@@ -83,8 +83,10 @@ smoke-test:
     - apt-get install -y intel-oneapi-mkl
 
   script:
-    # Source Intel oneAPI environment
-    - source /opt/intel/oneapi/setvars.sh
+    # Source Intel oneAPI environment (verbose output)
+    - source /opt/intel/oneapi/setvars.sh --force
+    - echo "=== MKL Environment ===" && env | grep -i mkl
+    - echo "=== LD_LIBRARY_PATH ===" && echo $LD_LIBRARY_PATH
 
     # Create minimal test config with reduced primaries for speed
     - |
