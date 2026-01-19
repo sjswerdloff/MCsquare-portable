@@ -72,7 +72,7 @@ smoke-test:
   before_script:
     # Install runtime dependencies
     - apt-get update
-    - apt-get install -y wget gnupg2
+    - apt-get install -y wget gnupg2 libgomp1
 
     # Add Intel oneAPI repository for MKL runtime
     - wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor > /usr/share/keyrings/oneapi-archive-keyring.gpg
