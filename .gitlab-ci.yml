@@ -88,7 +88,8 @@ smoke-test:
     - echo "=== MKL Environment ===" && env | grep -i mkl
     - echo "=== LD_LIBRARY_PATH ===" && echo $LD_LIBRARY_PATH
 
-    # Create minimal test config with reduced primaries for speed
+    # Create output directory and test config with reduced primaries
+    - mkdir -p smoke_test_output
     - |
       cat > smoke_test_config.txt << 'EOF'
       Num_Threads         1
@@ -98,16 +99,18 @@ smoke-test:
       HU_Material_Conversion_File  Scanners/default/HU_Material_Conversion.txt
       BDL_Machine_Parameter_File   BDL/BDL_default_DN_RangeShifter.txt
       BDL_Plan_File       Sample_input_data/PlanPencil.txt
+      Output_Directory    smoke_test_output
+      Dose_MHD_Output     True
       EOF
 
     # Run smoke test
     - echo "Running MCsquare smoke test with 1000 primaries..."
     - ./MCsquare_gcc smoke_test_config.txt
 
-    # Verify simulation completed - check for any output
+    # Verify dose output was created
     - echo "Checking for output files..."
-    - ls -la Outputs/ || ls -la *.mhd || echo "Output directory check"
-    - echo "Smoke test passed - simulation completed successfully!"
+    - ls -la smoke_test_output/
+    - test -f smoke_test_output/Dose.mhd && echo "Smoke test passed - Dose.mhd created!"
 
   dependencies:
     - build-gcc-openmp
