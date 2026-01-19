@@ -245,7 +245,7 @@ void Copy_Hadron_struct(Hadron *destination, Hadron *origin){
   memcpy(destination->v_charge, origin->v_charge, VLENGTH * sizeof(VAR_COMPUTE));
   memcpy(destination->v_mass, origin->v_mass, VLENGTH * sizeof(VAR_COMPUTE));
 
-  memcpy(destination->v_type, origin->v_type, VLENGTH * sizeof(int));
+  memcpy(destination->v_type, origin->v_type, VLENGTH * sizeof(enum Hadron_type));
 
   memcpy(destination->v_E, origin->v_E, VLENGTH * sizeof(VAR_COMPUTE));
   memcpy(destination->v_gamma, origin->v_gamma, VLENGTH * sizeof(VAR_COMPUTE));
