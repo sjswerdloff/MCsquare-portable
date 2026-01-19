@@ -424,40 +424,41 @@ unsigned long Simulation_loop(DATA_config *config, Materials *material, DATA_CT 
     // Compute simulation
     while(stop == 0){
       for(i=0; i<VLENGTH; i++){
-		#pragma omp simd
-	for (int i = 0; i < VLENGTH; i++) {
-    if(hadron.v_type[i] == Unknown){
+	if(hadron.v_type[i] == Unknown){
 
-    	  if(Nbr_HadronToSimulate > 0){
-    	    Nbr_HadronToSimulate -= 1;
-    	    Insert_particle(&hadron, i, &HadronToSimulate[Nbr_HadronToSimulate]);
-    	  }
+	  if(Nbr_HadronToSimulate > 0){
+	    Nbr_HadronToSimulate -= 1;
+	    Insert_particle(&hadron, i, &HadronToSimulate[Nbr_HadronToSimulate]);
+	  }
 
-    	  else if(Num_simulated_primaries < Num_primaries){
-    	    #pragma omp atomic
-    	    Num_simulated_primaries += VLENGTH;
+	  else if(Num_simulated_primaries < Num_primaries){
+	    #pragma omp atomic
+	    Num_simulated_primaries += VLENGTH;
 
-    	    //Generate_particle(&hadron, i, BeamPOSx, BeamPOSy, BeamPOSz, PEnergy*UMeV);
-    	    Generate_PBS_particle(HadronToSimulate, &Nbr_HadronToSimulate, ct->Length, plan, machine, RNDstream, config, material);
-    	    if(Nbr_HadronToSimulate > 0){
-    	      Nbr_HadronToSimulate -= 1;
-    	      Insert_particle(&hadron, i, &HadronToSimulate[Nbr_HadronToSimulate]);
-    	    }
-    	  }
+	    //Generate_particle(&hadron, i, BeamPOSx, BeamPOSy, BeamPOSz, PEnergy*UMeV);
+	    Generate_PBS_particle(HadronToSimulate, &Nbr_HadronToSimulate, ct->Length, plan, machine, RNDstream, config, material);
+	    if(Nbr_HadronToSimulate > 0){
+	      Nbr_HadronToSimulate -= 1;
+	      Insert_particle(&hadron, i, &HadronToSimulate[Nbr_HadronToSimulate]);
+	    }
+	  }
 
-    	  else{
-    	    count = __sec_reduce_add(hadron.v_type[i]);
-    	    if(count == 0) stop = 1;
-    	  }
+	  else{
+	    count = 0;
+	    #pragma omp simd reduction(+:count)
+	    for (int __j = 0; __j < VLENGTH; __j++) {
+	      count += hadron.v_type[__j];
+	    }
+	    if(count == 0) stop = 1;
+	  }
 
-    	  if(tid == 0 && display_progress == 1 && Num_simulated_primaries > progress_next){
-    	    sprintf(progress_message, " %.1f %% \n", floor(Num_simulated_primaries/progress_interval)*progress_binning);
-    	    Display_simulation_progression(config, progress_message);
-    	    if((floor(Num_simulated_primaries/progress_interval)*progress_binning) == 100) display_progress = 0;
-    	    progress_next += progress_interval;
-    	  }
+	  if(tid == 0 && display_progress == 1 && Num_simulated_primaries > progress_next){
+	    sprintf(progress_message, " %.1f %% \n", floor(Num_simulated_primaries/progress_interval)*progress_binning);
+	    Display_simulation_progression(config, progress_message);
+	    if((floor(Num_simulated_primaries/progress_interval)*progress_binning) == 100) display_progress = 0;
+	    progress_next += progress_interval;
+	  }
 
-    	}
 	}
       }
 

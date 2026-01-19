@@ -120,7 +120,11 @@ void Run_simulation_beamlet(DATA_config *config, Materials *material, DATA_CT **
     	    }
 
     	    else{
-    	      count = __sec_reduce_add(hadron.v_type[i]);
+    	      count = 0;
+    	      #pragma omp simd reduction(+:count)
+    	      for (int __j = 0; __j < VLENGTH; __j++) {
+    	        count += hadron.v_type[__j];
+    	      }
     	      if(count == 0) stop = 1;
     	    }
     	  }
