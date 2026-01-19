@@ -83,8 +83,8 @@ smoke-test:
     - apt-get install -y intel-oneapi-mkl
 
   script:
-    # Set library path for MKL runtime
-    - export LD_LIBRARY_PATH=/opt/intel/oneapi/mkl/latest/lib/intel64:$LD_LIBRARY_PATH
+    # Source Intel oneAPI environment
+    - source /opt/intel/oneapi/setvars.sh
 
     # Create minimal test config with reduced primaries for speed
     - |
@@ -100,7 +100,7 @@ smoke-test:
 
     # Run smoke test
     - echo "Running MCsquare smoke test with 1000 primaries..."
-    - LD_LIBRARY_PATH=/opt/intel/oneapi/mkl/latest/lib/intel64:$LD_LIBRARY_PATH ./MCsquare_gcc smoke_test_config.txt
+    - ./MCsquare_gcc smoke_test_config.txt
 
     # Verify output was created
     - echo "Checking for output files..."
