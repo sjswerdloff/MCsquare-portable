@@ -51,10 +51,9 @@ build-gcc-openmp:
 
     # Verify binary was created
     - ls -la MCsquare_gcc
-    - file MCsquare_gcc
 
-    # Show help/version if available
-    - ./MCsquare_gcc --help || ./MCsquare_gcc -h || echo "No help flag available"
+    # Show version
+    - ./MCsquare_gcc || true  # MCsquare prints version then exits with usage
 
   artifacts:
     paths:
