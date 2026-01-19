@@ -18,9 +18,16 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 #include <time.h>
 #include <string.h>
 #include <float.h>
-#include <omp.h> 
-#include <mkl_vsl.h>
-#include <mkl.h>
+#include <omp.h>
+
+// PCG random number generator (replaces Intel MKL VSL)
+#include "../pcg_basic.h"
+
+// Type alias for RNG stream (replaces VSLStreamStatePtr)
+typedef pcg32_random_t* RNG_Stream_t;
+
+// For source compatibility during migration
+#define VSLStreamStatePtr RNG_Stream_t
 
 #define VAR_DATA_PRECISION 1	// 1 =  float, 2 = double
 #define VAR_SCORING_PRECISION 1	// 1 =  float, 2 = double

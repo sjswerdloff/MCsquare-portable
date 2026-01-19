@@ -7,10 +7,13 @@ The MCsquare software has been developed by Kevin Souris from UCL in the context
 Each use of this software must be attributed to Université catholique de Louvain (UCL, Louvain-la-Neuve). Any other additional authorizations may be asked to LTTO@uclouvain.be.
 The MCsquare software is released under the terms of the open-source Apache 2.0 license. Anyone can use or modify the code provided that the Apache 2.0 license conditions are met. See the Apache 2.0 license for more details https://www.apache.org/licenses/LICENSE-2.0
 The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+
+Modified 2026: Replaced Intel MKL vector math (vsFloor/vdFloor) with portable implementation.
 */
 
 
 #include "include/compute_math.h"
+#include <math.h>
 
 
 void vector_floor(VAR_COMPUTE *v_vec, VAR_COMPUTE *v_result){
@@ -18,11 +21,15 @@ void vector_floor(VAR_COMPUTE *v_vec, VAR_COMPUTE *v_result){
   __assume_aligned(v_vec, 64);
   __assume_aligned(v_result, 64);
 
-  #if VAR_COMPUTE_PRECISION==1
-    vsFloor(VLENGTH, v_vec, v_result);
-  #else
-    vdFloor(VLENGTH, v_vec, v_result);
-  #endif
+  // Portable replacement for Intel MKL vsFloor/vdFloor
+  #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    #if VAR_COMPUTE_PRECISION==1
+      v_result[i] = floorf(v_vec[i]);
+    #else
+      v_result[i] = floor(v_vec[i]);
+    #endif
+  }
 
   return;
 }
