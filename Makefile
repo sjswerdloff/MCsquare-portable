@@ -63,7 +63,14 @@ MCsquare_mac_NoArch :	$(SRC)
 MC2_gcc_UMCG : $(SRC)
 	gcc $(SRC) -fcilkplus -fopenmp -lmkl_intel_lp64 -lmkl_core -lmkl_gnu_thread -lm -ldl $(OPTIONS) $(LIB_PATH) -static -m64 -march=corei7-avx  -I/opt/intel/compilers_and_libraries_2018.2.199/linux/mkl/include/ -L/opt/intel/compilers_and_libraries_2018.2.199/linux/mkl/lib/intel64_lin -o MC2_gcc
 
+# Portable builds - no Intel MKL dependency (uses PCG random number generator)
+# Requires: mkl-to-pcg64 branch changes (PCG replaces MKL VSL, floorf replaces vsFloor)
 
+MCsquare_portable : $(SRC)
+	gcc $(SRC) -fopenmp -lgomp -lpthread -lm -ldl -O3 $(FULL_VERSION) -m64 -o MCsquare_portable
+
+MCsquare_arm64 : $(SRC)
+	clang $(SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O3 $(FULL_VERSION) -o MCsquare_arm64
 
 
 

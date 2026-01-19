@@ -389,15 +389,13 @@ unsigned long Simulation_loop(DATA_config *config, Materials *material, DATA_CT 
   {
     int tid = omp_get_thread_num();
 
-    // Init RNG
-    VSLStreamStatePtr RNDstream;				// variable for the random number generator
+    // Init RNG (PCG32 - portable replacement for Intel MKL VSL)
+    pcg32_random_t rng_state;
+    RNG_Stream_t RNDstream = &rng_state;
     ALIGNED_(64) VAR_COMPUTE v_rnd[VLENGTH];			// variable that contains random numbers
-    if(config->RNG_Seed == 0){
-      vslNewStream(&RNDstream, VSL_BRNG_MCG59, time(NULL)+tid*1e4+Num_call*1e5);	// initialize the RNG for each thread individually with a seed = time+thread_id*10000
-    }
-    else{
-      vslNewStream(&RNDstream, VSL_BRNG_MCG59, config->RNG_Seed+tid*1e4+Num_call*1e5);
-    }
+    uint64_t seed = (config->RNG_Seed == 0) ? (uint64_t)(time(NULL) + tid*1e4 + Num_call*1e5)
+                                            : (uint64_t)(config->RNG_Seed + tid*1e4 + Num_call*1e5);
+    pcg32_srandom_r(RNDstream, seed, (uint64_t)tid);  // thread ID as stream selector
     rand_uniform(RNDstream, v_rnd);				// the RNG is called here because random numbers seems not well distributed the first time.
 
     // Init scoring
