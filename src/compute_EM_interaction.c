@@ -23,22 +23,37 @@ void Total_Stop_Pow(Hadron *hadron, Materials *material, int *v_material_label, 
   int i;
 
   ALIGNED_(64) VAR_COMPUTE v_scaled_T[VLENGTH];
-  v_scaled_T[vALL] = hadron->v_T[vALL]/hadron->v_mass[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_scaled_T[i] = hadron->v_T[i]/hadron->v_mass[i];
+  }
 
 
   ALIGNED_(64) int v_index[VLENGTH];
 //  v_index[vALL] = (int)(v_scaled_T[vALL] / (UMeV*PSTAR_BIN));
 //  v_index[vALL] = (int)floor(v_scaled_T[vALL] / (UMeV*PSTAR_BIN));
   ALIGNED_(64) VAR_COMPUTE v_scaled_T2[VLENGTH];
-  v_scaled_T2[vALL] = v_scaled_T[vALL] / (UMeV*PSTAR_BIN);
-  v_index[vALL] = (int)floor(v_scaled_T2[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_scaled_T2[i] = v_scaled_T[i] / (UMeV*PSTAR_BIN);
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_index[i] = (int)floor(v_scaled_T2[i]);
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_data_Energy1[VLENGTH];
-  v_data_Energy1[vALL] = v_index[vALL] * UMeV * PSTAR_BIN;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_data_Energy1[i] = v_index[i] * UMeV * PSTAR_BIN;
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_data_Energy2[VLENGTH];
 //  v_data_Energy2[vALL] = v_data_Energy1[vALL] + UMeV * PSTAR_BIN;
-  v_data_Energy2[vALL] = (v_index[vALL]+1) * UMeV * PSTAR_BIN;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_data_Energy2[i] = (v_index[i]+1) * UMeV * PSTAR_BIN;
+  }
 
 
   ALIGNED_(64) VAR_COMPUTE v_Stop_Pow1[VLENGTH];
@@ -71,27 +86,42 @@ void Total_Hard_Cross_Section(Hadron *hadron, Materials *material, int *v_materi
   cross_section_ionization(hadron, v_N_el, Te_min, v_cross_section);
 
   ALIGNED_(64) VAR_COMPUTE v_tmp_result[VLENGTH];
-  if(config->Simulate_Nuclear_Interactions == 1){
-    total_Nuclear_cross_section(hadron, material, v_material_label, v_density, v_tmp_result);
-    v_cross_section[vALL] += v_tmp_result[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(config->Simulate_Nuclear_Interactions == 1){
+        total_Nuclear_cross_section(hadron, material, v_material_label, v_density, v_tmp_result);
+        v_cross_section[i] += v_tmp_result[i];
+      }
   }
 
 
   Hadron tmp;
   Copy_Hadron_struct(&tmp, hadron);
-  tmp.v_T[vALL] = hadron->v_T[vALL] - v_dE_max[vALL];
-  if(tmp.v_T[vALL] <= 0) tmp.v_T[vALL] = hadron->v_T[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      tmp.v_T[i] = hadron->v_T[i] - v_dE_max[i];
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(tmp.v_T[i] <= 0) tmp.v_T[i] = hadron->v_T[i];
+  }
   Update_Hadron(&tmp);
     
   ALIGNED_(64) VAR_COMPUTE v_cross_section2[VLENGTH];
   cross_section_ionization(&tmp, v_N_el, Te_min, v_cross_section2);
 
-  if(config->Simulate_Nuclear_Interactions == 1){
-    total_Nuclear_cross_section(&tmp, material, v_material_label, v_density, v_tmp_result);
-    v_cross_section2[vALL] += v_tmp_result[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(config->Simulate_Nuclear_Interactions == 1){
+        total_Nuclear_cross_section(&tmp, material, v_material_label, v_density, v_tmp_result);
+        v_cross_section2[i] += v_tmp_result[i];
+      }
   }
 
-  v_result[vALL] = fmax(v_cross_section[vALL], v_cross_section2[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_result[i] = fmax(v_cross_section[i], v_cross_section2[i]);
+  }
 
   return;
 }
@@ -109,36 +139,48 @@ void get_interaction_type(Hadron *hadron, Materials *material, int *v_material_l
   __assume_aligned(v_result, 64);
 
 
-  v_result[vALL] = 0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_result[i] = 0;
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_rnd[VLENGTH];
   rand_uniform(RNG_Stream, v_rnd);
 
   ALIGNED_(64) VAR_COMPUTE v_ionization_section[VLENGTH];
   cross_section_ionization(hadron, v_N_el, Te_min, v_ionization_section);
-  v_ionization_section[vALL] = v_ionization_section[vALL] / v_tot_section[vALL];
-
-  if(v_rnd[vALL] <= v_ionization_section[vALL]){
-    v_result[vALL] = 1;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_ionization_section[i] = v_ionization_section[i] / v_tot_section[i];
   }
 
-  if(config->Simulate_Nuclear_Interactions == 1){
-    ALIGNED_(64) VAR_COMPUTE v_nuclear_section[VLENGTH];
-    total_Nuclear_cross_section(hadron, material, v_material_label, v_density, v_nuclear_section);
-    v_nuclear_section[vALL] = (v_nuclear_section[vALL] / v_tot_section[vALL]) + v_ionization_section[vALL];
-
-    if(v_rnd[vALL] <= v_ionization_section[vALL]){
-      v_result[vALL] = 1;
-    }
-    else if(v_rnd[vALL] <= v_nuclear_section[vALL]){
-      v_result[vALL] = 2;
-    }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_rnd[i] <= v_ionization_section[i]){
+        v_result[i] = 1;
+      }
   }
 
-  else{
-    if(v_rnd[vALL] <= v_ionization_section[vALL]){
-      v_result[vALL] = 1;
-    }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(config->Simulate_Nuclear_Interactions == 1){
+        ALIGNED_(64) VAR_COMPUTE v_nuclear_section[VLENGTH];
+        total_Nuclear_cross_section(hadron, material, v_material_label, v_density, v_nuclear_section);
+        v_nuclear_section[i] = (v_nuclear_section[i] / v_tot_section[i]) + v_ionization_section[i];
+
+        if(v_rnd[i] <= v_ionization_section[i]){
+          v_result[i] = 1;
+        }
+        else if(v_rnd[i] <= v_nuclear_section[i]){
+          v_result[i] = 2;
+        }
+      }
+
+      else{
+        if(v_rnd[i] <= v_ionization_section[i]){
+          v_result[i] = 1;
+        }
+      }
   }
 
   return;
@@ -162,17 +204,29 @@ void cross_section_ionization(Hadron *hadron, VAR_COMPUTE *v_N_el, VAR_COMPUTE T
 
 
   ALIGNED_(64) VAR_COMPUTE v_log_result[VLENGTH];
-  v_log_result[vALL] = hadron->v_Te_max[vALL]/Te_min;
-  v_log_result[vALL] = log(v_log_result[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_log_result[i] = hadron->v_Te_max[i]/Te_min;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_log_result[i] = log(v_log_result[i]);
+  }
 
-  v_result[vALL] =  	2*M_PI*R_ELEC*R_ELEC*MC2_ELEC * v_N_el[vALL] * hadron->v_charge[vALL]*hadron->v_charge[vALL] 
-			* (	((1.0/Te_min) - (1.0/hadron->v_Te_max[vALL])) 
-				- (hadron->v_beta2[vALL]/hadron->v_Te_max[vALL]) * v_log_result[vALL] 
-				+ (hadron->v_Te_max[vALL]-Te_min) / (2*hadron->v_E[vALL]*hadron->v_E[vALL])
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_result[i] =  	2*M_PI*R_ELEC*R_ELEC*MC2_ELEC * v_N_el[i] * hadron->v_charge[i]*hadron->v_charge[i] 
+			* (	((1.0/Te_min) - (1.0/hadron->v_Te_max[i])) 
+				- (hadron->v_beta2[i]/hadron->v_Te_max[i]) * v_log_result[i] 
+				+ (hadron->v_Te_max[i]-Te_min) / (2*hadron->v_E[i]*hadron->v_E[i])
 			  )
-			/ (hadron->v_beta2[vALL]);
+			/ (hadron->v_beta2[i]);
+  }
 
-  if(hadron->v_Te_max[vALL] <= Te_min) v_result[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_Te_max[i] <= Te_min) v_result[i] = 0.0;
+  }
 
   return;
 }
@@ -199,21 +253,36 @@ void Compute_L(Hadron *hadron, VAR_COMPUTE *v_N_el, VAR_COMPUTE *v_density, Mate
 
 
   ALIGNED_(64) VAR_COMPUTE v_log_result[VLENGTH];
-  v_log_result[vALL] = hadron->v_Te_max[vALL]/Te_min;
-  v_log_result[vALL] = log(v_log_result[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_log_result[i] = hadron->v_Te_max[i]/Te_min;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_log_result[i] = log(v_log_result[i]);
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_M[VLENGTH];
 
-  v_M[vALL] =	(2*M_PI*R_ELEC*R_ELEC*MC2_ELEC * v_N_el[vALL] * hadron->v_charge[vALL]*hadron->v_charge[vALL] / hadron->v_beta2[vALL]) 
-		* ( 	v_log_result[vALL]
-			- (hadron->v_Te_max[vALL] - Te_min) * hadron->v_beta2[vALL] / hadron->v_Te_max[vALL]
-			+ (hadron->v_Te_max[vALL]*hadron->v_Te_max[vALL] - Te_min*Te_min) / (4*hadron->v_E[vALL]*hadron->v_E[vALL])
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_M[i] =	(2*M_PI*R_ELEC*R_ELEC*MC2_ELEC * v_N_el[i] * hadron->v_charge[i]*hadron->v_charge[i] / hadron->v_beta2[i]) 
+		* ( 	v_log_result[i]
+			- (hadron->v_Te_max[i] - Te_min) * hadron->v_beta2[i] / hadron->v_Te_max[i]
+			+ (hadron->v_Te_max[i]*hadron->v_Te_max[i] - Te_min*Te_min) / (4*hadron->v_E[i]*hadron->v_E[i])
 		);
+  }
 
-  if(hadron->v_Te_max[vALL] <= Te_min) v_M[vALL] = 0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_Te_max[i] <= Te_min) v_M[i] = 0;
+  }
 
   Total_Stop_Pow(hadron, material, v_material_label, v_result);
-  v_result[vALL] = v_density[vALL] * hadron->v_charge[vALL]*hadron->v_charge[vALL] * v_result[vALL] - v_M[vALL];	// Pouvoir d'arrêt restreint en eV / cm
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_result[i] = v_density[i] * hadron->v_charge[i]*hadron->v_charge[i] * v_result[i] - v_M[i];
+  }	// Pouvoir d'arrêt restreint en eV / cm
 
   return;
 }
@@ -244,48 +313,75 @@ void Compute_dE2(Hadron *hadron, VAR_COMPUTE *v_N_el, VAR_COMPUTE *v_density, Ma
   Compute_L(hadron, v_N_el, v_density, material, Te_min, v_material_label, v_L);
 
   ALIGNED_(64) VAR_COMPUTE v_dE1[VLENGTH];
-  v_dE1[vALL] = v_L[vALL] * v_s[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_dE1[i] = v_L[i] * v_s[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_tau1[VLENGTH];
-  v_tau1[vALL] = hadron->v_T[vALL] / MC2_PRO;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_tau1[i] = hadron->v_T[i] / MC2_PRO;
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_e1[VLENGTH];
-  v_e1[vALL] = v_dE1[vALL] / hadron->v_T[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_e1[i] = v_dE1[i] / hadron->v_T[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_C[VLENGTH];
-  v_C[vALL] = v_L[vALL] * hadron->v_beta2[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_C[i] = v_L[i] * hadron->v_beta2[i];
+  }
 
 
   // Calcul numérique de la dérivée de C(E)
 
   Hadron tmp;
   Copy_Hadron_struct(&tmp, hadron);
-  tmp.v_T[vALL] = hadron->v_T[vALL] * CONST_DERIV;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      tmp.v_T[i] = hadron->v_T[i] * CONST_DERIV;
+  }
   Update_Hadron(&tmp);
 
   ALIGNED_(64) VAR_COMPUTE v_L2[VLENGTH];
   Compute_L(&tmp, v_N_el, v_density, material, Te_min, v_material_label, v_L2);
 
   ALIGNED_(64) VAR_COMPUTE v_C2[VLENGTH];
-  v_C2[vALL] = v_L2[vALL] * tmp.v_beta2[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_C2[i] = v_L2[i] * tmp.v_beta2[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_deriv_C[VLENGTH];
-  v_deriv_C[vALL] = (v_C2[vALL] - v_C[vALL]) / (tmp.v_T[vALL] - hadron->v_T[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_deriv_C[i] = (v_C2[i] - v_C[i]) / (tmp.v_T[i] - hadron->v_T[i]);
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_b[VLENGTH];
-  v_b[vALL] = hadron->v_T[vALL] * v_deriv_C[vALL] / v_C[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_b[i] = hadron->v_T[i] * v_deriv_C[i] / v_C[i];
+  }
 
 
   // Calcul de dE2
 
-  v_result[vALL] = v_dE1[vALL] * (	1 
-					+ (v_e1[vALL] / ((1+v_tau1[vALL]) * (2+v_tau1[vALL]))) 
-					+ (	v_e1[vALL]*v_e1[vALL] 
-						* (2+2*v_tau1[vALL]+v_tau1[vALL]*v_tau1[vALL]) 
-						/ ((1+v_tau1[vALL])*(1+v_tau1[vALL])*(2+v_tau1[vALL])*(2+v_tau1[vALL]))
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_result[i] = v_dE1[i] * (	1 
+					+ (v_e1[i] / ((1+v_tau1[i]) * (2+v_tau1[i]))) 
+					+ (	v_e1[i]*v_e1[i] 
+						* (2+2*v_tau1[i]+v_tau1[i]*v_tau1[i]) 
+						/ ((1+v_tau1[i])*(1+v_tau1[i])*(2+v_tau1[i])*(2+v_tau1[i]))
 					  ) 
-					- (v_b[vALL] * v_e1[vALL] * (0.5 + 2*v_e1[vALL]/(3*(1+v_tau1[vALL])*(2+v_tau1[vALL])) + (1-v_b[vALL]) * v_e1[vALL]/6)) 
+					- (v_b[i] * v_e1[i] * (0.5 + 2*v_e1[i]/(3*(1+v_tau1[i])*(2+v_tau1[i])) + (1-v_b[i]) * v_e1[i]/6)) 
 			 	);
+  }
 
   return;
 }
@@ -307,9 +403,12 @@ void Compute_Energy_straggling(Hadron *hadron, VAR_COMPUTE *v_N_el, VAR_COMPUTE 
   __assume_aligned(&hadron->v_beta2, 64);
   __assume_aligned(&hadron->v_Te_max, 64);
 
-  v_result[vALL] = 	2*M_PI*R_ELEC*R_ELEC*MC2_ELEC * v_N_el[vALL] * hadron->v_charge[vALL]*hadron->v_charge[vALL] * v_s[vALL] 
-			* fmin(Te_min, hadron->v_Te_max[vALL]) 
-			* (1 - 0.5*hadron->v_beta2[vALL]) / hadron->v_beta2[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_result[i] = 	2*M_PI*R_ELEC*R_ELEC*MC2_ELEC * v_N_el[i] * hadron->v_charge[i]*hadron->v_charge[i] * v_s[i] 
+			* fmin(Te_min, hadron->v_Te_max[i]) 
+			* (1 - 0.5*hadron->v_beta2[i]) / hadron->v_beta2[i];
+  }
 
   return;
 }
@@ -331,7 +430,10 @@ void Compute_MS_Fippel(Hadron *hadron, VAR_COMPUTE *v_s, VAR_COMPUTE *v_X0, VAR_
   __assume_aligned(&hadron->v_beta2, 64);
   __assume_aligned(&hadron->v_Te_max, 64);
 
-  v_result[vALL] = (CONST_MS_Fippel*UMeV * hadron->v_charge[vALL] / (hadron->v_beta2[vALL]*hadron->v_gamma[vALL]*MC2_PRO)) * sqrt(v_s[vALL]/v_X0[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_result[i] = (CONST_MS_Fippel*UMeV * hadron->v_charge[i] / (hadron->v_beta2[i]*hadron->v_gamma[i]*MC2_PRO)) * sqrt(v_s[i]/v_X0[i]);
+  }
 
   return;
 }
@@ -351,27 +453,50 @@ void Compute_Ionization_Energy(Hadron *hadron, VAR_COMPUTE Te_min, VSLStreamStat
   ALIGNED_(64) VAR_COMPUTE v_g[VLENGTH];
 
   ALIGNED_(64) VAR_COMPUTE v_mask[VLENGTH];
-  v_mask[vALL] = 1.0;
-
-  if(hadron->v_Te_max[vALL] < Te_min){
-    v_result[vALL] = 0.0;
-    v_mask[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_mask[i] = 1.0;
   }
 
-  int run = __sec_reduce_add(v_mask[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_Te_max[i] < Te_min){
+        v_result[i] = 0.0;
+        v_mask[i] = 0.0;
+      }
+  }
+
+    int run = 0;
+  #pragma omp simd reduction(+:run)
+  for (int i = 0; i < VLENGTH; i++) {
+      run += v_mask[i];
+  }
 
   while(run != 0.0){
     rand_uniform(RNG_Stream, v_rnd);
-    v_Te[vALL] = ( Te_min * hadron->v_Te_max[vALL]) / ((1-v_rnd[vALL]) * hadron->v_Te_max[vALL] + v_rnd[vALL] * Te_min);
-    v_g[vALL] = 1.0 - hadron->v_beta2[vALL] * (v_Te[vALL]/hadron->v_Te_max[vALL]) + v_Te[vALL]*v_Te[vALL]/(2*hadron->v_E[vALL]*hadron->v_E[vALL]);
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_Te[i] = ( Te_min * hadron->v_Te_max[i]) / ((1-v_rnd[i]) * hadron->v_Te_max[i] + v_rnd[i] * Te_min);
+    }
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_g[i] = 1.0 - hadron->v_beta2[i] * (v_Te[i]/hadron->v_Te_max[i]) + v_Te[i]*v_Te[i]/(2*hadron->v_E[i]*hadron->v_E[i]);
+    }
     rand_uniform(RNG_Stream, v_rnd);
 
-    if(v_rnd[vALL] <= v_g[vALL] && v_mask[vALL] == 1.0){
-      v_result[vALL] = v_Te[vALL];
-      v_mask[vALL] = 0.0;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(v_rnd[i] <= v_g[i] && v_mask[i] == 1.0){
+          v_result[i] = v_Te[i];
+          v_mask[i] = 0.0;
+        }
     }
 
-  run = __sec_reduce_add(v_mask[vALL]);
+    run = 0;
+  #pragma omp simd reduction(+:run)
+  for (int i = 0; i < VLENGTH; i++) {
+      run += v_mask[i];
+  }
   }
 
   return;

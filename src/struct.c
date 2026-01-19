@@ -15,20 +15,53 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 
 void Init_particles(Hadron *hadron){
 
-  hadron->v_x[vALL] = 0.0;
-  hadron->v_y[vALL] = 0.0;
-  hadron->v_z[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_x[i] = 0.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_y[i] = 0.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_z[i] = 0.0;
+  }
 
-  hadron->v_u[vALL] = 0.0;
-  hadron->v_v[vALL] = 0.0;
-  hadron->v_w[vALL] = 0.1;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_u[i] = 0.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_v[i] = 0.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_w[i] = 0.1;
+  }
 
-  hadron->v_T[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_T[i] = 0.0;
+  }
 
-  hadron->v_M[vALL] = 1.0;
-  hadron->v_type[vALL] = Unknown;
-  hadron->v_charge[vALL] = 1.0;
-  hadron->v_mass[vALL] = 1.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_M[i] = 1.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_type[i] = Unknown;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_charge[i] = 1.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_mass[i] = 1.0;
+  }
 
   return;
 }
@@ -130,16 +163,28 @@ void Update_Hadron(Hadron *hadron){
   __assume_aligned(&hadron->v_Te_max, 64);
 
 
-  hadron->v_E[vALL] = hadron->v_T[vALL] + hadron->v_mass[vALL] * MC2_PRO;	// Energie totale du proton
-  hadron->v_gamma[vALL] = hadron->v_E[vALL] / (hadron->v_mass[vALL] * MC2_PRO);	// Paramètre relativiste gamma du proton
-  hadron->v_beta2[vALL] = 1 - (1/(hadron->v_gamma[vALL]*hadron->v_gamma[vALL]));	// Betta au carré (v/c)^2
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_E[i] = hadron->v_T[i] + hadron->v_mass[i] * MC2_PRO;
+  }	// Energie totale du proton
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_gamma[i] = hadron->v_E[i] / (hadron->v_mass[i] * MC2_PRO);
+  }	// Paramètre relativiste gamma du proton
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_beta2[i] = 1 - (1/(hadron->v_gamma[i]*hadron->v_gamma[i]));
+  }	// Betta au carré (v/c)^2
 
   // Energie maximum transferable à l'e-
   //hadron->v_Te_max[vALL] = 	(2*MC2_ELEC * (hadron->v_gamma[vALL]*hadron->v_gamma[vALL] - 1)) / (1 + 2*hadron->v_gamma[vALL]*(MC2_ELEC/(hadron->v_mass[vALL]*MC2_PRO)) 
   //				+ (MC2_ELEC/(hadron->v_mass[vALL]*MC2_PRO)) * (MC2_ELEC/(hadron->v_mass[vALL]*MC2_PRO)));
-  hadron->v_Te_max[vALL] = 	(2*MC2_ELEC * (hadron->v_mass[vALL]*MC2_PRO)*(hadron->v_mass[vALL]*MC2_PRO) * (hadron->v_gamma[vALL]*hadron->v_gamma[vALL] - 1)) / 
-				((hadron->v_mass[vALL]*MC2_PRO)*(hadron->v_mass[vALL]*MC2_PRO) + 2*MC2_ELEC*hadron->v_gamma[vALL]*(hadron->v_mass[vALL]*MC2_PRO) 
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_Te_max[i] = 	(2*MC2_ELEC * (hadron->v_mass[i]*MC2_PRO)*(hadron->v_mass[i]*MC2_PRO) * (hadron->v_gamma[i]*hadron->v_gamma[i] - 1)) / 
+				((hadron->v_mass[i]*MC2_PRO)*(hadron->v_mass[i]*MC2_PRO) + 2*MC2_ELEC*hadron->v_gamma[i]*(hadron->v_mass[i]*MC2_PRO) 
 				+ MC2_ELEC*MC2_ELEC);
+  }
 
   return;
 }

@@ -19,24 +19,27 @@ void Fippel_Stop_Pow_correction(Hadron *hadron, VAR_COMPUTE *v_density, VAR_COMP
   __assume_aligned(v_result, 64);
 
 
-  if(v_density[vALL] >= 0.9){
-    v_result[vALL] = 1.0123 - 3.386e-5 * hadron->v_T[vALL]/UMeV + 0.291*(1+pow(hadron->v_T[vALL]/UMeV, -0.3421)) * (pow(v_density[vALL], -0.7) - 1);
-  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_density[i] >= 0.9){
+        v_result[i] = 1.0123 - 3.386e-5 * hadron->v_T[i]/UMeV + 0.291*(1+pow(hadron->v_T[i]/UMeV, -0.3421)) * (pow(v_density[i], -0.7) - 1);
+      }
 
-  // lung
-  else if(v_density[vALL] > 0.0012 && v_density[vALL] <= 0.26){
-    v_result[vALL] = ((0.9925 - 0.8815) / (0.26 - 0.0012))*(v_density[vALL] - 0.0012) + 0.8815;
-  }
+      // lung
+      else if(v_density[i] > 0.0012 && v_density[i] <= 0.26){
+        v_result[i] = ((0.9925 - 0.8815) / (0.26 - 0.0012))*(v_density[i] - 0.0012) + 0.8815;
+      }
 
   
-  else if(v_density[vALL] > 0.26 && v_density[vALL] < 0.9){
-    v_result[vALL] = 1.0123 - 3.386e-5 * hadron->v_T[vALL]/UMeV + 0.291*(1+pow(hadron->v_T[vALL]/UMeV, -0.3421)) * 0.0765;
-    v_result[vALL] = ((v_result[vALL] - 0.9925) / (0.9 - 0.26))*(v_density[vALL] - 0.26) + 0.9925;
-  }
+      else if(v_density[i] > 0.26 && v_density[i] < 0.9){
+        v_result[i] = 1.0123 - 3.386e-5 * hadron->v_T[i]/UMeV + 0.291*(1+pow(hadron->v_T[i]/UMeV, -0.3421)) * 0.0765;
+        v_result[i] = ((v_result[i] - 0.9925) / (0.9 - 0.26))*(v_density[i] - 0.26) + 0.9925;
+      }
 
-  // air
-  else{
-    v_result[vALL] = 0.8815;  // for rho <= 0.0012
+      // air
+      else{
+        v_result[i] = 0.8815;  // for rho <= 0.0012
+      }
   }
 
   return;
@@ -70,26 +73,44 @@ void Compute_dE2_Fippel(Hadron *hadron, VAR_COMPUTE *v_N_el, VAR_COMPUTE *v_dens
 
   ALIGNED_(64) VAR_COMPUTE v_L[VLENGTH];
   Compute_L(hadron, v_N_el, v_density, material, Te_min, v_material_label, v_L);
-  v_L[vALL] = v_L[vALL] * v_StpCorr[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_L[i] = v_L[i] * v_StpCorr[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_dE1[VLENGTH];
-  v_dE1[vALL] = v_L[vALL] * v_s[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_dE1[i] = v_L[i] * v_s[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_tau1[VLENGTH];
-  v_tau1[vALL] = hadron->v_T[vALL] / MC2_PRO;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_tau1[i] = hadron->v_T[i] / MC2_PRO;
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_e1[VLENGTH];
-  v_e1[vALL] = v_dE1[vALL] / hadron->v_T[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_e1[i] = v_dE1[i] / hadron->v_T[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_C[VLENGTH];
-  v_C[vALL] = v_L[vALL] * hadron->v_beta2[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_C[i] = v_L[i] * hadron->v_beta2[i];
+  }
 
 
   // Calcul numérique de la dérivée de C(E)
 
   Hadron tmp;
   Copy_Hadron_struct(&tmp, hadron);
-  tmp.v_T[vALL] = hadron->v_T[vALL] * CONST_DERIV;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      tmp.v_T[i] = hadron->v_T[i] * CONST_DERIV;
+  }
   Update_Hadron(&tmp);
 
   ALIGNED_(64) VAR_COMPUTE v_StpCorr2[VLENGTH];
@@ -97,28 +118,43 @@ void Compute_dE2_Fippel(Hadron *hadron, VAR_COMPUTE *v_N_el, VAR_COMPUTE *v_dens
 
   ALIGNED_(64) VAR_COMPUTE v_L2[VLENGTH];
   Compute_L(&tmp, v_N_el, v_density, material, Te_min, v_material_label, v_L2);
-  v_L2[vALL] = v_L2[vALL] * v_StpCorr2[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_L2[i] = v_L2[i] * v_StpCorr2[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_C2[VLENGTH];
-  v_C2[vALL] = v_L2[vALL] * tmp.v_beta2[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_C2[i] = v_L2[i] * tmp.v_beta2[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_deriv_C[VLENGTH];
-  v_deriv_C[vALL] = (v_C2[vALL] - v_C[vALL]) / (tmp.v_T[vALL] - hadron->v_T[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_deriv_C[i] = (v_C2[i] - v_C[i]) / (tmp.v_T[i] - hadron->v_T[i]);
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_b[VLENGTH];
-  v_b[vALL] = hadron->v_T[vALL] * v_deriv_C[vALL] / v_C[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_b[i] = hadron->v_T[i] * v_deriv_C[i] / v_C[i];
+  }
 
 
   // Calcul de dE2
 
-  v_result[vALL] = v_dE1[vALL] * (	1 
-					+ (v_e1[vALL] / ((1+v_tau1[vALL]) * (2+v_tau1[vALL]))) 
-					+ (	v_e1[vALL]*v_e1[vALL] 
-						* (2+2*v_tau1[vALL]+v_tau1[vALL]*v_tau1[vALL]) 
-						/ ((1+v_tau1[vALL])*(1+v_tau1[vALL])*(2+v_tau1[vALL])*(2+v_tau1[vALL]))
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_result[i] = v_dE1[i] * (	1 
+					+ (v_e1[i] / ((1+v_tau1[i]) * (2+v_tau1[i]))) 
+					+ (	v_e1[i]*v_e1[i] 
+						* (2+2*v_tau1[i]+v_tau1[i]*v_tau1[i]) 
+						/ ((1+v_tau1[i])*(1+v_tau1[i])*(2+v_tau1[i])*(2+v_tau1[i]))
 					  ) 
-					- (v_b[vALL] * v_e1[vALL] * (0.5 + 2*v_e1[vALL]/(3*(1+v_tau1[vALL])*(2+v_tau1[vALL])) + (1-v_b[vALL]) * v_e1[vALL]/6)) 
+					- (v_b[i] * v_e1[i] * (0.5 + 2*v_e1[i]/(3*(1+v_tau1[i])*(2+v_tau1[i])) + (1-v_b[i]) * v_e1[i]/6)) 
 			 	);
+  }
 
   return;
 }

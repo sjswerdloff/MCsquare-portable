@@ -63,23 +63,44 @@ void SemiInfiniteSlab_step(Hadron *hadron, Materials *material, Hadron_buffer *h
 
   // Compute total cross section
   ALIGNED_(64) VAR_COMPUTE v_Dist_Interface[VLENGTH];
-  v_Dist_Interface[vALL] = hadron->v_z[vALL] - RS_exit_position[vALL] + 1e-4;
-  if(v_Dist_Interface[vALL] < 0) v_Dist_Interface[vALL] = 0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_Dist_Interface[i] = hadron->v_z[i] - RS_exit_position[i] + 1e-4;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_Dist_Interface[i] < 0) v_Dist_Interface[i] = 0;
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_stop_pow[VLENGTH];
   Total_Stop_Pow(hadron, material, v_material_label, v_stop_pow);
-  v_stop_pow[vALL] = v_init_density[vALL] * hadron->v_charge[vALL]*hadron->v_charge[vALL] * v_stop_pow[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_stop_pow[i] = v_init_density[i] * hadron->v_charge[i]*hadron->v_charge[i] * v_stop_pow[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_step_max[VLENGTH];
-  v_step_max[vALL] = fmin(fmin(v_Dist_Interface[vALL], config->D_Max), (config->Epsilon_Max * hadron->v_T[vALL] / v_stop_pow[vALL]));
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_step_max[i] = fmin(fmin(v_Dist_Interface[i], config->D_Max), (config->Epsilon_Max * hadron->v_T[i] / v_stop_pow[i]));
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_dE_max[VLENGTH];
-  v_dE_max[vALL] = v_step_max[vALL] * v_stop_pow[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_dE_max[i] = v_step_max[i] * v_stop_pow[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_section[VLENGTH];
   Total_Hard_Cross_Section(hadron, material, v_material_label, v_N_el, v_init_density, (config->Te_Min*UMeV), v_dE_max, config, v_section); 
-  v_section[vALL] += 1e-10;
-  v_section[vALL] *= 1.017;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_section[i] += 1e-10;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_section[i] *= 1.017;
+  }
 
 
   // Compute step length
@@ -87,8 +108,14 @@ void SemiInfiniteSlab_step(Hadron *hadron, Materials *material, Hadron_buffer *h
   rand_uniform(RNG_Stream, v_rnd);
 
   ALIGNED_(64) VAR_COMPUTE v_step[VLENGTH];
-  v_step[vALL] = -log(v_rnd[vALL])/v_section[vALL];
-  if(v_step[vALL] > v_step_max[vALL]) v_step[vALL] = v_step_max[vALL];  // stop at step_max
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_step[i] = -log(v_rnd[i])/v_section[i];
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_step[i] > v_step_max[i]) v_step[i] = v_step_max[i];
+  }  // stop at step_max
 
 
   // Compute CSDA + MS
@@ -97,7 +124,10 @@ void SemiInfiniteSlab_step(Hadron *hadron, Materials *material, Hadron_buffer *h
 
   ALIGNED_(64) VAR_COMPUTE v_straggling[VLENGTH];
   Compute_Energy_straggling(hadron, v_N_el, (config->Te_Min*UMeV), v_step, v_straggling);
-  v_straggling[vALL] = sqrt(v_straggling[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_straggling[i] = sqrt(v_straggling[i]);
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_dE[VLENGTH];
   rand_normal(RNG_Stream, v_dE, v_mean_dE, v_straggling);
@@ -110,15 +140,27 @@ void SemiInfiniteSlab_step(Hadron *hadron, Materials *material, Hadron_buffer *h
 
   ALIGNED_(64) VAR_COMPUTE v_phi[VLENGTH];
   rand_uniform(RNG_Stream, v_phi);
-  v_phi[vALL] = 2*M_PI*v_phi[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_phi[i] = 2*M_PI*v_phi[i];
+  }
 
 
   // Lose energy
-  if(hadron->v_type[vALL] == Unknown) v_dE[vALL] = 0;
-  hadron->v_T[vALL] = hadron->v_T[vALL] - v_dE[vALL];
-  if(hadron->v_type[vALL] != Unknown && hadron->v_T[vALL] <= (config->Ecut_Pro * UMeV)){
-    hadron->v_type[vALL] = Unknown;
-    hadron_list[Hadron_ID[vALL]].type = Unknown;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_type[i] == Unknown) v_dE[i] = 0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_T[i] = hadron->v_T[i] - v_dE[i];
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_type[i] != Unknown && hadron->v_T[i] <= (config->Ecut_Pro * UMeV)){
+        hadron->v_type[i] = Unknown;
+        hadron_list[Hadron_ID[i]].type = Unknown;
+      }
   }
   Update_Hadron(hadron);
 
@@ -132,13 +174,22 @@ void SemiInfiniteSlab_step(Hadron *hadron, Materials *material, Hadron_buffer *h
   ALIGNED_(64) int v_interaction_type[VLENGTH];
 
   get_interaction_type(hadron, material, v_material_label, v_N_el, v_init_density, (config->Te_Min*UMeV), v_dE_max, v_section, RNG_Stream, config, v_interaction_type);
-  if(v_step[vALL] == v_step_max[vALL]) v_interaction_type[vALL] = 0; // force ficitious interaction if step >= step_max
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_step[i] == v_step_max[i]) v_interaction_type[i] = 0;
+  } // force ficitious interaction if step >= step_max
 
   // Ionization
   ALIGNED_(64) VAR_COMPUTE v_dE_hard[VLENGTH];
   Compute_Ionization_Energy(hadron, (config->Te_Min*UMeV), RNG_Stream, v_dE_hard);
-  if(hadron->v_type[vALL] == Unknown) v_dE_hard[vALL] = 0;
-  if(v_interaction_type[vALL] == 1) hadron->v_T[vALL] = hadron->v_T[vALL] - v_dE_hard[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_type[i] == Unknown) v_dE_hard[i] = 0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_interaction_type[i] == 1) hadron->v_T[i] = hadron->v_T[i] - v_dE_hard[i];
+  }
 
   // Nuclear interaction
   DATA_Scoring tmp;
@@ -155,9 +206,12 @@ void SemiInfiniteSlab_step(Hadron *hadron, Materials *material, Hadron_buffer *h
     }
   }
 
-  if(hadron->v_type[vALL] != Unknown && hadron->v_T[vALL] <= (config->Ecut_Pro * UMeV)){
-    hadron->v_type[vALL] = Unknown;
-    hadron_list[Hadron_ID[vALL]].type = Unknown;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_type[i] != Unknown && hadron->v_T[i] <= (config->Ecut_Pro * UMeV)){
+        hadron->v_type[i] = Unknown;
+        hadron_list[Hadron_ID[i]].type = Unknown;
+      }
   }
 
 }

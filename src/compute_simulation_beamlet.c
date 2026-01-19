@@ -98,29 +98,32 @@ void Run_simulation_beamlet(DATA_config *config, Materials *material, DATA_CT **
       // Compute simulation
       while(stop == 0){
         for(i=0; i<VLENGTH; i++){
-	  if(hadron.v_type[i] == Unknown){
+	  	  #pragma omp simd
+	  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron.v_type[i] == Unknown){
 
-	    if(Nbr_HadronToSimulate > 0){
-	      Nbr_HadronToSimulate -= 1;
-	      Insert_particle(&hadron, i, &HadronToSimulate[Nbr_HadronToSimulate]);
-	    }
+    	    if(Nbr_HadronToSimulate > 0){
+    	      Nbr_HadronToSimulate -= 1;
+    	      Insert_particle(&hadron, i, &HadronToSimulate[Nbr_HadronToSimulate]);
+    	    }
 
-	    else if(Nbr_simulated_primaries < config->Num_Primaries){
+    	    else if(Nbr_simulated_primaries < config->Num_Primaries){
 
-	      Nbr_simulated_primaries += VLENGTH;
+    	      Nbr_simulated_primaries += VLENGTH;
 
-	      //Generate_particle(&hadron, i, BeamPOSx, BeamPOSy, BeamPOSz, PEnergy*UMeV);
-	      Generate_PBS_particle(HadronToSimulate, &Nbr_HadronToSimulate, ct->Length, Beamlet, machine, RNDstream, config, material);
-	      if(Nbr_HadronToSimulate > 0){
-	        Nbr_HadronToSimulate -= 1;
-	        Insert_particle(&hadron, i, &HadronToSimulate[Nbr_HadronToSimulate]);
-	      }
-	    }
+    	      //Generate_particle(&hadron, i, BeamPOSx, BeamPOSy, BeamPOSz, PEnergy*UMeV);
+    	      Generate_PBS_particle(HadronToSimulate, &Nbr_HadronToSimulate, ct->Length, Beamlet, machine, RNDstream, config, material);
+    	      if(Nbr_HadronToSimulate > 0){
+    	        Nbr_HadronToSimulate -= 1;
+    	        Insert_particle(&hadron, i, &HadronToSimulate[Nbr_HadronToSimulate]);
+    	      }
+    	    }
 
-	    else{
-	      count = __sec_reduce_add(hadron.v_type[vALL]);
-	      if(count == 0) stop = 1;
-	    }
+    	    else{
+    	      count = __sec_reduce_add(hadron.v_type[i]);
+    	      if(count == 0) stop = 1;
+    	    }
+    	  }
 	  }
         }
 

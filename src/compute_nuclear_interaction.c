@@ -18,11 +18,14 @@ void proton_proton_cross_section(Hadron *hadron, VAR_COMPUTE *v_density, VAR_COM
   __assume_aligned(v_density, 64);
 
 
-  if(hadron->v_T[vALL] > 10*UMeV){
-    v_result[vALL] = v_density[vALL] * (0.315*pow(hadron->v_T[vALL]/UMeV, -1.126) + 3.78e-6 * hadron->v_T[vALL]/UMeV) / 0.1119;
-  }
-  else{
-    v_result[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_T[i] > 10*UMeV){
+        v_result[i] = v_density[i] * (0.315*pow(hadron->v_T[i]/UMeV, -1.126) + 3.78e-6 * hadron->v_T[i]/UMeV) / 0.1119;
+      }
+      else{
+        v_result[i] = 0.0;
+      }
   }
  
   return;
@@ -42,16 +45,31 @@ void total_Nuclear_cross_section(Hadron *hadron, Materials *material, int *v_mat
   ALIGNED_(64) int v_index[VLENGTH];
 //  v_index[vALL] = (int)floor(hadron->v_T[vALL]/(UMeV*INTERP_BIN));
   ALIGNED_(64) VAR_COMPUTE v_T[VLENGTH];
-  v_T[vALL] = hadron->v_T[vALL] / (UMeV*INTERP_BIN);
-  v_index[vALL] = (int)floor(v_T[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_T[i] = hadron->v_T[i] / (UMeV*INTERP_BIN);
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_index[i] = (int)floor(v_T[i]);
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_T1[VLENGTH];
-  v_T1[vALL] = v_index[vALL] * UMeV * INTERP_BIN;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_T1[i] = v_index[i] * UMeV * INTERP_BIN;
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_T2[VLENGTH];
-  v_T2[vALL] = (v_index[vALL]+1) * UMeV * INTERP_BIN;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_T2[i] = (v_index[i]+1) * UMeV * INTERP_BIN;
+  }
 
-  if(v_index[vALL] >= 249) v_index[vALL] = 0; // nuclear cross sections tabulated up to 250 MeV
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_index[i] >= 249) v_index[i] = 0;
+  } // nuclear cross sections tabulated up to 250 MeV
 
   ALIGNED_(64) VAR_COMPUTE v_Cross_section1[VLENGTH];
   for(i=0; i<VLENGTH; i++){
@@ -65,7 +83,10 @@ void total_Nuclear_cross_section(Hadron *hadron, Materials *material, int *v_mat
 
   vec_Linear_Interpolation(hadron->v_T, v_T1, v_T2, v_Cross_section1, v_Cross_section2, v_result);
 
-  v_result[vALL] = v_result[vALL] * v_density[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_result[i] = v_result[i] * v_density[i];
+  }
 
   return;
 }
@@ -207,11 +228,17 @@ VAR_COMPUTE Compute_Elastic_PP(int hadron_index, Hadron *hadron, Hadron_buffer *
   VAR_COMPUTE dE = hadron->v_T[hadron_index] * (1-cos_theta_CM) / 2.0;
 
   ALIGNED_(64) VAR_COMPUTE v_theta[VLENGTH];
-  v_theta[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_theta[i] = 0.0;
+  }
   v_theta[hadron_index] = acos( (cos_theta_CM+1.0)/sqrt((cos_theta_CM+1.0)*(cos_theta_CM+1.0) + (1 - hadron->v_T[hadron_index]/(hadron->v_T[hadron_index]+2*MC2_PRO))*(1.0-cos_theta_CM*cos_theta_CM)) );
 
   ALIGNED_(64) VAR_COMPUTE v_phi[VLENGTH];
-  v_phi[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_phi[i] = 0.0;
+  }
   v_phi[hadron_index] = 2*M_PI*single_rand_uniform(RNG_Stream);
       	  
   // Secondary proton :
@@ -276,11 +303,17 @@ VAR_COMPUTE Compute_Elastic_ICRU(int hadron_index, Hadron *hadron, Materials *ma
   VAR_COMPUTE tau = sqrt( (MC2_PRO/(material->A*Uamu)) * (MC2_PRO/(material->A*Uamu)) * (1-beta2_CM) + beta2_CM );
 
   ALIGNED_(64) VAR_COMPUTE v_theta[VLENGTH];
-  v_theta[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_theta[i] = 0.0;
+  }
   v_theta[hadron_index] = acos( (cos_theta_CM+tau)/sqrt( (cos_theta_CM+tau)*(cos_theta_CM+tau) + (1 - cos_theta_CM*cos_theta_CM)/gamma2_CM ) );
 
   ALIGNED_(64) VAR_COMPUTE v_phi[VLENGTH];
-  v_phi[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_phi[i] = 0.0;
+  }
   v_phi[hadron_index] = 2*M_PI*single_rand_uniform(RNG_Stream);
 
   Update_direction(hadron, v_theta, v_phi);
