@@ -46,6 +46,7 @@ build-gcc-openmp:
         -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core \
         -lgomp -lpthread -lm -ldl \
         -O3 -m64 \
+        -DVERSION="\"GitLab CI build (cilk-to-openmp-simd)\"" \
         -o MCsquare_gcc
 
     # Verify binary was created
