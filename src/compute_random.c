@@ -56,7 +56,10 @@ void rand_normal(VSLStreamStatePtr stream, VAR_COMPUTE *v_rnd, VAR_COMPUTE *v_mu
     vdRngGaussian( VSL_RNG_METHOD_GAUSSIAN_BOXMULLER, stream, VLENGTH, v_rnd, 0.0, 1.0);		// VSL_RNG_METHOD_GAUSSIAN_ICDF
   #endif
 
-  v_rnd[vALL] = v_sigma[vALL] * v_rnd[vALL] + v_mu[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_rnd[i] = v_sigma[i] * v_rnd[i] + v_mu[i];
+  }
 
   return;
 }
@@ -73,7 +76,10 @@ void rand_normal_zero(VSLStreamStatePtr stream, VAR_COMPUTE *v_rnd, VAR_COMPUTE 
     vdRngGaussian( VSL_RNG_METHOD_GAUSSIAN_BOXMULLER, stream, VLENGTH, v_rnd, 0.0, 1.0);		// VSL_RNG_METHOD_GAUSSIAN_ICDF
   #endif
 
-  v_rnd[vALL] = v_sigma[vALL] * v_rnd[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_rnd[i] = v_sigma[i] * v_rnd[i];
+  }
 
   return;
 }

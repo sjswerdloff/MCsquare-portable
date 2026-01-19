@@ -20,8 +20,11 @@ void verif_position(Hadron *hadron, DATA_CT *ct){
 
   __assume_aligned(&hadron->v_type, 64);
 
-  if(	hadron->v_x[vALL] < 0 || hadron->v_y[vALL] < 0 || hadron->v_z[vALL] < 0 || 
-	hadron->v_x[vALL] >= ct->Length[0] || hadron->v_y[vALL] >= ct->Length[1] || hadron->v_z[vALL] >= ct->Length[2]) hadron->v_type[vALL] = Unknown;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(	hadron->v_x[i] < 0 || hadron->v_y[i] < 0 || hadron->v_z[i] < 0 || 
+    	hadron->v_x[i] >= ct->Length[0] || hadron->v_y[i] >= ct->Length[1] || hadron->v_z[i] >= ct->Length[2]) hadron->v_type[i] = Unknown;
+  }
 
   return;
 }
@@ -41,16 +44,28 @@ void get_CT_Offset(Hadron *hadron, DATA_CT *ct, int *v_index){
   // L'axe x du repère simulation ne correspond pas à l'axe x du repère CT : x_simu = -x_ct + Lx
   // Conversion position -> index CT : index = floor(x/dx)
 
-  v_index[vALL] = 	(int)floor( (-hadron->v_x[vALL] + ct->Length[0]) / ct->VoxelLength[0] ) 
-			+ ct->GridSize[0] * (int)floor( hadron->v_y[vALL] / ct->VoxelLength[1] ) 
-			+ ct->GridSize[0] * ct->GridSize[1] * (int)floor( hadron->v_z[vALL] / ct->VoxelLength[2] );
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_index[i] = 	(int)floor( (-hadron->v_x[i] + ct->Length[0]) / ct->VoxelLength[0] ) 
+			+ ct->GridSize[0] * (int)floor( hadron->v_y[i] / ct->VoxelLength[1] ) 
+			+ ct->GridSize[0] * ct->GridSize[1] * (int)floor( hadron->v_z[i] / ct->VoxelLength[2] );
+  }
 
-  if(	hadron->v_x[vALL] < 0 || hadron->v_y[vALL] < 0 || hadron->v_z[vALL] < 0 || 
-	hadron->v_x[vALL] >= ct->Length[0] || hadron->v_y[vALL] >= ct->Length[1] || hadron->v_z[vALL] >= ct->Length[2]) hadron->v_type[vALL] = Unknown;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(	hadron->v_x[i] < 0 || hadron->v_y[i] < 0 || hadron->v_z[i] < 0 || 
+    	hadron->v_x[i] >= ct->Length[0] || hadron->v_y[i] >= ct->Length[1] || hadron->v_z[i] >= ct->Length[2]) hadron->v_type[i] = Unknown;
+  }
 
-  if(v_index[vALL] < 0 || v_index[vALL] > ct->Nbr_voxels) hadron->v_type[vALL] = Unknown;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_index[i] < 0 || v_index[i] > ct->Nbr_voxels) hadron->v_type[i] = Unknown;
+  }
 
-  if(hadron->v_type[vALL] == Unknown) v_index[vALL] = 0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_type[i] == Unknown) v_index[i] = 0;
+  }
 
   return;
 }
@@ -69,44 +84,73 @@ void Dist_To_Material_Interface(Hadron *hadron, DATA_CT *ct, VAR_COMPUTE dist_ma
 
 
   ALIGNED_(64) VAR_COMPUTE v_mass_distance[VLENGTH];
-  v_mass_distance[vALL] = 0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_mass_distance[i] = 0;
+  }
 
   Hadron tmp;
   Copy_Hadron_struct(&tmp, hadron);
 
   ALIGNED_(64) int v_index[VLENGTH];
-  v_index[vALL] = v_init_index[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_index[i] = v_init_index[i];
+  }
 
   ALIGNED_(64) int v_index2[VLENGTH];
-  v_index2[vALL] = v_init_index[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_index2[i] = v_init_index[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_step[VLENGTH];
   ALIGNED_(64) VAR_COMPUTE v_run[VLENGTH];
-  v_run[vALL] = 1.0;
-  if(hadron->v_type[vALL] == Unknown) v_run[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_run[i] = 1.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_type[i] == Unknown) v_run[i] = 0.0;
+  }
 
-  int run = __sec_reduce_add(v_run[vALL]);
+    int run = 0;
+  #pragma omp simd reduction(+:run)
+  for (int i = 0; i < VLENGTH; i++) {
+      run += v_run[i];
+  }
 
   while(run != 0){
 
-    if((v_mass_distance[vALL] / v_init_density[vALL]) < dist_max && ct->material[v_index[vALL]] == ct->material[v_index2[vALL]]){
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if((v_mass_distance[i] / v_init_density[i]) < dist_max && ct->material[v_index[i]] == ct->material[v_index2[i]]){
 
-      Dist_To_Interface(&tmp, ct, v_step);
-      Update_position(&tmp, v_step);
+          Dist_To_Interface(&tmp, ct, v_step);
+          Update_position(&tmp, v_step);
 
-      v_index[vALL] = v_index2[vALL];
-      get_CT_Offset(&tmp, ct, v_index2);
+          v_index[i] = v_index2[i];
+          get_CT_Offset(&tmp, ct, v_index2);
 
-      v_mass_distance[vALL] += v_step[vALL] * ct->density[v_index[vALL]];
+          v_mass_distance[i] += v_step[i] * ct->density[v_index[i]];
+        }
+        else{
+          v_run[i] = 0.0;
+        }
     }
-    else{
-      v_run[vALL] = 0.0;
-    }
 
-  run = __sec_reduce_add(v_run[vALL]);
+    run = 0;
+  #pragma omp simd reduction(+:run)
+  for (int i = 0; i < VLENGTH; i++) {
+      run += v_run[i];
+  }
   }
 
-  v_result[vALL] = v_mass_distance[vALL] / v_init_density[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_result[i] = v_mass_distance[i] / v_init_density[i];
+  }
 
   return;
 }
@@ -126,21 +170,39 @@ void Dist_To_Interface(Hadron *hadron, DATA_CT *ct, VAR_COMPUTE *v_result){
 
 
   ALIGNED_(64) VAR_COMPUTE v_DistX[VLENGTH];
-  v_DistX[vALL] = fabs(((floor(hadron->v_x[vALL]/ct->VoxelLength[0]) + (hadron->v_u[vALL] > 0)) * ct->VoxelLength[0] - hadron->v_x[vALL])/hadron->v_u[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_DistX[i] = fabs(((floor(hadron->v_x[i]/ct->VoxelLength[0]) + (hadron->v_u[i] > 0)) * ct->VoxelLength[0] - hadron->v_x[i])/hadron->v_u[i]);
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_DistY[VLENGTH];
-  v_DistY[vALL] = fabs(((floor(hadron->v_y[vALL]/ct->VoxelLength[1]) + (hadron->v_v[vALL] > 0)) * ct->VoxelLength[1] - hadron->v_y[vALL])/hadron->v_v[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_DistY[i] = fabs(((floor(hadron->v_y[i]/ct->VoxelLength[1]) + (hadron->v_v[i] > 0)) * ct->VoxelLength[1] - hadron->v_y[i])/hadron->v_v[i]);
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_DistZ[VLENGTH];
-  v_DistZ[vALL] = fabs(((floor(hadron->v_z[vALL]/ct->VoxelLength[2]) + (hadron->v_w[vALL] > 0)) * ct->VoxelLength[2] - hadron->v_z[vALL])/hadron->v_w[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_DistZ[i] = fabs(((floor(hadron->v_z[i]/ct->VoxelLength[2]) + (hadron->v_w[i] > 0)) * ct->VoxelLength[2] - hadron->v_z[i])/hadron->v_w[i]);
+  }
 
   // Add safety increment to compensate for rounding errors and to be sure to pass the interface (2e-4 for float, 1.5e-8 for double);
   #if VAR_COMPUTE_PRECISION==1
-    v_result[vALL] = fmin(v_DistX[vALL], fmin(v_DistY[vALL], v_DistZ[vALL])); 
-    if(v_result[vALL] < 1e-3) v_result[vALL] += 2e-4;
-    else v_result[vALL] += 5e-5;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_result[i] = fmin(v_DistX[i], fmin(v_DistY[i], v_DistZ[i]));
+    } 
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(v_result[i] < 1e-3) v_result[i] += 2e-4;
+        else v_result[i] += 5e-5;
+    }
   #else
-    v_result[vALL] = fmin(v_DistX[vALL], fmin(v_DistY[vALL], v_DistZ[vALL])) + 1.5e-8; 
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_result[i] = fmin(v_DistX[i], fmin(v_DistY[i], v_DistZ[i])) + 1.5e-8;
+    } 
   #endif
   
 
@@ -161,9 +223,18 @@ void Update_position(Hadron *hadron, VAR_COMPUTE *v_step){
 
   __assume_aligned(v_step, 64); 
 
-  hadron->v_x[vALL] += v_step[vALL] * hadron->v_u[vALL];
-  hadron->v_y[vALL] += v_step[vALL] * hadron->v_v[vALL];
-  hadron->v_z[vALL] += v_step[vALL] * hadron->v_w[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_x[i] += v_step[i] * hadron->v_u[i];
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_y[i] += v_step[i] * hadron->v_v[i];
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_z[i] += v_step[i] * hadron->v_w[i];
+  }
 
   return;
 }
@@ -179,62 +250,112 @@ void CT_Transport(Hadron *hadron, DATA_CT *ct, VAR_COMPUTE *v_s, VAR_COMPUTE *v_
   __assume_aligned(&hadron->v_type, 64); 
 
   ALIGNED_(64) VAR_COMPUTE v_MassDistance[VLENGTH];
-  v_MassDistance[vALL] = v_s[vALL] * v_init_density[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_MassDistance[i] = v_s[i] * v_init_density[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_step[VLENGTH];
   Dist_To_Interface(hadron, ct, v_step);
 
   ALIGNED_(64) int v_index[VLENGTH];
-  v_index[vALL] = v_init_index[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_index[i] = v_init_index[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_density[VLENGTH];
-  v_density[vALL] = ct->density[v_index[vALL]];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_density[i] = ct->density[v_index[i]];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_run[VLENGTH];
-  v_run[vALL] = 1.0;
-  if(hadron->v_type[vALL] == Unknown) v_run[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_run[i] = 1.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_type[i] == Unknown) v_run[i] = 0.0;
+  }
 
-  v_hinge_index[vALL] = -1;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_hinge_index[i] = -1;
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_HingeDistance[VLENGTH];
-  v_HingeDistance[vALL] = v_MassDistance[vALL] - v_tau[vALL] * v_init_density[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_HingeDistance[i] = v_MassDistance[i] - v_tau[i] * v_init_density[i];
+  }
 
-  int run = __sec_reduce_add(v_run[vALL]);
+    int run = 0;
+  #pragma omp simd reduction(+:run)
+  for (int i = 0; i < VLENGTH; i++) {
+      run += v_run[i];
+  }
 
   while(run != 0){
 
-    if(v_MassDistance[vALL] > v_step[vALL] * v_density[vALL]){ 
-      v_MassDistance[vALL] -= v_step[vALL] * v_density[vALL];
-    }
-    else{
-      v_run[vALL] = 0.0;
-      v_step[vALL] = 0.0;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(v_MassDistance[i] > v_step[i] * v_density[i]){ 
+          v_MassDistance[i] -= v_step[i] * v_density[i];
+        }
+        else{
+          v_run[i] = 0.0;
+          v_step[i] = 0.0;
+        }
     }
 
-    if(v_MassDistance[vALL] < v_HingeDistance[vALL] && v_hinge_index[vALL] == -1){
-      v_hinge_index[vALL] = v_index[vALL];
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(v_MassDistance[i] < v_HingeDistance[i] && v_hinge_index[i] == -1){
+          v_hinge_index[i] = v_index[i];
+        }
     }
 
     Update_position(hadron, v_step);
     verif_position(hadron, ct);
-    if(hadron->v_type[vALL] == Unknown) v_run[vALL] = 0.0;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_type[i] == Unknown) v_run[i] = 0.0;
+    }
     get_CT_Offset(hadron, ct, v_index);
-    v_density[vALL] = ct->density[v_index[vALL]];
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_density[i] = ct->density[v_index[i]];
+    }
     Dist_To_Interface(hadron, ct, v_step);
 
-    if(v_index[vALL] > ct->Nbr_voxels || v_index[vALL] < 0){
-      v_run[vALL] = 0.0;
-      v_hinge_index[vALL] = 0;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(v_index[i] > ct->Nbr_voxels || v_index[i] < 0){
+          v_run[i] = 0.0;
+          v_hinge_index[i] = 0;
+        }
     }
 
-  run = __sec_reduce_add(v_run[vALL]);
+    run = 0;
+  #pragma omp simd reduction(+:run)
+  for (int i = 0; i < VLENGTH; i++) {
+      run += v_run[i];
+  }
   }
 
-  v_step[vALL] = v_MassDistance[vALL] / v_density[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_step[i] = v_MassDistance[i] / v_density[i];
+  }
   Update_position(hadron, v_step);
 
-  if(v_hinge_index[vALL] == -1){
-    v_hinge_index[vALL] = v_index[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_hinge_index[i] == -1){
+        v_hinge_index[i] = v_index[i];
+      }
   }
 
 
@@ -254,19 +375,31 @@ void CT_Transport_SPR(Hadron *hadron, DATA_CT *ct, Materials *material, VAR_COMP
 
 
   ALIGNED_(64) int v_index[VLENGTH];
-  v_index[vALL] = v_init_index[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_index[i] = v_init_index[i];
+  }
 
   ALIGNED_(64) int v_material_label[VLENGTH];
-  v_material_label[vALL] = ct->material[v_index[vALL]];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_material_label[i] = ct->material[v_index[i]];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_density[VLENGTH];
-  v_density[vALL] = v_init_density[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_density[i] = v_init_density[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_step[VLENGTH];
   Dist_To_Interface(hadron, ct, v_step);
 
   ALIGNED_(64) int v_data_index[VLENGTH];
-  v_data_index[vALL] = (int)ceil( hadron->v_T[vALL] / (UMeV*PSTAR_BIN * hadron->v_mass[vALL]));
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_data_index[i] = (int)ceil( hadron->v_T[i] / (UMeV*PSTAR_BIN * hadron->v_mass[i]));
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_stop_pow[VLENGTH];
   int i;
@@ -280,62 +413,109 @@ void CT_Transport_SPR(Hadron *hadron, DATA_CT *ct, Materials *material, VAR_COMP
 
 
   ALIGNED_(64) VAR_COMPUTE v_MassDistance[VLENGTH];
-  v_MassDistance[vALL] = v_s[vALL] * v_init_density[vALL] * v_stop_pow[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_MassDistance[i] = v_s[i] * v_init_density[i] * v_stop_pow[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_HingeDistance[VLENGTH];
-  v_HingeDistance[vALL] = v_MassDistance[vALL] - v_tau[vALL] * v_init_density[vALL] * v_stop_pow[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_HingeDistance[i] = v_MassDistance[i] - v_tau[i] * v_init_density[i] * v_stop_pow[i];
+  }
 
 
   ALIGNED_(64) VAR_COMPUTE v_run[VLENGTH];
-  v_run[vALL] = 1.0;
-  if(hadron->v_type[vALL] == Unknown) v_run[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_run[i] = 1.0;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_type[i] == Unknown) v_run[i] = 0.0;
+  }
 
-  v_hinge_index[vALL] = -1;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_hinge_index[i] = -1;
+  }
 
-  int run = __sec_reduce_add(v_run[vALL]);
+    int run = 0;
+  #pragma omp simd reduction(+:run)
+  for (int i = 0; i < VLENGTH; i++) {
+      run += v_run[i];
+  }
 
   while(run != 0){
 
-    if(v_MassDistance[vALL] > v_step[vALL] * v_density[vALL] * v_stop_pow[vALL]){ 
-      v_MassDistance[vALL] -= v_step[vALL] * v_density[vALL] * v_stop_pow[vALL];
-    }
-    else{
-      v_run[vALL] = 0.0;
-      v_step[vALL] = 0.0;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(v_MassDistance[i] > v_step[i] * v_density[i] * v_stop_pow[i]){ 
+          v_MassDistance[i] -= v_step[i] * v_density[i] * v_stop_pow[i];
+        }
+        else{
+          v_run[i] = 0.0;
+          v_step[i] = 0.0;
+        }
     }
 
-    if(v_MassDistance[vALL] < v_HingeDistance[vALL] && v_hinge_index[vALL] == -1){
-      v_hinge_index[vALL] = v_index[vALL];
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(v_MassDistance[i] < v_HingeDistance[i] && v_hinge_index[i] == -1){
+          v_hinge_index[i] = v_index[i];
+        }
     }
 
     Update_position(hadron, v_step);
     verif_position(hadron, ct);
-    if(hadron->v_type[vALL] == Unknown) v_run[vALL] = 0.0;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_type[i] == Unknown) v_run[i] = 0.0;
+    }
     get_CT_Offset(hadron, ct, v_index);
-    v_density[vALL] = ct->density[v_index[vALL]];
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_density[i] = ct->density[v_index[i]];
+    }
     Dist_To_Interface(hadron, ct, v_step);
 
-    if(v_material_label[vALL] != ct->material[v_index[vALL]]){
-	v_material_label[vALL] = ct->material[v_index[vALL]];
-//	Total_Stop_Pow(hadron, material, v_material_label, v_stop_pow);
-  	for(i=0; i<VLENGTH; i++){
-  	  v_stop_pow[i] = (VAR_COMPUTE)material[v_material_label[i]].Stop_Pow[v_data_index[i]];
-  	}
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(v_material_label[i] != ct->material[v_index[i]]){
+    	v_material_label[i] = ct->material[v_index[i]];
+    //	Total_Stop_Pow(hadron, material, v_material_label, v_stop_pow);
+      	for(i=0; i<VLENGTH; i++){
+      	  v_stop_pow[i] = (VAR_COMPUTE)material[v_material_label[i]].Stop_Pow[v_data_index[i]];
+      	}
+        }
     }
 
-    if(v_index[vALL] > ct->Nbr_voxels || v_index[vALL] < 0){
-      v_run[vALL] = 0.0;
-      v_hinge_index[vALL] = 0;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(v_index[i] > ct->Nbr_voxels || v_index[i] < 0){
+          v_run[i] = 0.0;
+          v_hinge_index[i] = 0;
+        }
     }
 
-  run = __sec_reduce_add(v_run[vALL]);
+    run = 0;
+  #pragma omp simd reduction(+:run)
+  for (int i = 0; i < VLENGTH; i++) {
+      run += v_run[i];
+  }
   }
 
-  v_step[vALL] = v_MassDistance[vALL] / (v_density[vALL] * v_stop_pow[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_step[i] = v_MassDistance[i] / (v_density[i] * v_stop_pow[i]);
+  }
   Update_position(hadron, v_step);
 
-  if(v_hinge_index[vALL] == -1){
-    v_hinge_index[vALL] = v_index[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_hinge_index[i] == -1){
+        v_hinge_index[i] = v_index[i];
+      }
   }
 
 
@@ -355,71 +535,127 @@ void CT_Transport_Random_Hinge(Hadron *hadron, DATA_CT *ct, VAR_COMPUTE *v_s, VA
   __assume_aligned(&hadron->v_type, 64); 
 
   ALIGNED_(64) VAR_COMPUTE v_MassDistance[VLENGTH];
-  v_MassDistance[vALL] = v_s[vALL] * v_init_density[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_MassDistance[i] = v_s[i] * v_init_density[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_step[VLENGTH];
   Dist_To_Interface(hadron, ct, v_step);
 
   ALIGNED_(64) int v_index[VLENGTH];
-  v_index[vALL] = v_init_index[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_index[i] = v_init_index[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_density[VLENGTH];
-  v_density[vALL] = ct->density[v_index[vALL]];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_density[i] = ct->density[v_index[i]];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_run[VLENGTH];
-  v_run[vALL] = v_mask[vALL];
-  if(hadron->v_type[vALL] == Unknown) v_run[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_run[i] = v_mask[i];
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_type[i] == Unknown) v_run[i] = 0.0;
+  }
 
   ALIGNED_(64) unsigned short int v_material[VLENGTH];
-  v_material[vALL] = ct->material[v_index[vALL]];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_material[i] = ct->material[v_index[i]];
+  }
 
-  v_hinge_index[vALL] = -1;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_hinge_index[i] = -1;
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_HingeDistance[VLENGTH];
-  v_HingeDistance[vALL] = v_MassDistance[vALL] - v_tau[vALL] * v_init_density[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_HingeDistance[i] = v_MassDistance[i] - v_tau[i] * v_init_density[i];
+  }
 
-  int run = __sec_reduce_add(v_run[vALL]);
+    int run = 0;
+  #pragma omp simd reduction(+:run)
+  for (int i = 0; i < VLENGTH; i++) {
+      run += v_run[i];
+  }
 
   while(run != 0){
 
-    if(v_MassDistance[vALL] > v_step[vALL] * v_density[vALL] && v_run[vALL] != 0.0){
-      v_MassDistance[vALL] -= v_step[vALL] * v_density[vALL];
-    }
-    else{
-      v_run[vALL] = 0.0;
-      v_step[vALL] = 0.0;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(v_MassDistance[i] > v_step[i] * v_density[i] && v_run[i] != 0.0){
+          v_MassDistance[i] -= v_step[i] * v_density[i];
+        }
+        else{
+          v_run[i] = 0.0;
+          v_step[i] = 0.0;
+        }
     }
 
-    if(v_MassDistance[vALL] < v_HingeDistance[vALL] && v_hinge_index[vALL] == -1){
-      v_hinge_index[vALL] = v_index[vALL];
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(v_MassDistance[i] < v_HingeDistance[i] && v_hinge_index[i] == -1){
+          v_hinge_index[i] = v_index[i];
+        }
     }
 
     Update_position(hadron, v_step);
     verif_position(hadron, ct);
-    if(hadron->v_type[vALL] == Unknown) v_run[vALL] = 0.0;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_type[i] == Unknown) v_run[i] = 0.0;
+    }
     get_CT_Offset(hadron, ct, v_index);
-    v_density[vALL] = ct->density[v_index[vALL]];
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_density[i] = ct->density[v_index[i]];
+    }
     Dist_To_Interface(hadron, ct, v_step);
 
-    if(v_index[vALL] > ct->Nbr_voxels || v_index[vALL] < 0) v_run[vALL] = 0.0;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(v_index[i] > ct->Nbr_voxels || v_index[i] < 0) v_run[i] = 0.0;
 
-    else if(v_material[vALL] != ct->material[v_index[vALL]]){
-      v_run[vALL] = 0.0;
-      v_mask[vALL] = 0.0;
+        else if(v_material[i] != ct->material[v_index[i]]){
+          v_run[i] = 0.0;
+          v_mask[i] = 0.0;
+        }
     }
 
-  run = __sec_reduce_add(v_run[vALL]);
+    run = 0;
+  #pragma omp simd reduction(+:run)
+  for (int i = 0; i < VLENGTH; i++) {
+      run += v_run[i];
+  }
   }  
 
-  if(v_mask[vALL] == 0.0){
-    v_MassDistance[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_mask[i] == 0.0){
+        v_MassDistance[i] = 0.0;
+      }
   }
 
-  v_step[vALL] = v_MassDistance[vALL] / v_density[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_step[i] = v_MassDistance[i] / v_density[i];
+  }
   Update_position(hadron, v_step);
 
-  if(v_hinge_index[vALL] == -1 && v_mask[vALL] != 0.0){
-    v_hinge_index[vALL] = v_index[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_hinge_index[i] == -1 && v_mask[i] != 0.0){
+        v_hinge_index[i] = v_index[i];
+      }
   }
 
   return;
@@ -436,57 +672,87 @@ void Update_direction(Hadron *hadron, VAR_COMPUTE *v_theta, VAR_COMPUTE *v_phi){
   __assume_aligned(&hadron->v_w, 64); 
 
   ALIGNED_(64) VAR_COMPUTE v_cosT[VLENGTH];
-  v_cosT[vALL] = cos(v_theta[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_cosT[i] = cos(v_theta[i]);
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_sinT[VLENGTH];
-  v_sinT[vALL] = sin(v_theta[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_sinT[i] = sin(v_theta[i]);
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_cosP[VLENGTH];
-  v_cosP[vALL] = cos(v_phi[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_cosP[i] = cos(v_phi[i]);
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_sinP[VLENGTH];
-  v_sinP[vALL] = sin(v_phi[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_sinP[i] = sin(v_phi[i]);
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_prev_u[VLENGTH];
-  v_prev_u[vALL] = hadron->v_u[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_prev_u[i] = hadron->v_u[i];
+  }
 
 
 //  if(fabs(1.0 - hadron->v_w[vALL]) > 1e-10){	// Si direction non parallèle à l'axe z
-  if(hadron->v_w[vALL] < 0.999999 && hadron->v_w[vALL] > -0.999999){	// Si direction non parallèle à l'axe z
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_w[i] < 0.999999 && hadron->v_w[i] > -0.999999){	// Si direction non parallèle à l'axe z
 
-    hadron->v_u[vALL] = (v_prev_u[vALL]*v_cosT[vALL] 
-			+ (v_sinT[vALL] / (sqrt(1.0-hadron->v_w[vALL]*hadron->v_w[vALL]))) * (v_prev_u[vALL]*hadron->v_w[vALL]*v_cosP[vALL] - hadron->v_v[vALL]*v_sinP[vALL]));
+        hadron->v_u[i] = (v_prev_u[i]*v_cosT[i] 
+    			+ (v_sinT[i] / (sqrt(1.0-hadron->v_w[i]*hadron->v_w[i]))) * (v_prev_u[i]*hadron->v_w[i]*v_cosP[i] - hadron->v_v[i]*v_sinP[i]));
 
-    hadron->v_v[vALL] = (hadron->v_v[vALL]*v_cosT[vALL] 
-			+ (v_sinT[vALL] / (sqrt(1.0-hadron->v_w[vALL]*hadron->v_w[vALL]))) * (hadron->v_v[vALL]*hadron->v_w[vALL]*v_cosP[vALL] + v_prev_u[vALL]*v_sinP[vALL]));
+        hadron->v_v[i] = (hadron->v_v[i]*v_cosT[i] 
+    			+ (v_sinT[i] / (sqrt(1.0-hadron->v_w[i]*hadron->v_w[i]))) * (hadron->v_v[i]*hadron->v_w[i]*v_cosP[i] + v_prev_u[i]*v_sinP[i]));
 
-    hadron->v_w[vALL] = (hadron->v_w[vALL]*v_cosT[vALL] - sqrt(1.0-hadron->v_w[vALL]*hadron->v_w[vALL])*v_sinT[vALL]*v_cosP[vALL]);
+        hadron->v_w[i] = (hadron->v_w[i]*v_cosT[i] - sqrt(1.0-hadron->v_w[i]*hadron->v_w[i])*v_sinT[i]*v_cosP[i]);
 
-  }
-  else{
-    hadron->v_v[vALL] = v_sinT[vALL] * v_sinP[vALL];
+      }
+      else{
+        hadron->v_v[i] = v_sinT[i] * v_sinP[i];
 
-    if(hadron->v_w[vALL] > 0){		// Si direction parallère à l'axe z
-      hadron->v_u[vALL] = v_sinT[vALL] * v_cosP[vALL];
-      hadron->v_w[vALL] = v_cosT[vALL];
-    }
-    else{				// Si direction antiparallère à l'axe z
-      hadron->v_u[vALL] = -v_sinT[vALL] * v_cosP[vALL];
-      hadron->v_w[vALL] = -v_cosT[vALL];
-    }
+        if(hadron->v_w[i] > 0){		// Si direction parallère à l'axe z
+          hadron->v_u[i] = v_sinT[i] * v_cosP[i];
+          hadron->v_w[i] = v_cosT[i];
+        }
+        else{				// Si direction antiparallère à l'axe z
+          hadron->v_u[i] = -v_sinT[i] * v_cosP[i];
+          hadron->v_w[i] = -v_cosT[i];
+        }
+      }
   }
 
 
 
   // Si la norme dévie trop de 1, on renormalise
   ALIGNED_(64) VAR_COMPUTE v_norme[VLENGTH];
-  v_norme[vALL] = sqrt(hadron->v_u[vALL]*hadron->v_u[vALL] + hadron->v_v[vALL]*hadron->v_v[vALL] + hadron->v_w[vALL]*hadron->v_w[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_norme[i] = sqrt(hadron->v_u[i]*hadron->v_u[i] + hadron->v_v[i]*hadron->v_v[i] + hadron->v_w[i]*hadron->v_w[i]);
+  }
 
 //  if(fabs(v_norme[vALL]-1) > 1e-10){	
 
-    hadron->v_u[vALL] = hadron->v_u[vALL] / v_norme[vALL];
-    hadron->v_v[vALL] = hadron->v_v[vALL] / v_norme[vALL];
-    hadron->v_w[vALL] = hadron->v_w[vALL] / v_norme[vALL];
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        hadron->v_u[i] = hadron->v_u[i] / v_norme[i];
+    }
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        hadron->v_v[i] = hadron->v_v[i] / v_norme[i];
+    }
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        hadron->v_w[i] = hadron->v_w[i] / v_norme[i];
+    }
 //  }  
 
 

@@ -46,10 +46,16 @@ void hadron_step(Hadron *hadron, DATA_Scoring *scoring, Materials *material, DAT
   get_CT_Offset(hadron, ct, v_index);
 
   ALIGNED_(64) int v_material_label[VLENGTH];
-  v_material_label[vALL] = ct->material[v_index[vALL]];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_material_label[i] = ct->material[v_index[i]];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_init_density[VLENGTH];
-  v_init_density[vALL] = ct->density[v_index[vALL]];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_init_density[i] = ct->density[v_index[i]];
+  }
   
   ALIGNED_(64) VAR_COMPUTE v_N_el[VLENGTH];
   //v_N_el[vALL] = material[v_material_label[vALL]].N_el * v_init_density[vALL];
@@ -66,20 +72,32 @@ void hadron_step(Hadron *hadron, DATA_Scoring *scoring, Materials *material, DAT
 
   #if EM_Method==EM_FIPPEL
     ALIGNED_(64) int v_water_label[VLENGTH];
-    v_water_label[vALL] = WATER_LABEL;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_water_label[i] = WATER_LABEL;
+    }
 
     ALIGNED_(64) VAR_COMPUTE v_N_el_water[VLENGTH];
-    v_N_el_water[vALL] = material[v_water_label[vALL]].N_el * v_init_density[vALL];
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_N_el_water[i] = material[v_water_label[i]].N_el * v_init_density[i];
+    }
 
     ALIGNED_(64) VAR_COMPUTE v_StpCorr[VLENGTH];
     Fippel_Stop_Pow_correction(hadron, v_init_density, v_StpCorr);
 
     Total_Stop_Pow(hadron, material, v_water_label, v_stop_pow);
-    v_stop_pow[vALL] = v_init_density[vALL] * hadron->v_charge[vALL]*hadron->v_charge[vALL] * v_StpCorr[vALL] * v_stop_pow[vALL];
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_stop_pow[i] = v_init_density[i] * hadron->v_charge[i]*hadron->v_charge[i] * v_StpCorr[i] * v_stop_pow[i];
+    }
 
   #else	// full PSTAR
     Total_Stop_Pow(hadron, material, v_material_label, v_stop_pow);
-    v_stop_pow[vALL] = v_init_density[vALL] * hadron->v_charge[vALL]*hadron->v_charge[vALL] * v_stop_pow[vALL];
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_stop_pow[i] = v_init_density[i] * hadron->v_charge[i]*hadron->v_charge[i] * v_stop_pow[i];
+    }
   #endif
 
 
@@ -87,37 +105,58 @@ void hadron_step(Hadron *hadron, DATA_Scoring *scoring, Materials *material, DAT
     ALIGNED_(64) VAR_COMPUTE v_Dist_Interface[VLENGTH];
     Dist_To_Material_Interface(hadron, ct, config->D_Max, v_index, v_init_density, v_Dist_Interface);
 
-    v_step_max[vALL] = fmin(fmin(v_Dist_Interface[vALL], config->D_Max), (config->Epsilon_Max * hadron->v_T[vALL] / v_stop_pow[vALL]));
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_step_max[i] = fmin(fmin(v_Dist_Interface[i], config->D_Max), (config->Epsilon_Max * hadron->v_T[i] / v_stop_pow[i]));
+    }
 
   #elif InterfaceCrossing==VoxelInterface
     ALIGNED_(64) VAR_COMPUTE v_Dist_Interface[VLENGTH];
     Dist_To_Interface(hadron, ct, v_Dist_Interface);
 
-    v_step_max[vALL] = fmin(fmin(v_Dist_Interface[vALL], config->D_Max), (config->Epsilon_Max * hadron->v_T[vALL] / v_stop_pow[vALL]));
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_step_max[i] = fmin(fmin(v_Dist_Interface[i], config->D_Max), (config->Epsilon_Max * hadron->v_T[i] / v_stop_pow[i]));
+    }
 
   #else	// No interface or Random Hinge or Fippel Transport
-    v_step_max[vALL] = fmin(config->D_Max, (config->Epsilon_Max * hadron->v_T[vALL] / v_stop_pow[vALL]));
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_step_max[i] = fmin(config->D_Max, (config->Epsilon_Max * hadron->v_T[i] / v_stop_pow[i]));
+    }
   #endif
 
   ALIGNED_(64) VAR_COMPUTE v_dE_max[VLENGTH];
-  v_dE_max[vALL] = v_step_max[vALL] * v_stop_pow[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_dE_max[i] = v_step_max[i] * v_stop_pow[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_section[VLENGTH];
   Total_Hard_Cross_Section(hadron, material, v_material_label, v_N_el, v_init_density, (config->Te_Min*UMeV), v_dE_max, config, v_section); 
-  v_section[vALL] += 1e-10;
-  v_section[vALL] *= 1.017;  // facteur pour palier l'approximation.
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_section[i] += 1e-10;
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_section[i] *= 1.017;
+  }  // facteur pour palier l'approximation.
 
 
   // calcul du SPR pour la conversion dose to water
   ALIGNED_(64) VAR_COMPUTE v_SPR[VLENGTH];
-  if(config->DoseToWater == 2){
-    ALIGNED_(64) int v_water_ID[VLENGTH];
-    v_water_ID[vALL] = config->Water_Material_ID;
-    Total_Stop_Pow(hadron, material, v_water_ID, v_SPR);
-    v_SPR[vALL] = v_stop_pow[vALL] / (v_init_density[vALL] * hadron->v_charge[vALL]*hadron->v_charge[vALL] * v_SPR[vALL]);
-    if(hadron->v_type[vALL] == Unknown) v_SPR[vALL] = 1.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(config->DoseToWater == 2){
+        ALIGNED_(64) int v_water_ID[VLENGTH];
+        v_water_ID[i] = config->Water_Material_ID;
+        Total_Stop_Pow(hadron, material, v_water_ID, v_SPR);
+        v_SPR[i] = v_stop_pow[i] / (v_init_density[i] * hadron->v_charge[i]*hadron->v_charge[i] * v_SPR[i]);
+        if(hadron->v_type[i] == Unknown) v_SPR[i] = 1.0;
+      }
+      else v_SPR[i] = 1.0;
   }
-  else v_SPR[vALL] = 1.0;
 
   // calcul de la distance pour arriver au prochain step
 
@@ -125,9 +164,15 @@ void hadron_step(Hadron *hadron, DATA_Scoring *scoring, Materials *material, DAT
   rand_uniform(RNG_Stream, v_rnd);
 
   ALIGNED_(64) VAR_COMPUTE v_step[VLENGTH];
-  v_step[vALL] = -log(v_rnd[vALL])/v_section[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_step[i] = -log(v_rnd[i])/v_section[i];
+  }
 
-  if(v_step[vALL] > v_step_max[vALL]) v_step[vALL] = v_step_max[vALL];  // on se limite à une distance step_max
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_step[i] > v_step_max[i]) v_step[i] = v_step_max[i];
+  }  // on se limite à une distance step_max
 
   
   // Compute CSDA + MS
@@ -141,7 +186,10 @@ void hadron_step(Hadron *hadron, DATA_Scoring *scoring, Materials *material, DAT
 
   ALIGNED_(64) VAR_COMPUTE v_straggling[VLENGTH];
   Compute_Energy_straggling(hadron, v_N_el, (config->Te_Min*UMeV), v_step, v_straggling);		// energy straggling
-  v_straggling[vALL] = sqrt(v_straggling[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_straggling[i] = sqrt(v_straggling[i]);
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_dE[VLENGTH];
   rand_normal(RNG_Stream, v_dE, v_mean_dE, v_straggling);					// energie perdue
@@ -161,7 +209,10 @@ void hadron_step(Hadron *hadron, DATA_Scoring *scoring, Materials *material, DAT
 
   ALIGNED_(64) VAR_COMPUTE v_phi[VLENGTH];					// déviation angle (phi)
   rand_uniform(RNG_Stream, v_phi);
-  v_phi[vALL] = 2*M_PI*v_phi[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_phi[i] = 2*M_PI*v_phi[i];
+  }
 
 
   // Dépot de l'énergie à un point choisi aléatoirement dans le step
@@ -169,25 +220,43 @@ void hadron_step(Hadron *hadron, DATA_Scoring *scoring, Materials *material, DAT
   rand_uniform(RNG_Stream, v_rnd);
 
   ALIGNED_(64) VAR_COMPUTE v_tau[VLENGTH];
-  v_tau[vALL] = v_rnd[vALL] * v_step[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_tau[i] = v_rnd[i] * v_step[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE scoring_x[VLENGTH], scoring_y[VLENGTH], scoring_z[VLENGTH];
-  scoring_x[vALL] = hadron->v_x[vALL] + v_tau[vALL] * hadron->v_u[vALL];
-  scoring_y[vALL] = hadron->v_y[vALL] + v_tau[vALL] * hadron->v_v[vALL];
-  scoring_z[vALL] = hadron->v_z[vALL] + v_tau[vALL] * hadron->v_w[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      scoring_x[i] = hadron->v_x[i] + v_tau[i] * hadron->v_u[i];
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      scoring_y[i] = hadron->v_y[i] + v_tau[i] * hadron->v_v[i];
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      scoring_z[i] = hadron->v_z[i] + v_tau[i] * hadron->v_w[i];
+  }
 
   ALIGNED_(64) int v_hinge_index[VLENGTH];
 
   #if InterfaceCrossing==RandomHinge
 	// Gestion des interfaces par la méthode du Random Hinge
     ALIGNED_(64) VAR_COMPUTE v_mask[VLENGTH];
-    v_mask[vALL] = 1.0;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_mask[i] = 1.0;
+    }
     CT_Transport_Random_Hinge(hadron, ct, v_step, v_tau, v_index, v_hinge_index, v_init_density, v_mask);
   #elif InterfaceCrossing==FictitiousInteraction
 	// Gestion des interfaces par interaction fictives
     CT_Transport(hadron, ct, v_step, v_tau, v_index, v_hinge_index, v_init_density);
   #elif InterfaceCrossing==VoxelInterface
-    v_hinge_index[vALL] = v_index[vALL];
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+        v_hinge_index[i] = v_index[i];
+    }
     Update_position(hadron, v_step);
   #else
         // NoInterface
@@ -197,18 +266,30 @@ void hadron_step(Hadron *hadron, DATA_Scoring *scoring, Materials *material, DAT
 
   // scoring de la perte d'énergie
 
-  if(hadron->v_type[vALL] == Unknown) v_dE[vALL] = 0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(hadron->v_type[i] == Unknown) v_dE[i] = 0;
+  }
   #if InterfaceCrossing==RandomHinge
-    if(v_hinge_index[vALL] == -1){	// si on croise une interface, on ne continue pas le step.
-      v_theta[vALL] = 0.0;
-      v_dE[vALL] = 0;
+        #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
+    if(v_hinge_index[i] == -1){	// si on croise une interface, on ne continue pas le step.
+          v_theta[i] = 0.0;
+          v_dE[i] = 0;
+        }
     }
   #endif
-  if((hadron->v_T[vALL] - v_dE[vALL]) <= (config->Ecut_Pro * UMeV)){
-    v_dE[vALL] = hadron->v_T[vALL];
-    hadron->v_type[vALL] = Unknown;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if((hadron->v_T[i] - v_dE[i]) <= (config->Ecut_Pro * UMeV)){
+        v_dE[i] = hadron->v_T[i];
+        hadron->v_type[i] = Unknown;
+      }
   }
-  hadron->v_T[vALL] = hadron->v_T[vALL] - v_dE[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_T[i] = hadron->v_T[i] - v_dE[i];
+  }
 
   if(config->Independent_scoring_grid == 0) Energy_Scoring_from_index(scoring, v_hinge_index, hadron->v_M, v_dE, v_init_density, v_SPR, config);
   else Energy_Scoring_from_coordinates(scoring, scoring_x, scoring_y, scoring_z, hadron->v_M, v_dE, v_init_density, v_SPR, config);
@@ -246,25 +327,40 @@ void hadron_step(Hadron *hadron, DATA_Scoring *scoring, Materials *material, DAT
 
   // Interaction HARD
   ALIGNED_(64) VAR_COMPUTE v_dE_hard[VLENGTH];
-  v_dE_hard[vALL] = 0.0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_dE_hard[i] = 0.0;
+  }
 
   ALIGNED_(64) int v_interaction_type[VLENGTH];
   ALIGNED_(64) VAR_COMPUTE v_dE_tmp[VLENGTH];
 
   get_interaction_type(hadron, material, v_material_label, v_N_el, v_init_density, (config->Te_Min*UMeV), v_dE_max, v_section, RNG_Stream, config, v_interaction_type);
-  if(v_step[vALL] == v_step_max[vALL]) v_interaction_type[vALL] = 0;
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_step[i] == v_step_max[i]) v_interaction_type[i] = 0;
+  }
   // Si step > step_max : step = step_max et force interaction fictive
   // Sinon, on détermine aléatoirement le type d'interaction
 
   // interaction discrète d'ionisation
   Compute_Ionization_Energy(hadron, (config->Te_Min*UMeV), RNG_Stream, v_dE_tmp);
-  if(v_interaction_type[vALL] == 1) v_dE_hard[vALL] = v_dE_tmp[vALL];
-  hadron->v_T[vALL] = hadron->v_T[vALL] - v_dE_hard[vALL];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_interaction_type[i] == 1) v_dE_hard[i] = v_dE_tmp[i];
+  }
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      hadron->v_T[i] = hadron->v_T[i] - v_dE_hard[i];
+  }
 
   ALIGNED_(64) VAR_COMPUTE v_stop_pow2[VLENGTH];
-  if(config->Score_LET == 1 && config->LET_Calculation_Method == 1){
-    Total_Stop_Pow(hadron, material, v_material_label, v_stop_pow2);
-    v_stop_pow[vALL] = 0.5 * (v_stop_pow[vALL] + v_init_density[vALL] * hadron->v_charge[vALL]*hadron->v_charge[vALL] * v_stop_pow2[vALL]);
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+    if(config->Score_LET == 1 && config->LET_Calculation_Method == 1){
+        Total_Stop_Pow(hadron, material, v_material_label, v_stop_pow2);
+        v_stop_pow[i] = 0.5 * (v_stop_pow[i] + v_init_density[i] * hadron->v_charge[i]*hadron->v_charge[i] * v_stop_pow2[i]);
+      }
   }
 
   // interaction delta
@@ -308,7 +404,10 @@ void hadron_step(Hadron *hadron, DATA_Scoring *scoring, Materials *material, DAT
   }
     
   ALIGNED_(64) VAR_COMPUTE v_density[VLENGTH];
-  v_density[vALL] = ct->density[v_index[vALL]];
+    #pragma omp simd
+  for (int i = 0; i < VLENGTH; i++) {
+      v_density[i] = ct->density[v_index[i]];
+  }
   
   if(config->Independent_scoring_grid == 0) Energy_Scoring_from_index(scoring, v_index, hadron->v_M, v_dE_hard, v_density, v_SPR, config);
   else Energy_Scoring_from_coordinates(scoring, hadron->v_x, hadron->v_y, hadron->v_z, hadron->v_M, v_dE_hard, v_density, v_SPR, config);
