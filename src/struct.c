@@ -232,23 +232,23 @@ void Copy_Hadron_struct(Hadron *destination, Hadron *origin){
   __assume_aligned(&origin->v_Te_max, 64);
 
 
-  destination->v_x[:] = origin->v_x[:];
-  destination->v_y[:] = origin->v_y[:];
-  destination->v_z[:] = origin->v_z[:];
+  memcpy(destination->v_x, origin->v_x, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_y, origin->v_y, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_z, origin->v_z, VLENGTH * sizeof(VAR_COMPUTE));
 
-  destination->v_u[:] = origin->v_u[:];
-  destination->v_v[:] = origin->v_v[:];
-  destination->v_w[:] = origin->v_w[:];
+  memcpy(destination->v_u, origin->v_u, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_v, origin->v_v, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_w, origin->v_w, VLENGTH * sizeof(VAR_COMPUTE));
 
-  destination->v_T[:] = origin->v_T[:];
-  destination->v_M[:] = origin->v_M[:];
-  destination->v_charge[:] = origin->v_charge[:];
-  destination->v_mass[:] = origin->v_mass[:];
+  memcpy(destination->v_T, origin->v_T, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_M, origin->v_M, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_charge, origin->v_charge, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_mass, origin->v_mass, VLENGTH * sizeof(VAR_COMPUTE));
 
-  destination->v_type[:] = origin->v_type[:];
+  memcpy(destination->v_type, origin->v_type, VLENGTH * sizeof(int));
 
-  destination->v_E[:] = origin->v_E[:];
-  destination->v_gamma[:] = origin->v_gamma[:];
-  destination->v_beta2[:] = origin->v_beta2[:];
-  destination->v_Te_max[:] = origin->v_Te_max[:];
+  memcpy(destination->v_E, origin->v_E, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_gamma, origin->v_gamma, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_beta2, origin->v_beta2, VLENGTH * sizeof(VAR_COMPUTE));
+  memcpy(destination->v_Te_max, origin->v_Te_max, VLENGTH * sizeof(VAR_COMPUTE));
 }
