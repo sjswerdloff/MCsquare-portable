@@ -72,6 +72,9 @@ MCsquare_portable : $(SRC)
 MCsquare_arm64 : $(SRC)
 	clang $(SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O3 $(FULL_VERSION) -o MCsquare_arm64
 
+MCsquare_arm64_static : $(SRC)
+	clang $(SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include /opt/homebrew/opt/libomp/lib/libomp.a -lpthread -lm -O3 $(FULL_VERSION) -o MCsquare_arm64_static
+
 
 
 clean:
