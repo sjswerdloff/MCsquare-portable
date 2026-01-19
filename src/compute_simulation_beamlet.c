@@ -72,15 +72,13 @@ void Run_simulation_beamlet(DATA_config *config, Materials *material, DATA_CT **
 
       unsigned long Nbr_simulated_primaries = 0;
 
-      // Init RNG
-      VSLStreamStatePtr RNDstream;				// un stream de RNG par thread
+      // Init RNG (PCG32 - portable replacement for Intel MKL VSL)
+      pcg32_random_t rng_state;
+      RNG_Stream_t RNDstream = &rng_state;
       ALIGNED_(64) VAR_COMPUTE v_rnd[VLENGTH];			// vecteur de nbr aleatoires
-      if(config->RNG_Seed == 0){
-        vslNewStream(&RNDstream, VSL_BRNG_MCG59, time(NULL)+tid);	// initialisation du stream du RNG avec le seed (time+thread_id)
-      }
-      else{
-        vslNewStream(&RNDstream, VSL_BRNG_MCG59, config->RNG_Seed+tid);
-      }
+      uint64_t seed = (config->RNG_Seed == 0) ? (uint64_t)(time(NULL) + tid)
+                                              : (uint64_t)(config->RNG_Seed + tid);
+      pcg32_srandom_r(RNDstream, seed, (uint64_t)tid);  // thread ID as stream selector
       rand_uniform(RNDstream, v_rnd);				// on genere une première fois un set de nbr car les premiers semblent mal distribués
 
       // Init scoring    
