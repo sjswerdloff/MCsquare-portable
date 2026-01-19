@@ -12,6 +12,10 @@ build-gcc-openmp:
   stage: build
   image: ubuntu:22.04
   # No tags specified - will use any available runner (project or shared)
+  variables:
+    # Set MKL paths directly instead of sourcing setvars.sh
+    MKLROOT: /opt/intel/oneapi/mkl/latest
+
   before_script:
     # Install build dependencies
     - apt-get update
@@ -25,17 +29,12 @@ build-gcc-openmp:
     # Install Intel MKL (minimal package for linking)
     - apt-get install -y intel-oneapi-mkl-devel
 
-    # Set up MKL environment
-    - source /opt/intel/oneapi/setvars.sh
-
-    # Verify tools
+    # Verify tools and paths
     - gcc --version
-    - echo "MKL_ROOT=$MKLROOT"
+    - ls -la ${MKLROOT}/include/ | head -5
+    - ls -la ${MKLROOT}/lib/intel64/ | head -5
 
   script:
-    # Source MKL environment again (in case it didn't persist)
-    - source /opt/intel/oneapi/setvars.sh
-
     # Compile MCsquare with GCC + OpenMP (no Cilk Plus)
     # Based on MC2_gcc target but without -fcilkplus
     - |
@@ -43,6 +42,7 @@ build-gcc-openmp:
         -fopenmp \
         -I${MKLROOT}/include \
         -L${MKLROOT}/lib/intel64 \
+        -Wl,-rpath,${MKLROOT}/lib/intel64 \
         -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core \
         -lgomp -lpthread -lm -ldl \
         -O3 -m64 \
