@@ -146,16 +146,22 @@ void hadron_step(Hadron *hadron, DATA_Scoring *scoring, Materials *material, DAT
 
   // calcul du SPR pour la conversion dose to water
   ALIGNED_(64) VAR_COMPUTE v_SPR[VLENGTH];
-    #pragma omp simd
-  for (int i = 0; i < VLENGTH; i++) {
-    if(config->DoseToWater == 2){
-        ALIGNED_(64) int v_water_ID[VLENGTH];
+  if(config->DoseToWater == 2){
+    // FIX: v_water_ID must be fully initialized BEFORE passing to Total_Stop_Pow
+    ALIGNED_(64) int v_water_ID[VLENGTH];
+    for (int i = 0; i < VLENGTH; i++) {
         v_water_ID[i] = config->Water_Material_ID;
-        Total_Stop_Pow(hadron, material, v_water_ID, v_SPR);
+    }
+    Total_Stop_Pow(hadron, material, v_water_ID, v_SPR);
+    for (int i = 0; i < VLENGTH; i++) {
         v_SPR[i] = v_stop_pow[i] / (v_init_density[i] * hadron->v_charge[i]*hadron->v_charge[i] * v_SPR[i]);
         if(hadron->v_type[i] == Unknown) v_SPR[i] = 1.0;
-      }
-      else v_SPR[i] = 1.0;
+    }
+  }
+  else {
+    for (int i = 0; i < VLENGTH; i++) {
+        v_SPR[i] = 1.0;
+    }
   }
 
   // calcul de la distance pour arriver au prochain step
@@ -181,7 +187,7 @@ void hadron_step(Hadron *hadron, DATA_Scoring *scoring, Materials *material, DAT
   #if EM_Method==EM_FIPPEL
     Compute_dE2_Fippel(hadron, v_N_el_water, v_init_density, material, (config->Te_Min*UMeV), v_water_label, v_step, v_mean_dE);  
   #else
-    Compute_dE2(hadron, v_N_el, v_init_density, material, (config->Te_Min*UMeV), v_material_label, v_step, v_mean_dE);  
+    Compute_dE2(hadron, v_N_el, v_init_density, material, (config->Te_Min*UMeV), v_material_label, v_step, v_mean_dE);
   #endif
 
   ALIGNED_(64) VAR_COMPUTE v_straggling[VLENGTH];

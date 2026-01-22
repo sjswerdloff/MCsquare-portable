@@ -59,7 +59,7 @@ void get_CT_Offset(Hadron *hadron, DATA_CT *ct, int *v_index){
 
     #pragma omp simd
   for (int i = 0; i < VLENGTH; i++) {
-    if(v_index[i] < 0 || v_index[i] > ct->Nbr_voxels) hadron->v_type[i] = Unknown;
+    if(v_index[i] < 0 || v_index[i] >= ct->Nbr_voxels) hadron->v_type[i] = Unknown;
   }
 
     #pragma omp simd
@@ -332,7 +332,7 @@ void CT_Transport(Hadron *hadron, DATA_CT *ct, VAR_COMPUTE *v_s, VAR_COMPUTE *v_
 
         #pragma omp simd
     for (int i = 0; i < VLENGTH; i++) {
-    if(v_index[i] > ct->Nbr_voxels || v_index[i] < 0){
+    if(v_index[i] >= ct->Nbr_voxels || v_index[i] < 0){
           v_run[i] = 0.0;
           v_hinge_index[i] = 0;
         }
@@ -492,7 +492,7 @@ void CT_Transport_SPR(Hadron *hadron, DATA_CT *ct, Materials *material, VAR_COMP
 
         #pragma omp simd
     for (int i = 0; i < VLENGTH; i++) {
-    if(v_index[i] > ct->Nbr_voxels || v_index[i] < 0){
+    if(v_index[i] >= ct->Nbr_voxels || v_index[i] < 0){
           v_run[i] = 0.0;
           v_hinge_index[i] = 0;
         }
@@ -623,7 +623,7 @@ void CT_Transport_Random_Hinge(Hadron *hadron, DATA_CT *ct, VAR_COMPUTE *v_s, VA
 
         #pragma omp simd
     for (int i = 0; i < VLENGTH; i++) {
-    if(v_index[i] > ct->Nbr_voxels || v_index[i] < 0) v_run[i] = 0.0;
+    if(v_index[i] >= ct->Nbr_voxels || v_index[i] < 0) v_run[i] = 0.0;
 
         else if(v_material[i] != ct->material[v_index[i]]){
           v_run[i] = 0.0;

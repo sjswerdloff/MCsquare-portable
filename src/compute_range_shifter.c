@@ -22,6 +22,12 @@ int Init_RangeShifter_Data(plan_parameters *plan, machine_parameters *machine, M
 
         r = plan->fields[i].RS_num;
 
+	// Bounds check for RS_num before accessing RS arrays
+	if(r < 0 || r >= machine->RS_number){
+	  printf("\nERROR: Invalid range shifter index %d for beam %d (valid range: 0-%d)\n", r, i, machine->RS_number - 1);
+	  return 1;
+	}
+
 	// Check RS type
 	if(machine->RS_Type[r] == empty){
       	  for(j=0; j<plan->fields[i].NumberOfControlPoints; j++){
@@ -71,6 +77,12 @@ void Display_RangeShifter_Data(plan_parameters *plan, machine_parameters *machin
     if(plan->fields[i].RS_Type != none){
 
       r = plan->fields[i].RS_num;
+
+      // Bounds check for RS_num
+      if(r < 0 || r >= machine->RS_number){
+	    printf("\nWARNING: Invalid range shifter index %d for beam %d (valid range: 0-%d)\n", r, i, machine->RS_number - 1);
+	    continue;
+      }
 
       if(machine->RS_Type[r] == empty){
 	    printf("\nEmpty range shifter set for beam %d:\n", i);
