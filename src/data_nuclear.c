@@ -614,6 +614,8 @@ void Interp_Nuclear_Cross_section(Materials *material, int Nbr_Materials){
 	  else if(material[label].Nuclear_data_type == ICRU){
 	    if(j*INTERP_BIN > 7){
 	      index = Binary_Search((j*INTERP_BIN), material[label].Elastic_Energy_List, material[label].Nbr_Elastic_Energy);
+	      if(index < 0) index = 0;
+	      else if(index >= material[label].Nbr_Elastic_Energy-1) index = material[label].Nbr_Elastic_Energy - 2;
 	      material[i].Interp_Total_Nuclear_Cross_Section[j] += 	material[i].Mixture_Components_fraction[k] 
 									* (VAR_DATA)Linear_Interpolation(	(j*INTERP_BIN), 
 												material[label].Elastic_Energy_List[index], 
@@ -622,9 +624,11 @@ void Interp_Nuclear_Cross_section(Materials *material, int Nbr_Materials){
 												material[label].Nuclear_Elastic[index+1].Cross_section);
 
 	      index = Binary_Search((j*INTERP_BIN), material[label].Inelastic_Energy_List, material[label].Nbr_Inelastic_Energy);
-	      material[i].Interp_Total_Nuclear_Cross_Section[j] += 	material[i].Mixture_Components_fraction[k] 
-									* (VAR_DATA)Linear_Interpolation(	(j*INTERP_BIN), 
-												material[label].Inelastic_Energy_List[index], 
+	      if(index < 0) index = 0;
+	      else if(index >= material[label].Nbr_Inelastic_Energy-1) index = material[label].Nbr_Inelastic_Energy - 2;
+	      material[i].Interp_Total_Nuclear_Cross_Section[j] += 	material[i].Mixture_Components_fraction[k]
+									* (VAR_DATA)Linear_Interpolation(	(j*INTERP_BIN),
+												material[label].Inelastic_Energy_List[index],
 												material[label].Inelastic_Energy_List[index+1], 
 												material[label].Nuclear_Inelastic[index].Cross_section, 
 												material[label].Nuclear_Inelastic[index+1].Cross_section);

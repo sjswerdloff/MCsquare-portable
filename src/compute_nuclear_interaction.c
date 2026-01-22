@@ -440,6 +440,8 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_proton(int hadron_index, Hadron *hadron, H
   // Echantillonage de l'angle theta d'émission de la particule secondaire
   rnd = single_rand_uniform(RNG_Stream) * dd_cross_section[12];
   int angle_index = Binary_Search(rnd, dd_cross_section, 13)+1;
+  if(angle_index < 0) angle_index = 0;
+  else if(angle_index > 12) angle_index = 12;
 
   static const double ICRU_angles[13] = { 0, 10, 20, 30, 40, 50, 60, 70, 90, 110, 130, 150, 180 };
 
@@ -561,6 +563,8 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_deuteron(int hadron_index, Hadron *hadron,
   // Echantillonage de l'angle theta d'émission de la particule secondaire
   rnd = single_rand_uniform(RNG_Stream) * dd_cross_section[12];
   int angle_index = Binary_Search(rnd, dd_cross_section, 13)+1;
+  if(angle_index < 0) angle_index = 0;
+  else if(angle_index > 12) angle_index = 12;
 
   static const double ICRU_angles[13] = { 0, 10, 20, 30, 40, 50, 60, 70, 90, 110, 130, 150, 180 };
 
@@ -681,6 +685,8 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_alpha(int hadron_index, Hadron *hadron, Ha
   // Echantillonage de l'angle theta d'émission de la particule secondaire
   rnd = single_rand_uniform(RNG_Stream) * dd_cross_section[12];
   int angle_index = Binary_Search(rnd, dd_cross_section, 13)+1;
+  if(angle_index < 0) angle_index = 0;
+  else if(angle_index > 12) angle_index = 12;
 
   static const double ICRU_angles[13] = { 0, 10, 20, 30, 40, 50, 60, 70, 90, 110, 130, 150, 180 };
 

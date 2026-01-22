@@ -54,6 +54,10 @@ void SemiInfiniteSlab_step(Hadron *hadron, Materials *material, Hadron_buffer *h
     }
     else{
       r = field_data[Hadron_ID[i]]->RS_num;
+      // Bounds check for RS_num (matches compute_range_shifter.c validation)
+      if (r < 0 || r >= machine->RS_number) {
+          r = 0;  // Clamp to valid index
+      }
       v_material_label[i] = machine->RS_Material[r];
       v_init_density[i] = machine->RS_Density[r];
       v_N_el[i] = material[machine->RS_Material[r]].N_el * v_init_density[i];
