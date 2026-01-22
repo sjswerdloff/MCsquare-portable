@@ -17,7 +17,7 @@ int File_exists(const char *FileName){
 
   FILE *file;
  
-  if (file = fopen(FileName, "r")){
+  if ((file = fopen(FileName, "r"))){
         fclose(file);
         return 1;
   }

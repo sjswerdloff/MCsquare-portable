@@ -264,8 +264,8 @@ void Run_simulation_beamlet(DATA_config *config, Materials *material, DATA_CT **
           if(config->Compute_DVH == 1){
 	    #pragma omp critical (Outputs)
             {
-	      sprintf(config->output_beamlet_suffix, output_beamlet_suffix);
-	      sprintf(config->output_4D_suffix, output_4D_suffix);
+	      sprintf(config->output_beamlet_suffix, "%s", output_beamlet_suffix);
+	      sprintf(config->output_4D_suffix, "%s", output_4D_suffix);
 	      config->Current_4D_phase = a;
 	      compute_all_DVH(config, Tot_scoring.dose, DoseScaling);
 	    }
@@ -360,8 +360,8 @@ void Run_simulation_beamlet(DATA_config *config, Materials *material, DATA_CT **
 	      if(config->Simu_4D_Mode == 1 && config->Dose_4D_Accumulation == 0){
 		#pragma omp critical (Outputs)
                 {
-	          sprintf(config->output_beamlet_suffix, output_beamlet_suffix);
-	          sprintf(config->output_4D_suffix, output_4D_suffix);
+	          sprintf(config->output_beamlet_suffix, "%s", output_beamlet_suffix);
+	          sprintf(config->output_4D_suffix, "%s", output_4D_suffix);
 	          config->Current_4D_phase = a;
 	          export_Sparse_image(file_path, config, &Tot_scoring, Beamlet, Tot_scoring.energy, config->Energy_Sparse_Threshold);
 	        }
@@ -382,8 +382,8 @@ void Run_simulation_beamlet(DATA_config *config, Materials *material, DATA_CT **
 	      if(config->Simu_4D_Mode == 1 && config->Dose_4D_Accumulation == 0){
 		#pragma omp critical (Outputs)
                 {
-	          sprintf(config->output_beamlet_suffix, output_beamlet_suffix);
-	          sprintf(config->output_4D_suffix, output_4D_suffix);
+	          sprintf(config->output_beamlet_suffix, "%s", output_beamlet_suffix);
+	          sprintf(config->output_4D_suffix, "%s", output_4D_suffix);
 	          config->Current_4D_phase = a;
 	          export_Sparse_image(file_path, config, &Tot_scoring, Beamlet, Tot_scoring.dose, config->Dose_Sparse_Threshold);
 	        }
@@ -404,8 +404,8 @@ void Run_simulation_beamlet(DATA_config *config, Materials *material, DATA_CT **
 	      if(config->Simu_4D_Mode == 1 && config->Dose_4D_Accumulation == 0){
 		#pragma omp critical (Outputs)
                 {
-	          sprintf(config->output_beamlet_suffix, output_beamlet_suffix);
-	          sprintf(config->output_4D_suffix, output_4D_suffix);
+	          sprintf(config->output_beamlet_suffix, "%s", output_beamlet_suffix);
+	          sprintf(config->output_4D_suffix, "%s", output_4D_suffix);
 	          config->Current_4D_phase = a;
 	          export_Sparse_image(file_path, config, &Tot_scoring, Beamlet, Tot_scoring.LET, config->LET_Sparse_Threshold);
 	        }

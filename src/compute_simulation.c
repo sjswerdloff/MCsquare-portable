@@ -356,12 +356,12 @@ void Display_simulation_progression(DATA_config *config, char *progress_message)
   strcat(file_path, "Simulation_progress.txt");
 
   // display progression on terminal
-  printf(progress_message);
+  printf("%s", progress_message);
   fflush(stdout);
 
   // write progression in file
   progress_file = fopen(file_path, "a");
-  fprintf(progress_file, progress_message);
+  fprintf(progress_file, "%s", progress_message);
   fclose(progress_file);
 
   return;

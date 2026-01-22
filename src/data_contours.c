@@ -161,7 +161,7 @@ void display_structs_information(DATA_StructList *StructList){
     printf("Override: %d\n", StructList->Structs[i].Override);
     if (StructList->Structs[i].Override!=0) {
       printf("Density: %f\n", StructList->Structs[i].rho);
-      printf("Material num: %f\n", StructList->Structs[i].material);
+      printf("Material num: %hu\n", StructList->Structs[i].material);
     }
     printf("\n");
   }
