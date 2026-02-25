@@ -5,19 +5,22 @@ Developer tools for comparing MCsquare dose distributions across builds, platfor
 ## Quick Start
 
 ```bash
-pip install -r validation/requirements.txt
+# Set up virtual environment (from MCsquare root)
+cd validation
+uv sync
+cd ..
 
 # Compare two dose outputs (text summary)
-python validation/compare_doses.py reference/Dose.mhd evaluation/Dose.mhd
+uv run --directory validation python compare_doses.py reference/Dose.mhd evaluation/Dose.mhd
 
 # With plots
-python validation/compare_doses.py reference/Dose.mhd evaluation/Dose.mhd --output report/
+uv run --directory validation python compare_doses.py reference/Dose.mhd evaluation/Dose.mhd --output report/
 
 # Custom gamma criteria (2%/2mm)
-python validation/compare_doses.py ref/Dose.mhd eval/Dose.mhd --criteria 2 2
+uv run --directory validation python compare_doses.py ref/Dose.mhd eval/Dose.mhd --criteria 2 2
 
 # Skip gamma (no pymedphys dependency needed)
-python validation/compare_doses.py ref/Dose.mhd eval/Dose.mhd --no-gamma
+uv run --directory validation python compare_doses.py ref/Dose.mhd eval/Dose.mhd --no-gamma
 ```
 
 ## What It Compares
@@ -39,7 +42,7 @@ mv Outputs reference_output
 mv Outputs portable_output
 
 # Compare
-python validation/compare_doses.py \
+uv run --directory validation python compare_doses.py \
     reference_output/Dose.mhd \
     portable_output/Dose.mhd \
     --output comparison_report/

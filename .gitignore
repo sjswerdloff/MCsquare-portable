@@ -7,3 +7,5 @@ MCsquare_win*
 *.py
 !validation/*.py
 old_versions
+.venv/
+validation/.venv/
