@@ -5,4 +5,5 @@ settings.json
 MCsquare_linux*
 MCsquare_win*
 *.py
+!validation/*.py
 old_versions
