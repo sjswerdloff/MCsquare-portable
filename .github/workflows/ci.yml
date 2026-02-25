@@ -1,0 +1,93 @@
+# GitHub Actions CI for MCsquare-portable
+# Builds and tests on Linux (gcc) and macOS ARM64 (clang)
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-linux:
+    name: Build & Test (Linux gcc)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Build MCsquare_portable
+        run: make MCsquare_portable
+
+      - name: Verify binary
+        run: |
+          ls -la MCsquare_portable
+          file MCsquare_portable
+
+      - name: Smoke test (1000 primaries)
+        run: |
+          mkdir -p smoke_test_output
+          cat > smoke_test_config.txt << 'EOF'
+          Num_Threads         1
+          Num_Primaries       1000
+          CT_File             Sample_input_data/CT.mhd
+          HU_Density_Conversion_File   Scanners/default/HU_Density_Conversion.txt
+          HU_Material_Conversion_File  Scanners/default/HU_Material_Conversion.txt
+          BDL_Machine_Parameter_File   BDL/BDL_default_DN_RangeShifter.txt
+          BDL_Plan_File       Sample_input_data/PlanPencil.txt
+          Output_Directory    smoke_test_output
+          Dose_MHD_Output     True
+          EOF
+          ./MCsquare_portable smoke_test_config.txt
+
+      - name: Verify output
+        run: |
+          ls -la smoke_test_output/
+          test -f smoke_test_output/Dose.mhd
+          echo "Smoke test passed - Dose.mhd created"
+
+  build-macos-arm64:
+    name: Build & Test (macOS ARM64)
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libomp
+        run: brew install libomp
+
+      - name: Build MCsquare_arm64
+        run: make MCsquare_arm64
+
+      - name: Verify binary
+        run: |
+          ls -la MCsquare_arm64
+          file MCsquare_arm64
+
+      - name: Smoke test (1000 primaries)
+        run: |
+          mkdir -p smoke_test_output
+          cat > smoke_test_config.txt << 'EOF'
+          Num_Threads         1
+          Num_Primaries       1000
+          CT_File             Sample_input_data/CT.mhd
+          HU_Density_Conversion_File   Scanners/default/HU_Density_Conversion.txt
+          HU_Material_Conversion_File  Scanners/default/HU_Material_Conversion.txt
+          BDL_Machine_Parameter_File   BDL/BDL_default_DN_RangeShifter.txt
+          BDL_Plan_File       Sample_input_data/PlanPencil.txt
+          Output_Directory    smoke_test_output
+          Dose_MHD_Output     True
+          EOF
+          ./MCsquare_arm64 smoke_test_config.txt
+
+      - name: Verify output
+        run: |
+          ls -la smoke_test_output/
+          test -f smoke_test_output/Dose.mhd
+          echo "Smoke test passed - Dose.mhd created"
