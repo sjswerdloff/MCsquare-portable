@@ -1,0 +1,4 @@
+# Developer validation dependencies (not required for MCsquare itself)
+numpy
+pymedphys
+matplotlib

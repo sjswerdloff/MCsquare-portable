@@ -1,0 +1,11 @@
+# Minimal smoke test configuration for CI
+# 1000 primaries - fast enough for CI, enough to verify execution
+Num_Threads         1
+Num_Primaries       1000
+CT_File             Sample_input_data/CT.mhd
+HU_Density_Conversion_File   Scanners/default/HU_Density_Conversion.txt
+HU_Material_Conversion_File  Scanners/default/HU_Material_Conversion.txt
+BDL_Machine_Parameter_File   BDL/BDL_default_DN_RangeShifter.txt
+BDL_Plan_File       Sample_input_data/PlanPencil.txt
+Output_Directory    smoke_test_output
+Dose_MHD_Output     True

@@ -1,0 +1,50 @@
+# Gitea Actions CI for MCsquare-portable
+# Builds and smoke tests on macOS ARM64 (local runner)
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Build & Test (macOS ARM64)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        run: |
+          git clone http://git/The_Kindled/MCsquare-portable.git .
+          git fetch origin ${{ github.ref }}
+          git checkout ${{ github.sha }}
+
+      - name: Verify build tools
+        run: |
+          clang --version
+          brew list libomp > /dev/null 2>&1 || brew install libomp
+
+      - name: Build MCsquare_arm64
+        run: make MCsquare_arm64
+
+      - name: Verify binary
+        run: |
+          ls -la MCsquare_arm64
+          file MCsquare_arm64
+
+      - name: Smoke test (1000 primaries)
+        run: |
+          mkdir -p smoke_test_output
+          ./MCsquare_arm64 Sample_input_data/smoke_test_config.txt
+
+      - name: Verify output
+        run: |
+          ls -la smoke_test_output/
+          test -f smoke_test_output/Dose.mhd
+          echo "Smoke test passed - Dose.mhd created"
+
+      - name: Test summary
+        if: always()
+        run: echo "MCsquare ARM64 CI completed"
