@@ -8,4 +8,4 @@ MCsquare_win*
 !validation/*.py
 old_versions
 .venv/
-validation/.venv/
+validation/.venv/test_transport_to_ct

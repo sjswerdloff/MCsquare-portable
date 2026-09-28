@@ -72,6 +72,13 @@ MCsquare_portable : $(SRC)
 MCsquare_arm64 : $(SRC)
 	clang $(SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O3 $(FULL_VERSION) -o MCsquare_arm64
 
+# C regression tests (macOS arm64, as CI runs them). UBSan with no recovery, so an out-of-bounds
+# read fails deterministically instead of depending on what is on the stack.
+TEST_SRC = $(filter-out src/main.c, $(SRC))
+test_transport : tests/test_transport_to_ct.c $(TEST_SRC)
+	clang -Isrc tests/test_transport_to_ct.c $(TEST_SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O1 -g -fsanitize=undefined -fno-sanitize-recover=all -DVERSION='"test"' -o test_transport_to_ct
+	./test_transport_to_ct
+
 
 
 clean:
