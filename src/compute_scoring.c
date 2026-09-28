@@ -446,7 +446,7 @@ VAR_SCORING Process_batch(DATA_Scoring *Tot_scoring, DATA_Scoring *batch, Materi
       }
     }
 
-    char file_path[100];
+    char file_path[PATH_SIZE];
     strcpy(file_path, config->Output_Directory);
     strcat(file_path, "Batch_Dose");
     strcat(file_path, config->output_robustness_suffix);

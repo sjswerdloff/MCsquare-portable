@@ -18,7 +18,7 @@ int Read_Stop_Pow(char *MaterialName, Materials *material, DATA_config *config){
   VAR_DATA tmp1, tmp2;
   int i = 0, nbr_lines = 0;
 
-  char FileName[200];
+  char FileName[PATH_SIZE];
 
   strcpy(FileName, config->Materials_Dir);
   strcat(FileName, MaterialName);

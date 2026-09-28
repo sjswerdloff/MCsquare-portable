@@ -14,11 +14,11 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 
 void export_MHD_image(char *file_name, int GridSize[3], VAR_DATA VoxelLength[3], VAR_DATA Offset[3], VAR_SCORING *data){
 
-  char file_path[100];
-  char file_mhd_name[100];
-  char file_mhd_path[100];
-  char file_raw_name[100];
-  char file_raw_path[100];
+  char file_path[PATH_SIZE];
+  char file_mhd_name[PATH_SIZE];
+  char file_mhd_path[PATH_SIZE];
+  char file_raw_name[PATH_SIZE];
+  char file_raw_path[PATH_SIZE];
 
   char *path_ptr = strrchr(file_name, '/');
   if(path_ptr==NULL){
@@ -301,8 +301,8 @@ VAR_DATA *import_MHD_image(char *file_name, int *GridSize, VAR_DATA *VoxelLength
 
   // Read binary data
   char *path_ptr = strrchr(file_name, '/');
-  char file_path[200];
-  char file_raw_path[200];
+  char file_path[PATH_SIZE];
+  char file_raw_path[PATH_SIZE];
   if(path_ptr!=NULL){
     strncpy(file_path, file_name, strlen(file_name)-strlen(path_ptr)+1);
     file_path[strlen(file_name)-strlen(path_ptr)+1] = '\0';

@@ -41,6 +41,9 @@ jobs:
           mkdir -p smoke_test_output
           ./MCsquare_arm64 Sample_input_data/smoke_test_config.txt
 
+      - name: Long output path (issue #5)
+        run: tests/test_long_output_path.sh ./MCsquare_arm64
+
       - name: Verify output
         run: |
           ls -la smoke_test_output/

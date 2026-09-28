@@ -16,7 +16,7 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 DATA_StructList *load_all_structs(){
 
   int NbrStructs = 0;
-  char struct_file_path[200];
+  char struct_file_path[PATH_SIZE];
   char *file_extension;
 
   DIR *directory;

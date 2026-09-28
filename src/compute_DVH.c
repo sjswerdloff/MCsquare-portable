@@ -15,7 +15,7 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 
 void compute_all_DVH(DATA_config *config, VAR_SCORING *Dose, VAR_SCORING DoseScaling){
 
-  char DVH_file_path[200];
+  char DVH_file_path[PATH_SIZE];
 
   if(config->StructList == NULL) config->StructList = load_all_structs();
 
