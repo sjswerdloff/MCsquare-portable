@@ -8,12 +8,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from compare_doses import build_axes, run_gamma  # noqa: E402
+from compare_doses import build_axes, run_gamma
 
 
-def _meta(dims: list[int]) -> dict:
+def _meta(dims: list[int], spacing: list[float] | None = None) -> dict:
     """Metadata as load_mhd returns it: dims and spacing in MHD (x, y, z) order."""
-    return {"dims": dims, "spacing": [2.0, 2.0, 3.0], "offset": [0.0, 0.0, 0.0]}
+    return {"dims": dims, "spacing": spacing or [2.0, 2.0, 3.0], "offset": [0.0, 0.0, 0.0]}
 
 
 def _dose(dims: list[int]) -> np.ndarray:
@@ -32,12 +32,48 @@ def test_gamma_accepts_non_cubic_grid(dims: list[int]) -> None:
     assert pass_rate == pytest.approx(100.0)
 
 
-def test_gamma_detects_a_shift_along_z() -> None:
-    """A dose scaled only along z must fail gamma where it exceeds 3%, so the z axis is really z."""
-    dims = [8, 8, 6]
-    ref = _dose(dims)
-    evl = ref.copy()
-    evl[3:, :, :] *= 1.2
-    axes = build_axes(_meta(dims))
-    _, pass_rate = run_gamma(ref, evl, axes, axes)
-    assert pass_rate < 100.0
+# Orientation on a CUBIC grid, where a wrong axis order cannot trip pymedphys' shape check and
+# would instead pair z's spacing with x's array dimension, returning a wrong pass rate silently.
+# Spacing is anisotropic: x = y = 2 mm, z = 5 mm. A one-voxel shift is therefore 5 mm along z
+# (beyond the 3 mm DTA, so it must fail) and 2 mm along x (within DTA, so it must pass). With the
+# spacings swapped, both verdicts flip, so the pair pins the orientation in both directions.
+# (Design: cora-2f1e43dc, review of #7.)
+_CUBE = [8, 8, 8]
+_ANISO = [2.0, 2.0, 5.0]
+
+
+def _shift_one_voxel(dose: np.ndarray, axis: int) -> np.ndarray:
+    """Shift by one voxel along a numpy axis, repeating the first slice instead of wrapping."""
+    out = np.roll(dose, 1, axis=axis)
+    first = [slice(None)] * dose.ndim
+    first[axis] = 0
+    out[tuple(first)] = dose[tuple(first)]
+    return out
+
+
+def _ramp(axis: int) -> np.ndarray:
+    """30..100 in steps of 10 (% of max) along one numpy axis, flat along the others.
+
+    Each step is far beyond the 3% dose criterion, so a one-voxel shift can only pass on
+    distance: the verdict depends on the spacing gamma assigns to that axis and nothing else.
+    """
+    shape = [1, 1, 1]
+    shape[axis] = _CUBE[axis]
+    profile = (30.0 + 10.0 * np.arange(_CUBE[axis])).reshape(shape)
+    return np.broadcast_to(profile, tuple(_CUBE)).astype(np.float32).copy()
+
+
+def test_gamma_fails_a_one_voxel_shift_along_z_of_5mm() -> None:
+    ref = _ramp(axis=0)
+    axes = build_axes(_meta(_CUBE, _ANISO))
+    _, pass_rate = run_gamma(ref, _shift_one_voxel(ref, axis=0), axes, axes)
+    assert pass_rate < 50.0  # only the repeated first slice matches exactly
+
+
+def test_gamma_passes_a_one_voxel_shift_along_x_of_2mm() -> None:
+    ref = _ramp(axis=2)
+    axes = build_axes(_meta(_CUBE, _ANISO))
+    _, pass_rate = run_gamma(ref, _shift_one_voxel(ref, axis=2), axes, axes)
+    # 7 of 8 columns: the reference's 100% column has no counterpart once shifted (eval tops
+    # out at 90%). With the axis order swapped, x gets 5 mm and only ~1 column in 8 passes.
+    assert pass_rate > 80.0
