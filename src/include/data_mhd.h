@@ -37,7 +37,7 @@ struct MHD_header{
   VAR_DATA Offset[3];
   enum MHD_ElementType ElementType;
   int ElementByteOrderMSB;
-  char ElementDataFile[100];
+  char ElementDataFile[PATH_SIZE];
   // Extend MHD header with material override parameters
   // to force a given density and material in a ROI loaded as binary mask
   unsigned short int Override;

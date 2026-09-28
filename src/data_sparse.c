@@ -14,11 +14,11 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 
 void export_Sparse_image(char *file_name, DATA_config *config, DATA_Scoring *scoring, plan_parameters *plan, VAR_SCORING *data, VAR_SCORING threshold){
 
-  char file_path[200];
-  char file_header_name[200];
-  char file_header_path[200];
-  char file_bin_name[200];
-  char file_bin_path[200];
+  char file_path[PATH_SIZE];
+  char file_header_name[PATH_SIZE];
+  char file_header_path[PATH_SIZE];
+  char file_bin_name[PATH_SIZE];
+  char file_bin_path[PATH_SIZE];
 
   char *path_ptr = strrchr(file_name, '/');
   if(path_ptr==NULL){
@@ -234,8 +234,8 @@ VAR_DATA *import_Sparse_image(char *file_name, int *GridSize, VAR_DATA *VoxelLen
 
   
   // Read binary data
-  char file_path_bin[200];
-  char file_path[200];
+  char file_path_bin[PATH_SIZE];
+  char file_path[PATH_SIZE];
 
   char *path_ptr = strrchr(file_name, '/');
   if(path_ptr==NULL) strcpy(file_path, "./");
@@ -501,10 +501,10 @@ DATA_Sparse_Header Init_Sparse_Header(){
 
 int Merge_Sparse_Files(char *InputPath, char *FileName, int NbrDirectories, char *OutputFile){
 
-  char file_header_path[200];
-  char file_bin_path[200];
-  char out_header_path[200];
-  char out_bin_path[200];
+  char file_header_path[PATH_SIZE];
+  char file_bin_path[PATH_SIZE];
+  char out_header_path[PATH_SIZE];
+  char out_bin_path[PATH_SIZE];
 
   char *file_extension = strrchr(FileName, '.');
   if(file_extension==NULL || strcmp(file_extension, ".txt")!=0){
@@ -536,7 +536,7 @@ int Merge_Sparse_Files(char *InputPath, char *FileName, int NbrDirectories, char
     strcat(out_header_path, ".txt");
   }
   
-  char from[200], ID[10];
+  char from[PATH_SIZE], ID[10];
   sprintf(from, "%s1/%s", InputPath, file_header_path);
   myCopyFile(out_header_path, from);
 
@@ -593,7 +593,7 @@ int Merge_Sparse_Files(char *InputPath, char *FileName, int NbrDirectories, char
 
 
 int Remove_temporary_folders(char *InputPath, int NbrDirectories){
-  char path[200], cmd[300];
+  char path[PATH_SIZE], cmd[PATH_SIZE + 64];
   int i;
   for(i=0; i<NbrDirectories; i++){
     // Remove sub folder

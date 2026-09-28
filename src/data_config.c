@@ -22,7 +22,7 @@ DATA_config_dictionary *Init_Config(DATA_config *config){
   Add_uint_Config_element("_Internal_Num_Config_Tags", &config_dictionary[0], &config->Num_Config_Tags, 1, Num_Config_Tags, 0, UINT_MAX);
   Add_int_Config_element("Num_Threads", &config_dictionary[1], &config->Num_Threads, 1, 0, -INT_MAX, INT_MAX);
   Add_ulong_Config_element("Num_Primaries", &config_dictionary[2], &config->Num_Primaries, 1, 10000000, 1, ULONG_MAX);
-  Add_string_Config_element("CT_File", &config_dictionary[3], config->CT_File, 1, "CT.mhd", 1, 200);
+  Add_string_Config_element("CT_File", &config_dictionary[3], config->CT_File, 1, "CT.mhd", 1, CONFIG_PATH_MAX);
   Add_ureal_Config_element("E_Cut_Pro", &config_dictionary[4], &config->Ecut_Pro, 1, 0.5, 0.001, 200);
   Add_ureal_Config_element("D_Max", &config_dictionary[5], &config->D_Max, 1, 0.2, 0.001, 100);
   Add_ureal_Config_element("Epsilon_Max", &config_dictionary[6], &config->Epsilon_Max, 1, 0.25, 0.001, 1.0);
@@ -35,8 +35,8 @@ DATA_config_dictionary *Init_Config(DATA_config *config){
   Add_ureal_Config_element("PG_HighEnergyCut", &config_dictionary[13], &config->PG_HighEnergyCut, 1, 50.0, 0.001, 1000.0);
   Add_uint_Config_element("PG_Spectrum_NumBin", &config_dictionary[14], &config->PG_Spectrum_NumBin, 1, 150, 1, UINT_MAX);
   Add_ureal_Config_element("PG_Spectrum_Binning", &config_dictionary[15], &config->PG_Spectrum_Binning, 1, 0.1, 0.001, 1000.0);
-  Add_string_Config_element("BDL_Machine_Parameter_File", &config_dictionary[16], config->BDL_machine, 1, "BDL.txt", 1, 200);
-  Add_string_Config_element("BDL_Plan_File", &config_dictionary[17], config->BDL_plan, 1, "Plan.txt", 1, 200);
+  Add_string_Config_element("BDL_Machine_Parameter_File", &config_dictionary[16], config->BDL_machine, 1, "BDL.txt", 1, CONFIG_PATH_MAX);
+  Add_string_Config_element("BDL_Plan_File", &config_dictionary[17], config->BDL_plan, 1, "Plan.txt", 1, CONFIG_PATH_MAX);
   Add_bool_Config_element("Energy_ASCII_Output", &config_dictionary[18], &config->Energy_ASCII_Output, 1, 0);
   Add_bool_Config_element("Energy_MHD_Output", &config_dictionary[19], &config->Energy_MHD_Output, 1, 0);
   Add_bool_Config_element("Energy_Sparse_Output", &config_dictionary[20], &config->Energy_Sparse_Output, 1, 0);
@@ -45,9 +45,9 @@ DATA_config_dictionary *Init_Config(DATA_config *config){
   Add_bool_Config_element("Dose_Sparse_Output", &config_dictionary[23], &config->Dose_Sparse_Output, 1, 0);
   Add_bool_Config_element("Densities_Output", &config_dictionary[24], &config->Densities_Output, 1, 0);
   Add_bool_Config_element("Materials_Output", &config_dictionary[25], &config->Materials_Output, 1, 0);
-  Add_string_Config_element("HU_Density_Conversion_File", &config_dictionary[26], config->HU_Density_File, 1, "HU_Density_Conversion.txt", 1, 200);
-  Add_string_Config_element("HU_Material_Conversion_File", &config_dictionary[27], config->HU_Material_File, 1, "HU_Material_Conversion.txt", 1, 200);
-  Add_string_Config_element("Output_Directory", &config_dictionary[28], config->Output_Directory, 1, "Outputs", 1, 200);
+  Add_string_Config_element("HU_Density_Conversion_File", &config_dictionary[26], config->HU_Density_File, 1, "HU_Density_Conversion.txt", 1, CONFIG_PATH_MAX);
+  Add_string_Config_element("HU_Material_Conversion_File", &config_dictionary[27], config->HU_Material_File, 1, "HU_Material_Conversion.txt", 1, CONFIG_PATH_MAX);
+  Add_string_Config_element("Output_Directory", &config_dictionary[28], config->Output_Directory, 1, "Outputs", 1, CONFIG_PATH_MAX);
   Add_bool_Config_element("Simulate_Nuclear_Interactions", &config_dictionary[29], &config->Simulate_Nuclear_Interactions, 1, 1);
   Add_bool_Config_element("Dose_Segmentation", &config_dictionary[30], &config->Dose_Segmentation, 1, 0);
   Add_ureal_Config_element("Density_Threshold_for_Segmentation", &config_dictionary[31], &config->Segmentation_Density_Threshold, 1, 0.01, 0.00001, 20);
@@ -307,7 +307,7 @@ void Add_Enum_Config_element(char *Tag, DATA_config_dictionary *config_dictionar
 int Parse_Config(DATA_config *config, char *file_name){
 
   FILE *file = NULL;
-  char read[500], list[100], *read_token, *read_list, *save_token, *save_list;
+  char read[PATH_SIZE], list[100], *read_token, *read_list, *save_token, *save_list;
   int i, j, k, parsed;
 
   DATA_config_dictionary *config_dictionary = Init_Config(config);
@@ -318,7 +318,7 @@ int Parse_Config(DATA_config *config, char *file_name){
     return 1;
   }
 
-  while (fgets(read, 500, file) != NULL){
+  while (fgets(read, sizeof(read), file) != NULL){
     // on ignore les commentaires
     if(read[0] == '#') continue;
     strtok_r(read, "#", &save_token);

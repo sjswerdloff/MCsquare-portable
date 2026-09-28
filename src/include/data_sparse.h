@@ -26,7 +26,7 @@ struct DATA_Sparse_Header{
 	unsigned int ImageSize[3];
 	float VoxelSpacing[3];
 	float Offset[3];
-	char BinaryFile[100];
+	char BinaryFile[PATH_SIZE];
 	int Beamlet_mode;
 	int NbrSpots;
 };
