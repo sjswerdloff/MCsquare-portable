@@ -36,6 +36,9 @@ jobs:
       - name: Regression tests (UBSan)
         run: make test_transport
 
+      - name: Temporary folders removed without a shell (issue #12)
+        run: make test_remove_tmp
+
       - name: Smoke test (1000 primaries)
         run: |
           mkdir -p smoke_test_output
