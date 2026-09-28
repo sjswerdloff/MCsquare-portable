@@ -10,3 +10,5 @@ old_versions
 .venv/
 validation/.venv/
 test_transport_to_ct
+test_remove_temporary_folders
+*.dSYM/

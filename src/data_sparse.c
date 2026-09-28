@@ -10,6 +10,14 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 */
 
 
+#ifndef _MSC_VER
+  #ifndef _GNU_SOURCE
+    #define _GNU_SOURCE	// nftw() in glibc's <ftw.h>
+  #endif
+  #include <ftw.h>
+  #include <errno.h>
+#endif
+
 #include "include/data_sparse.h"
 
 void export_Sparse_image(char *file_name, DATA_config *config, DATA_Scoring *scoring, plan_parameters *plan, VAR_SCORING *data, VAR_SCORING threshold){
@@ -592,15 +600,37 @@ int Merge_Sparse_Files(char *InputPath, char *FileName, int NbrDirectories, char
 }
 
 
+#ifndef _MSC_VER
+// nftw callback: remove each entry after its contents (FTW_DEPTH). Symbolic links are removed
+// themselves, never followed (FTW_PHYS), as with `rm -r`.
+static int remove_tree_entry(const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf){
+  (void)sb; (void)typeflag; (void)ftwbuf;
+  if(remove(fpath) != 0) printf("\nWarning: unable to remove temporary file %s \n", fpath);
+  return 0;
+}
+#endif
+
+// Deletes the per-beamlet temporary folders InputPath1 .. InputPathN. The path comes from the
+// config, so on Linux and macOS it is never passed through a shell (issue #12).
 int Remove_temporary_folders(char *InputPath, int NbrDirectories){
-  char path[PATH_SIZE], cmd[PATH_SIZE + 64];
+  char path[PATH_SIZE];
   int i;
   for(i=0; i<NbrDirectories; i++){
-    // Remove sub folder
-    sprintf(path, "\"%s%d\"", InputPath, i+1);
-    // rmdir(path); // from unistd.h
-    sprintf(cmd, RMDIR_CMD, path); // RMDIR_CMD is defined in define.h according to the OS
+    int len = snprintf(path, sizeof path, "%s%d", InputPath, i+1);
+    if(len < 0 || len >= (int)sizeof path){
+      printf("\nWarning: temporary folder path too long, not removed: %s%d \n", InputPath, i+1);
+      continue;
+    }
+#ifdef _MSC_VER
+    // Unchanged Windows behaviour; Makefile.bat builds are not maintained here.
+    char quoted[PATH_SIZE + 2], cmd[PATH_SIZE + 64];
+    sprintf(quoted, "\"%s\"", path);
+    sprintf(cmd, RMDIR_CMD, quoted);
     system(cmd);
+#else
+    if(nftw(path, remove_tree_entry, 16, FTW_DEPTH | FTW_PHYS) != 0 && errno != ENOENT)
+      printf("\nWarning: unable to remove temporary folder %s \n", path);
+#endif
   }
   return 0;
 }

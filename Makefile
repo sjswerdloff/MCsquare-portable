@@ -79,6 +79,11 @@ test_transport : tests/test_transport_to_ct.c $(TEST_SRC)
 	clang -Isrc tests/test_transport_to_ct.c $(TEST_SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O1 -g -fsanitize=undefined -fno-sanitize-recover=all -DVERSION='"test"' -o test_transport_to_ct
 	./test_transport_to_ct
 
+# Regression test for issue #12: the temporary folders are removed without a shell.
+test_remove_tmp : tests/test_remove_temporary_folders.c $(TEST_SRC)
+	clang -Isrc tests/test_remove_temporary_folders.c $(TEST_SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O1 -g -fsanitize=undefined -fno-sanitize-recover=all -DVERSION='"test"' -o test_remove_temporary_folders
+	./test_remove_temporary_folders
+
 
 
 clean:
