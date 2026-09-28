@@ -96,8 +96,6 @@ void Run_simulation_beamlet(DATA_config *config, Materials *material, DATA_CT **
       // Compute simulation
       while(stop == 0){
         for(i=0; i<VLENGTH; i++){
-	  	  #pragma omp simd
-	  for (int i = 0; i < VLENGTH; i++) {
     if(hadron.v_type[i] == Unknown){
 
     	    if(Nbr_HadronToSimulate > 0){
@@ -125,7 +123,6 @@ void Run_simulation_beamlet(DATA_config *config, Materials *material, DATA_CT **
     	      }
     	      if(count == 0) stop = 1;
     	    }
-    	  }
 	  }
         }
 
