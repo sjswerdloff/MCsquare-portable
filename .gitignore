@@ -11,4 +11,5 @@ old_versions
 validation/.venv/
 test_transport_to_ct
 test_remove_temporary_folders
+test_update_material_labels
 *.dSYM/
