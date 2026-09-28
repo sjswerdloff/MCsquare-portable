@@ -361,12 +361,13 @@ void hadron_step(Hadron *hadron, DATA_Scoring *scoring, Materials *material, DAT
   }
 
   ALIGNED_(64) VAR_COMPUTE v_stop_pow2[VLENGTH];
-    #pragma omp simd
-  for (int i = 0; i < VLENGTH; i++) {
-    if(config->Score_LET == 1 && config->LET_Calculation_Method == 1){
-        Total_Stop_Pow(hadron, material, v_material_label, v_stop_pow2);
+  // Once for all lanes, as upstream; it was recomputed inside the lane loop.
+  if(config->Score_LET == 1 && config->LET_Calculation_Method == 1){
+    Total_Stop_Pow(hadron, material, v_material_label, v_stop_pow2);
+      #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
         v_stop_pow[i] = 0.5 * (v_stop_pow[i] + v_init_density[i] * hadron->v_charge[i]*hadron->v_charge[i] * v_stop_pow2[i]);
-      }
+    }
   }
 
   // interaction delta
