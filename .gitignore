@@ -9,3 +9,4 @@ MCsquare_win*
 old_versions
 .venv/
 validation/.venv/
+test_transport_to_ct

@@ -33,6 +33,9 @@ jobs:
           ls -la MCsquare_arm64
           file MCsquare_arm64
 
+      - name: Regression tests (UBSan)
+        run: make test_transport
+
       - name: Smoke test (1000 primaries)
         run: |
           mkdir -p smoke_test_output
