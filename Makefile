@@ -84,6 +84,11 @@ test_remove_tmp : tests/test_remove_temporary_folders.c $(TEST_SRC)
 	clang -Isrc tests/test_remove_temporary_folders.c $(TEST_SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O1 -g -fsanitize=undefined -fno-sanitize-recover=all -DVERSION='"test"' -o test_remove_temporary_folders
 	./test_remove_temporary_folders
 
+# Regression test for issue #20: every lane that changes material is relabelled (SPR transport).
+test_material_labels : tests/test_update_material_labels.c $(TEST_SRC)
+	clang -Isrc tests/test_update_material_labels.c $(TEST_SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O1 -g -fsanitize=undefined -fno-sanitize-recover=all -DVERSION='"test"' -o test_update_material_labels
+	./test_update_material_labels
+
 
 
 clean:
