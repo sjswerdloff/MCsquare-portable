@@ -49,13 +49,15 @@ jobs:
     timeout-minutes: 170
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: MSYS2 + UCRT64 GCC (verified, once per box)
+        shell: powershell
+        run: |
+          & .\.gitea\scripts\ensure-msys2.ps1
       - name: Build and run
         shell: powershell
         run: |
           $ErrorActionPreference = 'Continue'
-          "$env:COMPUTERNAME  $((Get-CimInstance Win32_Processor).Name)"
           $m = 'C:\mcsq-win\msys64'
-          if (-not (Test-Path "$m\ucrt64\lib\libgomp.dll.a")) { throw "MSYS2 UCRT64 gcc + libgomp missing: run ci-windows.yml on this box" }
           $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
           & "$m\usr\bin\bash.exe" -lc 'make MCsquare_win_portable' 2>&1 | Select-Object -Last 3
           if (-not (Test-Path MCsquare_win_portable.exe)) { throw "build failed" }
