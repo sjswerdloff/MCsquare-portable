@@ -57,7 +57,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Continue'
-          $m = 'C:\mcsq-win\msys64'
+          $m = 'C:\mcsq-win\msys64-20260927'
           $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
           & "$m\usr\bin\bash.exe" -lc 'make MCsquare_win_portable' 2>&1 | Select-Object -Last 3
           if (-not (Test-Path MCsquare_win_portable.exe)) { throw "build failed" }
