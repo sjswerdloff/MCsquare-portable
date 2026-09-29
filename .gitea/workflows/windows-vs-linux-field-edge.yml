@@ -1,0 +1,103 @@
+# Does the Windows build give the same dose as the Linux build? Portable MCsquare at this commit,
+# built with GCC on each (Linux: make MCsquare_portable; Windows: make MCsquare_win_portable in
+# MSYS2 UCRT64), runs the field-edge case (200 MeV, 15 x 15 cm, 300 mm water cube, 3 threads, two seeds).
+# The analysis script compares "before" with "after", so Linux is labelled "before" and Windows "after":
+# its difference column reads Windows minus Linux, beside each platform's seed-to-seed noise.
+
+name: Windows vs Linux field-edge (portable)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [connor/windows-portable]
+    paths: [.gitea/workflows/windows-vs-linux-field-edge.yml]
+
+env:
+  PRIMARIES: "3e7"
+
+jobs:
+  linux:
+    name: Linux portable (gcc)
+    runs-on: linux
+    timeout-minutes: 170
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build and run
+        run: |
+          lscpu | grep 'Model name'; gcc --version | head -1
+          make MCsquare_portable
+          uv run --no-project --with numpy python validation/field_edge_make_cases.py 200 150
+          for s in A B; do
+            seed=12345; [ $s = B ] && seed=67890
+            printf '%s\n' "Num_Threads 3" "Num_Primaries $PRIMARIES" "RNG_Seed $seed" "CT_File cube.mhd" \
+              "HU_Density_Conversion_File Scanners/default/HU_Density_Conversion.txt" \
+              "HU_Material_Conversion_File Scanners/default/HU_Material_Conversion.txt" \
+              "BDL_Machine_Parameter_File BDL/BDL_default_DN_RangeShifter.txt" \
+              "BDL_Plan_File E200_S150.txt" "Output_Directory out_E200_S150_before_$s" "Dose_MHD_Output True" > cfg_$s.txt
+            mkdir -p out_E200_S150_before_$s
+            start=$(date +%s); ./MCsquare_portable cfg_$s.txt > log_$s.txt 2>&1 || { tail -20 log_$s.txt; exit 1; }
+            echo "RUN linux_$s seed=$seed wall_s=$(( $(date +%s) - start ))"; test -s out_E200_S150_before_$s/Dose.raw
+          done
+      - uses: actions/upload-artifact@v3
+        with:
+          name: linux-dose
+          path: out_E200_S150_before_*/Dose.raw
+
+  windows:
+    name: Windows portable (MinGW-w64 gcc)
+    runs-on: windows
+    timeout-minutes: 170
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          "$env:COMPUTERNAME  $((Get-CimInstance Win32_Processor).Name)"
+          $m = 'C:\mcsq-win\msys64'
+          if (-not (Test-Path "$m\ucrt64\lib\libgomp.dll.a")) { throw "MSYS2 UCRT64 gcc + libgomp missing: run ci-windows.yml on this box" }
+          $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
+          & "$m\usr\bin\bash.exe" -lc 'git config --global --add safe.directory "*"; make MCsquare_win_portable' 2>&1 | Select-Object -Last 3
+          if (-not (Test-Path MCsquare_win_portable.exe)) { throw "build failed" }
+          $env:PATH = "$m\ucrt64\bin;$env:PATH"
+          if (-not (Test-Path C:\mcsq-win\uv\uv.exe)) {
+            New-Item -ItemType Directory -Force C:\mcsq-win\uv | Out-Null
+            curl.exe -fsSL -o C:\mcsq-win\uv\uv.zip https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip
+            Expand-Archive -Force C:\mcsq-win\uv\uv.zip C:\mcsq-win\uv
+          }
+          & C:\mcsq-win\uv\uv.exe run --no-project --with numpy python validation\field_edge_make_cases.py 200 150
+          foreach ($s in 'A','B') {
+            $seed = if ($s -eq 'B') { 67890 } else { 12345 }
+            @("Num_Threads 3", "Num_Primaries $env:PRIMARIES", "RNG_Seed $seed", "CT_File cube.mhd",
+              "HU_Density_Conversion_File Scanners/default/HU_Density_Conversion.txt",
+              "HU_Material_Conversion_File Scanners/default/HU_Material_Conversion.txt",
+              "BDL_Machine_Parameter_File BDL/BDL_default_DN_RangeShifter.txt",
+              "BDL_Plan_File E200_S150.txt", "Output_Directory out_E200_S150_after_$s", "Dose_MHD_Output True") |
+              Set-Content -Encoding Ascii "cfg_$s.txt"
+            New-Item -ItemType Directory -Force "out_E200_S150_after_$s" | Out-Null
+            $t = Get-Date
+            & .\MCsquare_win_portable.exe "cfg_$s.txt" *> "log_$s.txt"
+            $rc = $LASTEXITCODE
+            "RUN windows_$s seed=$seed rc=$rc wall_s=$([int]((Get-Date) - $t).TotalSeconds)"
+            if ($rc -ne 0 -or -not (Test-Path "out_E200_S150_after_$s\Dose.raw")) { Get-Content "log_$s.txt" -Tail 20; throw "run $s failed" }
+          }
+      - uses: actions/upload-artifact@v3
+        with:
+          name: windows-dose
+          path: out_E200_S150_after_*/Dose.raw
+
+  compare:
+    name: Compare (Windows minus Linux)
+    needs: [linux, windows]
+    runs-on: linux
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@v3
+        with: { name: linux-dose, path: run }
+      - uses: actions/download-artifact@v3
+        with: { name: windows-dose, path: run }
+      - name: Table
+        run: |
+          ls -la run/*/Dose.raw
+          echo "Columns: before% = Linux; fix-bef = Windows minus Linux; noise = Linux seed A-B; noise_fix = Windows seed A-B"
+          uv run --no-project --with numpy python validation/field_edge_analyse.py "$PWD/run" E200_S150
