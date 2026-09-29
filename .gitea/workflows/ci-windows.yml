@@ -25,6 +25,7 @@ jobs:
       - name: MSYS2 + UCRT64 GCC (once per box)
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Continue'  # native stderr is not an error; results are checked explicitly
           "$env:COMPUTERNAME  $((Get-CimInstance Win32_Processor).Name)"
           $m = 'C:\mcsq-win\msys64'
           New-Item -ItemType Directory -Force C:\mcsq-win | Out-Null
@@ -46,6 +47,7 @@ jobs:
       - name: Build MCsquare_win_portable.exe
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Continue'  # native stderr is not an error; results are checked explicitly
           $m = 'C:\mcsq-win\msys64'
           $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
           & "$m\usr\bin\bash.exe" -lc 'git config --global --add safe.directory "*"; gcc --version | head -1; make MCsquare_win_portable' 2>&1 | ForEach-Object { "$_" }
@@ -57,6 +59,7 @@ jobs:
       - name: Smoke test (1000 primaries), run natively
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Continue'  # native stderr is not an error; results are checked explicitly
           New-Item -ItemType Directory -Force smoke_test_output | Out-Null
           & .\MCsquare_win_portable.exe Sample_input_data\smoke_test_config.txt *> smoke.log
           $rc = $LASTEXITCODE
