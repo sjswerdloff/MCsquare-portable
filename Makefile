@@ -72,6 +72,13 @@ MCsquare_portable : $(SRC)
 MCsquare_arm64 : $(SRC)
 	clang $(SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O3 $(FULL_VERSION) -o MCsquare_arm64
 
+# Windows x86-64 with MinGW-w64 GCC (MSYS2 UCRT64 shell): make MCsquare_win_portable
+# Uses its own source list: on Windows COMSPEC is set, so $(SRC) above is the Intel `src\*.c` form.
+# -static links libgomp and the C runtime in, so the .exe runs outside MSYS2.
+WIN_SRC = $(wildcard src/*.c)
+MCsquare_win_portable : $(WIN_SRC)
+	gcc $(WIN_SRC) -fopenmp -lm -O3 -static $(FULL_VERSION) -o MCsquare_win_portable.exe
+
 # C regression tests (macOS arm64, as CI runs them). UBSan with no recovery, so an out-of-bounds
 # read fails deterministically instead of depending on what is on the stack.
 TEST_SRC = $(filter-out src/main.c, $(SRC))

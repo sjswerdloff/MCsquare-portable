@@ -1,0 +1,67 @@
+# Windows x86-64 build of portable MCsquare with MinGW-w64 GCC (MSYS2 UCRT64), on the native Windows
+# runners (label `windows`: the HP and the Lenovo, SYSTEM, capacity 1 each).
+# MSYS2 is unpacked once per box into C:\mcsq-win\msys64 (self-extracting archive, no installer).
+# The .exe is linked statically (libgomp included), so it is run from PowerShell, outside MSYS2.
+
+name: CI Windows
+
+on:
+  push:
+    branches: [main, connor/windows-portable]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-smoke:
+    name: Build & smoke test (Windows x86-64, MinGW-w64 GCC)
+    runs-on: windows
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: MSYS2 + UCRT64 GCC (once per box)
+        shell: powershell
+        run: |
+          "$env:COMPUTERNAME  $((Get-CimInstance Win32_Processor).Name)"
+          $m = 'C:\mcsq-win\msys64'
+          New-Item -ItemType Directory -Force C:\mcsq-win | Out-Null
+          if (-not (Test-Path "$m\usr\bin\bash.exe")) {
+            curl.exe -fsSL -o C:\mcsq-win\msys2.sfx.exe https://repo.msys2.org/distrib/msys2-x86_64-latest.sfx.exe
+            if ($LASTEXITCODE) { throw "MSYS2 download failed" }
+            & C:\mcsq-win\msys2.sfx.exe -y -oC:\mcsq-win\ | Out-Null
+            if (-not (Test-Path "$m\usr\bin\bash.exe")) { throw "MSYS2 did not unpack" }
+          }
+          if (-not (Test-Path "$m\ucrt64\bin\gcc.exe")) {
+            $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
+            # First run initialises the keyring; a core update can end the shell, so update twice.
+            & "$m\usr\bin\bash.exe" -lc 'pacman -Syuu --noconfirm' 2>&1 | Select-Object -Last 5
+            & "$m\usr\bin\bash.exe" -lc 'pacman -Syuu --noconfirm' 2>&1 | Select-Object -Last 5
+            & "$m\usr\bin\bash.exe" -lc 'pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-gcc make' 2>&1 | Select-Object -Last 5
+            if (-not (Test-Path "$m\ucrt64\bin\gcc.exe")) { throw "UCRT64 gcc not installed" }
+          }
+
+      - name: Build MCsquare_win_portable.exe
+        shell: powershell
+        run: |
+          $m = 'C:\mcsq-win\msys64'
+          $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
+          & "$m\usr\bin\bash.exe" -lc 'git config --global --add safe.directory "*"; gcc --version | head -1; make MCsquare_win_portable' 2>&1 | ForEach-Object { "$_" }
+          if ($LASTEXITCODE) { throw "build failed" }
+          if (-not (Test-Path MCsquare_win_portable.exe)) { throw "no exe" }
+          "DLLs the exe imports (expect only Windows system DLLs):"
+          & "$m\usr\bin\bash.exe" -lc 'objdump -p MCsquare_win_portable.exe | grep "DLL Name"' 2>&1 | ForEach-Object { "$_" }
+
+      - name: Smoke test (1000 primaries), run natively
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force smoke_test_output | Out-Null
+          & .\MCsquare_win_portable.exe Sample_input_data\smoke_test_config.txt *> smoke.log
+          $rc = $LASTEXITCODE
+          Get-Content smoke.log -Tail 8
+          if ($rc -ne 0) { throw "MCsquare exited $rc" }
+          if (-not (Test-Path smoke_test_output\Dose.mhd)) { throw "no Dose.mhd" }
+          Get-ChildItem smoke_test_output | ForEach-Object { "$($_.Length)`t$($_.Name)" }
+          "Smoke test passed - Dose.mhd created"
