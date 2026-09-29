@@ -18,7 +18,7 @@ if (Test-Path $m) {
   $installed = if (Test-Path $marker) { (Get-Content $marker -Raw).Trim() } else { '' }
   if ($installed -ne $want) { throw "$m exists but was not unpacked from the pinned installer (marker '$installed'): not touching it; ask sjswerdloff" }
 } else {
-  $stage = "C:\mcsq-win\msys2-stage-$ver"
+  $stage = "C:\mcsq-win\msys2-stage-$ver-$env:GITHUB_RUN_ID-$PID"   # unique: a cancelled run's leftover never blocks
   $sfx = "C:\mcsq-win\msys2-base-x86_64-$ver.sfx.exe"
   if (-not (Test-Path $sfx)) {
     curl.exe -fsSL -o $sfx "https://repo.msys2.org/distrib/x86_64/msys2-base-x86_64-$ver.sfx.exe"
@@ -26,13 +26,14 @@ if (Test-Path $m) {
   }
   $got = (Get-FileHash $sfx -Algorithm SHA256).Hash.ToLower()
   if ($got -ne $want) { throw "MSYS2 installer sha256 $got, expected ${want}: not run (file left at $sfx for inspection)" }
-  if (Test-Path $stage) { throw "staging dir $stage already exists from an interrupted run: not touching it; ask sjswerdloff" }
   # The archive unpacks to <dir>\msys64; unpack into a fresh staging dir and move that into place.
-  & $sfx -y "-o$stage\" | Out-Null
+  & $sfx -y "-o$stage" | Out-Null
   if (-not (Test-Path "$stage\msys64\usr\bin\bash.exe")) { throw "MSYS2 did not unpack" }
+  # Marker first, then one rename: the tree and its marker appear at $m together, so a cancelled job
+  # (a push cancels in-flight runs) can leave only a staging dir, never an unmarked tree at $m.
+  Set-Content -NoNewline "$stage\msys64\.installed-from-sha256" $want
   Move-Item "$stage\msys64" $m
   Remove-Item $stage   # the now-empty staging dir this script created
-  Set-Content -NoNewline $marker $want
 }
 
 $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
