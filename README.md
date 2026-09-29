@@ -6,7 +6,7 @@ runs natively on Apple Silicon.
 
 **No Intel software is needed or used.** The Intel compiler and Intel MKL that upstream requires are not
 used here: MKL's random number generator is replaced by PCG, and the MKL vector helpers by standard C.
-Any C compiler with OpenMP builds the code.
+The code builds with Apple clang (with Homebrew `libomp`) and with GNU GCC, as described below.
 
 ## Platforms
 
@@ -55,14 +55,16 @@ make MCsquare_portable
 ## Run
 
 Run the binary directly with a configuration file. Upstream's `MCsquare` launcher script selects the
-Intel builds and is not used here.
+Intel builds and is not used here. The binary is `MCsquare_arm64` on Apple Silicon and
+`MCsquare_portable` on Linux:
 
 ```
-./MCsquare_arm64 Sample_input_data/config.txt
+./MCsquare_arm64 Sample_input_data/config.txt       # Apple Silicon
+./MCsquare_portable Sample_input_data/config.txt    # Linux
 ```
 
 Materials are read from `./Materials` if present, otherwise from the directory in the environment
-variable `MCsquare_Materials_Dir`. A quick check with 1000 primaries:
+variable `MCsquare_Materials_Dir`. A quick check with 1000 primaries (use `./MCsquare_portable` on Linux):
 
 ```
 mkdir -p smoke_test_output
