@@ -11,6 +11,7 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 
 
 #include "include/compute_nuclear_interaction.h"
+#include <assert.h>
 
 void proton_proton_cross_section(Hadron *hadron, VAR_COMPUTE *v_density, VAR_COMPUTE *v_result){
 
@@ -442,8 +443,9 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_proton(int hadron_index, Hadron *hadron, H
   // Echantillonage de l'angle theta d'émission de la particule secondaire
   rnd = single_rand_uniform(RNG_Stream) * dd_cross_section[12];
   int angle_index = Binary_Search(rnd, dd_cross_section, 13)+1;
-  if(angle_index < 0) angle_index = 0;
-  else if(angle_index > 12) angle_index = 12;
+  // Fail fast (issue #24): with a proper cumulative, Binary_Search + 1 is always in [0, 12]. An index
+  // outside it means the angular table is broken; clamping it to a valid angle hid exactly that.
+  assert(angle_index >= 0 && angle_index <= 12);
 
   static const double ICRU_angles[13] = { 0, 10, 20, 30, 40, 50, 60, 70, 90, 110, 130, 150, 180 };
 
@@ -567,8 +569,9 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_deuteron(int hadron_index, Hadron *hadron,
   // Echantillonage de l'angle theta d'émission de la particule secondaire
   rnd = single_rand_uniform(RNG_Stream) * dd_cross_section[12];
   int angle_index = Binary_Search(rnd, dd_cross_section, 13)+1;
-  if(angle_index < 0) angle_index = 0;
-  else if(angle_index > 12) angle_index = 12;
+  // Fail fast (issue #24): with a proper cumulative, Binary_Search + 1 is always in [0, 12]. An index
+  // outside it means the angular table is broken; clamping it to a valid angle hid exactly that.
+  assert(angle_index >= 0 && angle_index <= 12);
 
   static const double ICRU_angles[13] = { 0, 10, 20, 30, 40, 50, 60, 70, 90, 110, 130, 150, 180 };
 
@@ -691,8 +694,9 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_alpha(int hadron_index, Hadron *hadron, Ha
   // Echantillonage de l'angle theta d'émission de la particule secondaire
   rnd = single_rand_uniform(RNG_Stream) * dd_cross_section[12];
   int angle_index = Binary_Search(rnd, dd_cross_section, 13)+1;
-  if(angle_index < 0) angle_index = 0;
-  else if(angle_index > 12) angle_index = 12;
+  // Fail fast (issue #24): with a proper cumulative, Binary_Search + 1 is always in [0, 12]. An index
+  // outside it means the angular table is broken; clamping it to a valid angle hid exactly that.
+  assert(angle_index >= 0 && angle_index <= 12);
 
   static const double ICRU_angles[13] = { 0, 10, 20, 30, 40, 50, 60, 70, 90, 110, 130, 150, 180 };
 

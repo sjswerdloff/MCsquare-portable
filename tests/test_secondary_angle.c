@@ -13,6 +13,10 @@
  * row 1, which made the old cumulative negative, so the old code sent every sample past the table
  * and emitted it at 165-180 degrees.
  *
+ * The last check (issue #24): an out-of-range angle index must abort, not be clamped to an angle. A
+ * forked child is given a table whose cumulative decreases, which drives the index to 13 even with the
+ * fix; the test passes only if the child dies of SIGABRT.
+ *
  * Built by `make test_angle`.
  */
 #include "include/define.h"
@@ -21,6 +25,9 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 enum { ROWS = 3, NSAMPLES = 2000 };
 
@@ -109,11 +116,39 @@ int main(void) {
   config.Simulate_Secondary_Deuterons = 1;
   config.Simulate_Secondary_Alphas = 1;
 
+  // A broken table: negative weights, so the cumulative decreases and angle_index reaches 13.
+  static VAR_DATA dd_bad[ROWS * 13];
+  memset(dd_bad, 0, sizeof dd_bad);
+  for (int k = 3; k <= 12; k++) { dd_bad[13 * 1 + k] = -4.0f; dd_bad[13 * 2 + k] = -1.0f; }
+
   int failures = 0;
   failures += check("proton", Compute_Nuclear_Inelastic_proton, Proton, 25.0, 65.0, &material, &config);
   failures += check("deuteron", Compute_Nuclear_Inelastic_deuteron, Deuteron, 80.0, 120.0, &material, &config);
   failures += check("alpha", Compute_Nuclear_Inelastic_alpha, Alpha, 5.0, 15.0, &material, &config);
+  fflush(stdout);
+  pid_t pid = fork();
+  if (pid == 0) {
+    for (int b = 0; b < 2; b++) blocks[b].P_DD_Cross_section = dd_bad;
+    Hadron_buffer out[1];
+    int nsec;
+    static Hadron h;
+    memset(&h, 0, sizeof h);
+    h.v_T[0] = 105.0f * UMeV; h.v_M[0] = 1.0f; h.v_w[0] = 1.0f;
+    pcg32_random_t r;
+    pcg32_srandom_r(&r, 1u, 0u);
+    for (int n = 0; n < NSAMPLES; n++) { nsec = 0; Compute_Nuclear_Inelastic_proton(0, &h, out, &nsec, &material, 0, &r, &config); }
+    _exit(0);  // reached only if no sample ever produced an out-of-range index
+  }
+  int status = 0;
+  waitpid(pid, &status, 0);
+  if (WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT) {
+    printf("broken table: out-of-range angle index aborts (SIGABRT), as required\n");
+  } else {
+    printf("FAIL broken table: expected SIGABRT, got %s %d\n", WIFSIGNALED(status) ? "signal" : "exit",
+           WIFSIGNALED(status) ? WTERMSIG(status) : WEXITSTATUS(status));
+    failures++;
+  }
   if (failures) return 1;
-  printf("PASS: secondary emission angles follow each species' angular table\n");
+  printf("PASS: secondary emission angles follow each species' angular table; out-of-range index aborts\n");
   return 0;
 }
