@@ -11,7 +11,8 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 
 
 #include "include/compute_nuclear_interaction.h"
-#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 void proton_proton_cross_section(Hadron *hadron, VAR_COMPUTE *v_density, VAR_COMPUTE *v_result){
 
@@ -445,7 +446,11 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_proton(int hadron_index, Hadron *hadron, H
   int angle_index = Binary_Search(rnd, dd_cross_section, 13)+1;
   // Fail fast (issue #24): with a proper cumulative, Binary_Search + 1 is always in [0, 12]. An index
   // outside it means the angular table is broken; clamping it to a valid angle hid exactly that.
-  assert(angle_index >= 0 && angle_index <= 12);
+  // An explicit check, not assert(): it must survive -DNDEBUG, or ICRU_angles is read out of bounds.
+  if(angle_index < 0 || angle_index > 12){
+    fprintf(stderr, "FATAL %s: angle_index %d outside [0, 12] (cumulative %g): broken angular table\n", __func__, angle_index, (double)dd_cross_section[12]);
+    abort();
+  }
 
   static const double ICRU_angles[13] = { 0, 10, 20, 30, 40, 50, 60, 70, 90, 110, 130, 150, 180 };
 
@@ -571,7 +576,11 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_deuteron(int hadron_index, Hadron *hadron,
   int angle_index = Binary_Search(rnd, dd_cross_section, 13)+1;
   // Fail fast (issue #24): with a proper cumulative, Binary_Search + 1 is always in [0, 12]. An index
   // outside it means the angular table is broken; clamping it to a valid angle hid exactly that.
-  assert(angle_index >= 0 && angle_index <= 12);
+  // An explicit check, not assert(): it must survive -DNDEBUG, or ICRU_angles is read out of bounds.
+  if(angle_index < 0 || angle_index > 12){
+    fprintf(stderr, "FATAL %s: angle_index %d outside [0, 12] (cumulative %g): broken angular table\n", __func__, angle_index, (double)dd_cross_section[12]);
+    abort();
+  }
 
   static const double ICRU_angles[13] = { 0, 10, 20, 30, 40, 50, 60, 70, 90, 110, 130, 150, 180 };
 
@@ -696,7 +705,11 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_alpha(int hadron_index, Hadron *hadron, Ha
   int angle_index = Binary_Search(rnd, dd_cross_section, 13)+1;
   // Fail fast (issue #24): with a proper cumulative, Binary_Search + 1 is always in [0, 12]. An index
   // outside it means the angular table is broken; clamping it to a valid angle hid exactly that.
-  assert(angle_index >= 0 && angle_index <= 12);
+  // An explicit check, not assert(): it must survive -DNDEBUG, or ICRU_angles is read out of bounds.
+  if(angle_index < 0 || angle_index > 12){
+    fprintf(stderr, "FATAL %s: angle_index %d outside [0, 12] (cumulative %g): broken angular table\n", __func__, angle_index, (double)dd_cross_section[12]);
+    abort();
+  }
 
   static const double ICRU_angles[13] = { 0, 10, 20, 30, 40, 50, 60, 70, 90, 110, 130, 150, 180 };
 
