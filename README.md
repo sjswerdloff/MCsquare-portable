@@ -84,7 +84,7 @@ Apart from portability, this fork fixes defects found while porting. Each is rec
 - **Secondary emission angles (#16).** Upstream interpolates the angular table of nuclear-inelastic
   secondaries at an energy in eV between brackets in MeV, so the sampled angles do not follow the
   ICRU data. It reads past the end of the angle table for about one sample in four. The measured
-  effect is that dose just outside a large field is underestimated. The fix has been reported upstream.
+  effect is that dose just outside a large field is underestimated. Not yet reported upstream.
 - **Out-of-range emission angle (#24).** An angle index outside the table now aborts with a message
   instead of producing an angle.
 - Other upstream defects fixed:
@@ -92,8 +92,8 @@ Apart from portability, this fork fixes defects found while porting. Each is rec
   - #8: a ray that misses the CT read uninitialised data in `Transport_to_CT`.
   - #12: temporary folders were removed through `system()` with a path from the configuration; they are
     now removed without a shell.
-  - #20: an inner loop in `CT_Transport_SPR` reused the outer lane index. That code is not compiled in
-    default builds.
+  - #20: an inner loop in `CT_Transport_SPR` reused the outer lane index. That code is not reached in
+    default builds, because `define.h` sets `InterfaceCrossing` to `VoxelInterface`.
 
 The physics of the corrected sampling has not yet been validated against measurement or a TOPAS/Geant4
 reference.
