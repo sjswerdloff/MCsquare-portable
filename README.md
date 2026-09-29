@@ -15,7 +15,7 @@ The code builds with Apple clang (with Homebrew `libomp`) and with GNU GCC, as d
 | **macOS on Apple Silicon (arm64)** | Apple clang + Homebrew `libomp` | Primary target; built and tested in CI on every pull request |
 | macOS on Apple Silicon (arm64) | Homebrew GCC (`gcc-15`) | Builds and runs the smoke test; not run in CI |
 | Linux x86-64 | GCC with OpenMP | Builds and runs (benchmarked on Ubuntu 24.04); not run in CI |
-| Windows | — | Not supported by the portable build. Upstream's own `Makefile.bat` needs Intel's compiler |
+| Windows x86-64 | MinGW-w64 GCC (MSYS2 UCRT64) | Builds and runs the smoke test in CI on every pull request |
 
 ## Build on Apple Silicon
 
@@ -52,15 +52,30 @@ sudo apt install build-essential    # gcc with OpenMP
 make MCsquare_portable
 ```
 
+## Build on Windows (x86-64)
+
+Install [MSYS2](https://www.msys2.org), then in its **UCRT64** shell:
+
+```
+pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libgomp make
+make MCsquare_win_portable
+```
+
+This produces `MCsquare_win_portable.exe`. It uses GCC's OpenMP runtime, `libgomp-1.dll`, which MSYS2
+provides only as a DLL. So run it from the UCRT64 shell, add `C:\msys64\ucrt64\bin` to `PATH`, or copy
+the DLLs it needs from there next to the `.exe`. Microsoft's compiler (MSVC) is not supported: its C
+OpenMP support stops at version 2.0.
+
 ## Run
 
 Run the binary directly with a configuration file. Upstream's `MCsquare` launcher script selects the
-Intel builds and is not used here. The binary is `MCsquare_arm64` on Apple Silicon and
-`MCsquare_portable` on Linux:
+Intel builds and is not used here. The binary is `MCsquare_arm64` on Apple Silicon,
+`MCsquare_portable` on Linux and `MCsquare_win_portable.exe` on Windows:
 
 ```
 ./MCsquare_arm64 Sample_input_data/config.txt       # Apple Silicon
 ./MCsquare_portable Sample_input_data/config.txt    # Linux
+MCsquare_win_portable.exe Sample_input_data\config.txt   # Windows
 ```
 
 Materials are read from `./Materials` if present, otherwise from the directory in the environment
