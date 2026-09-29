@@ -51,11 +51,14 @@ jobs:
           if (-not (Test-Path test_remove_temporary_folders_win.exe)) { throw "test build failed" }
           $env:PATH = "$m\ucrt64\bin;$env:PATH"
           $root = "$PWD\rmtest_$env:GITHUB_RUN_ID"   # must not exist; the test refuses an existing root
+          $preexisting = Test-Path $root
           & .\test_remove_temporary_folders_win.exe $root *> rmtest.log
           $rc = $LASTEXITCODE
           Get-Content rmtest.log
           $warned = Select-String -Path rmtest.log -Pattern 'unable to remove temporary folder .*bad<' -Quiet
-          if (Test-Path $root) { Remove-Item -Recurse -Force $root }   # the test created it; only keep\ is left
+          # Clean up only a root this invocation created: absent before the run AND carrying the test's marker.
+          if (-not $preexisting -and (Test-Path "$root\.created-by-test_remove_temporary_folders_win")) { Remove-Item -Recurse -Force $root }
+          elseif (Test-Path $root) { "left $root in place: not provably created by this run" }
           if ($rc -ne 0) { throw "test failed ($rc)" }
           if (-not $warned) { throw "no warning for the invalid-name (non-missing) error" }
 

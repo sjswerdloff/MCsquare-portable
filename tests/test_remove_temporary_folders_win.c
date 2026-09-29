@@ -32,6 +32,8 @@ int main(int argc, char **argv) {
   char p[1024], q[1024];
   if (exists(root)) { printf("test root %s already exists: refusing to use it\n", root); return 2; }
   if (!CreateDirectoryA(root, NULL)) { printf("cannot create %s\n", root); return 2; }
+  // Proof for the workflow that THIS invocation created the root, so only then may it clean up.
+  snprintf(p, sizeof p, "%s\\.created-by-test_remove_temporary_folders_win", root); write_file(p);
 
   snprintf(p, sizeof p, "%s\\keep", root); CreateDirectoryA(p, NULL);
   snprintf(p, sizeof p, "%s\\keep\\sentinel.txt", root); write_file(p);
