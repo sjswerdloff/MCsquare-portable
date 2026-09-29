@@ -50,7 +50,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Continue'
           $env:MSYSTEM = 'UCRT64'
-          & C:\mcsq-win\msys64\usr\bin\bash.exe -lc 'pacman -Q | grep -i -E "gcc|omp"; echo ---; pacman -Ss "gomp|openmp" | grep -i ucrt; echo ---; find /ucrt64 -iname "*gomp*" | head; echo ---; gcc -print-search-dirs | head -3' 2>&1 | ForEach-Object { "$_" }
+          & C:\mcsq-win\msys64\usr\bin\bash.exe -lc 'pacman -Fy >/dev/null 2>&1; pacman -F libgomp.dll.a; pacman -F libgomp-1.dll; pacman -F libgomp.a; pacman -Ss gomp' 2>&1 | ForEach-Object { "$_" }
 
       - name: Build MCsquare_win_portable.exe
         shell: powershell
