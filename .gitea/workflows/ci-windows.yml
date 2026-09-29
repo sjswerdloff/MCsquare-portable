@@ -1,6 +1,9 @@
 # Windows x86-64 build of portable MCsquare with MinGW-w64 GCC (MSYS2 UCRT64), on the native Windows
 # runners (label `windows`: the HP and the Lenovo, SYSTEM, capacity 1 each).
-# MSYS2 is unpacked once per box into C:\mcsq-win\msys64 (self-extracting archive, no installer).
+# MSYS2 is unpacked once per box into C:\mcsq-win\msys64 from a PINNED, SHA-256-verified dated release
+# (the digest GitHub publishes for the msys2-installer release matched the repo.msys2.org file).
+# An existing tree is trusted only if the installer it came from has that digest; otherwise it is
+# wiped and reinstalled. pacman verifies package signatures itself.
 # The .exe links libgomp dynamically (MSYS2 has no static libgomp); the smoke test runs it from
 # PowerShell with only ucrt64\bin added to PATH.
 
@@ -19,7 +22,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -29,13 +32,31 @@ jobs:
           $ErrorActionPreference = 'Continue'  # native stderr is not an error; results are checked explicitly
           "$env:COMPUTERNAME  $((Get-CimInstance Win32_Processor).Name)"
           $m = 'C:\mcsq-win\msys64'
+          $ver = '20260927'
+          $want = 'ad336cccfda47758b5e15cda993fbba421115cb0b126697daef1ee4dfe37209f'
+          $sfx = "C:\mcsq-win\msys2-base-x86_64-$ver.sfx.exe"
           New-Item -ItemType Directory -Force C:\mcsq-win | Out-Null
-          if (-not (Test-Path "$m\usr\bin\bash.exe")) {
-            curl.exe -fsSL -o C:\mcsq-win\msys2.sfx.exe https://repo.msys2.org/distrib/msys2-x86_64-latest.sfx.exe
-            if ($LASTEXITCODE) { throw "MSYS2 download failed" }
-            & C:\mcsq-win\msys2.sfx.exe -y -oC:\mcsq-win\ | Out-Null
-            if (-not (Test-Path "$m\usr\bin\bash.exe")) { throw "MSYS2 did not unpack" }
+          # Earlier runs unpacked an unverified "latest" installer. Keep that tree only if its installer
+          # hashes to the pinned digest; otherwise remove it and start again from a verified download.
+          $marker = "$m\.installed-from-sha256"
+          $installed = if (Test-Path $marker) { (Get-Content $marker -Raw).Trim() } else { '' }
+          if ($installed -ne $want -and (Test-Path "$m\usr\bin\bash.exe")) {
+            $old = 'C:\mcsq-win\msys2.sfx.exe'
+            $oldsha = if (Test-Path $old) { (Get-FileHash $old -Algorithm SHA256).Hash.ToLower() } else { 'none' }
+            if ($oldsha -eq $want) { "existing tree came from the pinned installer: kept"; Set-Content -NoNewline $marker $want; $installed = $want }
+            else { "existing tree came from installer sha256 $oldsha, not the pinned one: removing it"; Remove-Item -Recurse -Force $m }
           }
+          if (-not (Test-Path "$m\usr\bin\bash.exe")) {
+            curl.exe -fsSL -o $sfx "https://repo.msys2.org/distrib/x86_64/msys2-base-x86_64-$ver.sfx.exe"
+            if ($LASTEXITCODE) { throw "MSYS2 download failed" }
+            $got = (Get-FileHash $sfx -Algorithm SHA256).Hash.ToLower()
+            if ($got -ne $want) { Remove-Item -Force $sfx; throw "MSYS2 installer sha256 $got, expected ${want}: not run" }
+            & $sfx -y -oC:\mcsq-win\ | Out-Null
+            if (-not (Test-Path "$m\usr\bin\bash.exe")) { throw "MSYS2 did not unpack" }
+            Set-Content -NoNewline $marker $want
+          }
+          # Undo any safe.directory=* an earlier version of this workflow may have set in MSYS2's git.
+          & "$m\usr\bin\bash.exe" -lc 'command -v git >/dev/null && git config --global --unset-all safe.directory "^[*]$" ; true' 2>&1 | Out-Null
           if (-not (Test-Path "$m\ucrt64\bin\gcc.exe")) {
             $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
             # First run initialises the keyring; a core update can end the shell, so update twice.
@@ -57,7 +78,7 @@ jobs:
           $ErrorActionPreference = 'Continue'  # native stderr is not an error; results are checked explicitly
           $m = 'C:\mcsq-win\msys64'
           $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
-          & "$m\usr\bin\bash.exe" -lc 'git config --global --add safe.directory "*"; gcc --version | head -1; make MCsquare_win_portable' 2>&1 | ForEach-Object { "$_" }
+          & "$m\usr\bin\bash.exe" -lc 'gcc --version | head -1; make MCsquare_win_portable' 2>&1 | ForEach-Object { "$_" }
           if ($LASTEXITCODE) { throw "build failed" }
           if (-not (Test-Path MCsquare_win_portable.exe)) { throw "no exe" }
           "DLLs the exe imports:"
