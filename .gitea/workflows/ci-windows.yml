@@ -1,7 +1,8 @@
 # Windows x86-64 build of portable MCsquare with MinGW-w64 GCC (MSYS2 UCRT64), on the native Windows
 # runners (label `windows`: the HP and the Lenovo, SYSTEM, capacity 1 each).
 # MSYS2 is unpacked once per box into C:\mcsq-win\msys64 (self-extracting archive, no installer).
-# The .exe is linked statically (libgomp included), so it is run from PowerShell, outside MSYS2.
+# The .exe links libgomp dynamically (MSYS2 has no static libgomp); the smoke test runs it from
+# PowerShell with only ucrt64\bin added to PATH.
 
 name: CI Windows
 
@@ -53,13 +54,14 @@ jobs:
           & "$m\usr\bin\bash.exe" -lc 'git config --global --add safe.directory "*"; gcc --version | head -1; make MCsquare_win_portable' 2>&1 | ForEach-Object { "$_" }
           if ($LASTEXITCODE) { throw "build failed" }
           if (-not (Test-Path MCsquare_win_portable.exe)) { throw "no exe" }
-          "DLLs the exe imports (expect only Windows system DLLs):"
+          "DLLs the exe imports:"
           & "$m\usr\bin\bash.exe" -lc 'objdump -p MCsquare_win_portable.exe | grep "DLL Name"' 2>&1 | ForEach-Object { "$_" }
 
       - name: Smoke test (1000 primaries), run natively
         shell: powershell
         run: |
           $ErrorActionPreference = 'Continue'  # native stderr is not an error; results are checked explicitly
+          $env:PATH = "C:\mcsq-win\msys64\ucrt64\bin;$env:PATH"
           New-Item -ItemType Directory -Force smoke_test_output | Out-Null
           & .\MCsquare_win_portable.exe Sample_input_data\smoke_test_config.txt *> smoke.log
           $rc = $LASTEXITCODE

@@ -74,10 +74,11 @@ MCsquare_arm64 : $(SRC)
 
 # Windows x86-64 with MinGW-w64 GCC (MSYS2 UCRT64 shell): make MCsquare_win_portable
 # Uses its own source list: on Windows COMSPEC is set, so $(SRC) above is the Intel `src\*.c` form.
-# -static links libgomp and the C runtime in, so the .exe runs outside MSYS2.
+# MSYS2 ships no static libgomp, so the .exe needs libgomp-1.dll and its companions from ucrt64\bin
+# at run time: run it in the UCRT64 shell, put ucrt64\bin on PATH, or copy those DLLs next to it.
 WIN_SRC = $(wildcard src/*.c)
 MCsquare_win_portable : $(WIN_SRC)
-	gcc $(WIN_SRC) -fopenmp -lm -O3 -static $(FULL_VERSION) -o MCsquare_win_portable.exe
+	gcc $(WIN_SRC) -fopenmp -lm -O3 $(FULL_VERSION) -o MCsquare_win_portable.exe
 
 # C regression tests (macOS arm64, as CI runs them). UBSan with no recovery, so an out-of-bounds
 # read fails deterministically instead of depending on what is on the stack.
