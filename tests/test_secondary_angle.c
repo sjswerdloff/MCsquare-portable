@@ -13,6 +13,11 @@
  * row 1, which made the old cumulative negative, so the old code sent every sample past the table
  * and emitted it at 165-180 degrees.
  *
+ * The last checks (issue #24): an out-of-range angle index must abort, not be clamped to an angle. For
+ * each species a forked child is given a table whose cumulative decreases, which drives the index to 13
+ * even with the fix; the test passes only if the child dies of SIGABRT with the range guard's own
+ * "FATAL <function>: angle_index 13" line on stderr.
+ *
  * Built by `make test_angle`.
  */
 #include "include/define.h"
@@ -21,6 +26,9 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 enum { ROWS = 3, NSAMPLES = 2000 };
 
@@ -72,6 +80,57 @@ static int check(const char *name, inelastic_fn fn, int expected_type, double lo
   return 0;
 }
 
+// Run fn on a broken angular table in a forked child. Passes only if the child dies of SIGABRT AND its
+// stderr carries the range guard's own diagnostic, "FATAL <function>: angle_index 13", so an abort from
+// anywhere else does not count.
+static int expect_abort(const char *name, inelastic_fn fn, int species, DATA_Nuclear_Inelastic *blocks,
+                        VAR_DATA *dd_bad, Materials *material, DATA_config *config) {
+  int fds[2];
+  if (pipe(fds) != 0) { perror("pipe"); return 1; }
+  fflush(stdout);
+  pid_t pid = fork();
+  if (pid == 0) {
+    close(fds[0]);
+    dup2(fds[1], STDERR_FILENO);
+    for (int b = 0; b < 2; b++) {
+      if (species == 0) blocks[b].P_DD_Cross_section = dd_bad;
+      if (species == 1) blocks[b].D_DD_Cross_section = dd_bad;
+      if (species == 2) blocks[b].A_DD_Cross_section = dd_bad;
+    }
+    Hadron_buffer out[1];
+    int nsec;
+    static Hadron h;
+    memset(&h, 0, sizeof h);
+    h.v_T[0] = 105.0f * UMeV; h.v_M[0] = 1.0f; h.v_w[0] = 1.0f;
+    pcg32_random_t r;
+    pcg32_srandom_r(&r, 1u, 0u);
+    for (int n = 0; n < NSAMPLES; n++) { nsec = 0; fn(0, &h, out, &nsec, material, 0, &r, config); }
+    _exit(0);  // reached only if no sample ever produced an out-of-range index
+  }
+  close(fds[1]);
+  char err[4096] = {0};
+  size_t len = 0;
+  ssize_t got;
+  while (len < sizeof err - 1 && (got = read(fds[0], err + len, sizeof err - 1 - len)) > 0) len += (size_t)got;
+  close(fds[0]);
+  int status = 0;
+  waitpid(pid, &status, 0);
+
+  const char *fname = species == 0 ? "Compute_Nuclear_Inelastic_proton"
+                    : species == 1 ? "Compute_Nuclear_Inelastic_deuteron" : "Compute_Nuclear_Inelastic_alpha";
+  char want[128];
+  snprintf(want, sizeof want, "FATAL %s: angle_index 13", fname);
+  int aborted = WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT;
+  if (aborted && strstr(err, want)) {
+    printf("broken table (%s): aborts at the range guard (SIGABRT, \"%s\")\n", name, want);
+    return 0;
+  }
+  printf("FAIL broken table (%s): expected SIGABRT with \"%s\", got %s %d, stderr: %s\n", name, want,
+         WIFSIGNALED(status) ? "signal" : "exit", WIFSIGNALED(status) ? WTERMSIG(status) : WEXITSTATUS(status),
+         err[0] ? err : "(empty)");
+  return 1;
+}
+
 int main(void) {
   fill(dd_p, 3, 6);  // 30, 40, 50, 60 deg
   fill(dd_d, 8, 9);  // 90, 110 deg
@@ -109,11 +168,19 @@ int main(void) {
   config.Simulate_Secondary_Deuterons = 1;
   config.Simulate_Secondary_Alphas = 1;
 
+  // A broken table: negative weights, so the cumulative decreases and angle_index reaches 13.
+  static VAR_DATA dd_bad[ROWS * 13];
+  memset(dd_bad, 0, sizeof dd_bad);
+  for (int k = 3; k <= 12; k++) { dd_bad[13 * 1 + k] = -4.0f; dd_bad[13 * 2 + k] = -1.0f; }
+
   int failures = 0;
   failures += check("proton", Compute_Nuclear_Inelastic_proton, Proton, 25.0, 65.0, &material, &config);
   failures += check("deuteron", Compute_Nuclear_Inelastic_deuteron, Deuteron, 80.0, 120.0, &material, &config);
   failures += check("alpha", Compute_Nuclear_Inelastic_alpha, Alpha, 5.0, 15.0, &material, &config);
+  failures += expect_abort("proton", Compute_Nuclear_Inelastic_proton, 0, blocks, dd_bad, &material, &config);
+  failures += expect_abort("deuteron", Compute_Nuclear_Inelastic_deuteron, 1, blocks, dd_bad, &material, &config);
+  failures += expect_abort("alpha", Compute_Nuclear_Inelastic_alpha, 2, blocks, dd_bad, &material, &config);
   if (failures) return 1;
-  printf("PASS: secondary emission angles follow each species' angular table\n");
+  printf("PASS: secondary emission angles follow each species' angular table; out-of-range index aborts\n");
   return 0;
 }
