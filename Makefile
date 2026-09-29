@@ -80,6 +80,10 @@ WIN_SRC = $(wildcard src/*.c)
 MCsquare_win_portable : $(WIN_SRC)
 	gcc $(WIN_SRC) -fopenmp -lm -O3 $(FULL_VERSION) -o MCsquare_win_portable.exe
 
+# Windows regression test for the temporary-folder removal (#12, #28). CI runs it with a fresh root.
+test_remove_tmp_win : tests/test_remove_temporary_folders_win.c $(WIN_SRC)
+	gcc -Isrc tests/test_remove_temporary_folders_win.c $(filter-out src/main.c, $(WIN_SRC)) -fopenmp -lm -O1 -DVERSION='"test"' -o test_remove_temporary_folders_win.exe
+
 # C regression tests (macOS arm64, as CI runs them). UBSan with no recovery, so an out-of-bounds
 # read fails deterministically instead of depending on what is on the stack.
 TEST_SRC = $(filter-out src/main.c, $(SRC))

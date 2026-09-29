@@ -41,6 +41,24 @@ jobs:
           "DLLs the exe imports:"
           & "$m\usr\bin\bash.exe" -lc 'objdump -p MCsquare_win_portable.exe | grep "DLL Name"' 2>&1 | ForEach-Object { "$_" }
 
+      - name: Temporary-folder removal on Windows (#12, #28), in a test-created root
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $m = 'C:\mcsq-win\msys64-20260927'
+          $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
+          & "$m\usr\bin\bash.exe" -lc 'make test_remove_tmp_win' 2>&1 | Select-Object -Last 3
+          if (-not (Test-Path test_remove_temporary_folders_win.exe)) { throw "test build failed" }
+          $env:PATH = "$m\ucrt64\bin;$env:PATH"
+          $root = "$PWD\rmtest_$env:GITHUB_RUN_ID"   # must not exist; the test refuses an existing root
+          & .\test_remove_temporary_folders_win.exe $root *> rmtest.log
+          $rc = $LASTEXITCODE
+          Get-Content rmtest.log
+          $warned = Select-String -Path rmtest.log -Pattern 'unable to remove temporary folder .*bad<' -Quiet
+          if (Test-Path $root) { Remove-Item -Recurse -Force $root }   # the test created it; only keep\ is left
+          if ($rc -ne 0) { throw "test failed ($rc)" }
+          if (-not $warned) { throw "no warning for the invalid-name (non-missing) error" }
+
       - name: Smoke test (1000 primaries), run natively
         shell: powershell
         run: |

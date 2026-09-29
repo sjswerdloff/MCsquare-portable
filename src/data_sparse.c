@@ -651,7 +651,13 @@ int Remove_temporary_folders(char *InputPath, int NbrDirectories){
     }
 #ifdef _WIN32
     DWORD attr = GetFileAttributesA(path);
-    if(attr == INVALID_FILE_ATTRIBUTES) continue;  // already gone, as ENOENT below
+    if(attr == INVALID_FILE_ATTRIBUTES){
+      DWORD err = GetLastError();
+      // Only "not there" is silent, as ENOENT is below; any other failure is reported.
+      if(err != ERROR_FILE_NOT_FOUND && err != ERROR_PATH_NOT_FOUND)
+        printf("\nWarning: unable to remove temporary folder %s (error %lu) \n", path, (unsigned long)err);
+      continue;
+    }
     if(!(attr & FILE_ATTRIBUTE_DIRECTORY)){  // a plain file: removed, as nftw does
       if(!DeleteFileA(path)) printf("\nWarning: unable to remove temporary file %s \n", path);
       continue;

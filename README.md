@@ -75,7 +75,8 @@ Intel builds and is not used here. The binary is `MCsquare_arm64` on Apple Silic
 ```
 ./MCsquare_arm64 Sample_input_data/config.txt       # Apple Silicon
 ./MCsquare_portable Sample_input_data/config.txt    # Linux
-MCsquare_win_portable.exe Sample_input_data\config.txt   # Windows
+./MCsquare_win_portable.exe Sample_input_data/config.txt     # Windows, MSYS2 UCRT64 shell
+.\MCsquare_win_portable.exe Sample_input_data\config.txt     # Windows, PowerShell
 ```
 
 Materials are read from `./Materials` if present, otherwise from the directory in the environment
