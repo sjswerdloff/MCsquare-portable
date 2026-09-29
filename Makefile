@@ -89,6 +89,11 @@ test_material_labels : tests/test_update_material_labels.c $(TEST_SRC)
 	clang -Isrc tests/test_update_material_labels.c $(TEST_SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O1 -g -fsanitize=undefined -fno-sanitize-recover=all -DVERSION='"test"' -o test_update_material_labels
 	./test_update_material_labels
 
+# Regression test for issue #16: secondary emission angles are sampled from the angular table.
+test_angle : tests/test_secondary_angle.c $(TEST_SRC)
+	clang -Isrc tests/test_secondary_angle.c $(TEST_SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O1 -g -fsanitize=undefined -fno-sanitize-recover=all -DVERSION='"test"' -o test_secondary_angle
+	./test_secondary_angle
+
 
 
 clean:

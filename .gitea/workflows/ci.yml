@@ -42,6 +42,9 @@ jobs:
       - name: Every lane that changes material is relabelled (issue #20)
         run: make test_material_labels
 
+      - name: Secondary emission angles follow the angular table (issue #16)
+        run: make test_angle
+
       - name: Smoke test (1000 primaries)
         run: |
           mkdir -p smoke_test_output

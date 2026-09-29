@@ -379,6 +379,8 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_proton(int hadron_index, Hadron *hadron, H
 								material->Nuclear_Inelastic[index].P_Energy_list[secondary_index+1]);
   free(diff_cross_section);
 
+  // Angular table is interpolated at the sampled table energy (MeV), not the rescaled eV value (issue #16).
+  VAR_COMPUTE T_table = secondary_hadron[*Nbr_secondaries].T;
   // scaling de l'énergie
   secondary_hadron[*Nbr_secondaries].T = ((hadron->v_T[hadron_index]/UMeV) / material->Inelastic_Energy_List[index]) * UMeV * secondary_hadron[*Nbr_secondaries].T;
   if(secondary_hadron[*Nbr_secondaries].T < config->Ecut_Pro * UMeV) return secondary_hadron[*Nbr_secondaries].M * secondary_hadron[*Nbr_secondaries].T / hadron->v_M[hadron_index];  
@@ -423,14 +425,14 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_proton(int hadron_index, Hadron *hadron, H
 
   VAR_DATA dd_cross_section[13];
 
-  dd_cross_section[0] = (VAR_DATA)Linear_Interpolation(	secondary_hadron[*Nbr_secondaries].T, 
+  dd_cross_section[0] = (VAR_DATA)Linear_Interpolation(	T_table, 
 							material->Nuclear_Inelastic[index].P_Energy_list[secondary_index],
 							material->Nuclear_Inelastic[index].P_Energy_list[secondary_index+1], 
 							dd_cross_section1[0],
 							dd_cross_section2[0]);
 
   for(i=1; i<13; i++){
-    dd_cross_section[i] = dd_cross_section[i-1] + (VAR_DATA)Linear_Interpolation(	secondary_hadron[*Nbr_secondaries].T, 
+    dd_cross_section[i] = dd_cross_section[i-1] + (VAR_DATA)Linear_Interpolation(	T_table, 
 											material->Nuclear_Inelastic[index].P_Energy_list[secondary_index],
 											material->Nuclear_Inelastic[index].P_Energy_list[secondary_index+1], 
 											dd_cross_section1[i],
@@ -501,6 +503,8 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_deuteron(int hadron_index, Hadron *hadron,
 								material->Nuclear_Inelastic[index].D_Energy_list[secondary_index+1]);
   free(diff_cross_section);
 
+  // Angular table is interpolated at the sampled table energy (MeV), not the rescaled eV value (issue #16).
+  VAR_COMPUTE T_table = secondary_hadron[*Nbr_secondaries].T;
   // scaling de l'énergie
   secondary_hadron[*Nbr_secondaries].T = ((hadron->v_T[hadron_index]/UMeV) / material->Inelastic_Energy_List[index]) * UMeV * secondary_hadron[*Nbr_secondaries].T;
   if(secondary_hadron[*Nbr_secondaries].T < config->Ecut_Pro * UMeV) return secondary_hadron[*Nbr_secondaries].M * secondary_hadron[*Nbr_secondaries].T / hadron->v_M[hadron_index];
@@ -546,14 +550,14 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_deuteron(int hadron_index, Hadron *hadron,
 
   VAR_DATA dd_cross_section[13];
 
-  dd_cross_section[0] = (VAR_DATA)Linear_Interpolation(	secondary_hadron[*Nbr_secondaries].T, 
+  dd_cross_section[0] = (VAR_DATA)Linear_Interpolation(	T_table, 
 							material->Nuclear_Inelastic[index].D_Energy_list[secondary_index],
 							material->Nuclear_Inelastic[index].D_Energy_list[secondary_index+1], 
 							dd_cross_section1[0],
 							dd_cross_section2[0]);
 
   for(i=1; i<13; i++){
-    dd_cross_section[i] = dd_cross_section[i-1] + (VAR_DATA)Linear_Interpolation(	secondary_hadron[*Nbr_secondaries].T, 
+    dd_cross_section[i] = dd_cross_section[i-1] + (VAR_DATA)Linear_Interpolation(	T_table, 
 											material->Nuclear_Inelastic[index].D_Energy_list[secondary_index],
 											material->Nuclear_Inelastic[index].D_Energy_list[secondary_index+1], 
 											dd_cross_section1[i],
@@ -625,6 +629,8 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_alpha(int hadron_index, Hadron *hadron, Ha
 								material->Nuclear_Inelastic[index].A_Energy_list[secondary_index+1]);
   free(diff_cross_section);
 
+  // Angular table is interpolated at the sampled table energy (MeV), not the rescaled eV value (issue #16).
+  VAR_COMPUTE T_table = secondary_hadron[*Nbr_secondaries].T;
   // scaling de l'énergie
   secondary_hadron[*Nbr_secondaries].T = ((hadron->v_T[hadron_index]/UMeV) / material->Inelastic_Energy_List[index]) * UMeV * secondary_hadron[*Nbr_secondaries].T;
   if(secondary_hadron[*Nbr_secondaries].T < config->Ecut_Pro * UMeV) return secondary_hadron[*Nbr_secondaries].M * secondary_hadron[*Nbr_secondaries].T / hadron->v_M[hadron_index];
@@ -668,14 +674,14 @@ VAR_COMPUTE Compute_Nuclear_Inelastic_alpha(int hadron_index, Hadron *hadron, Ha
 
   VAR_DATA dd_cross_section[13];
 
-  dd_cross_section[0] = (VAR_DATA)Linear_Interpolation(	secondary_hadron[*Nbr_secondaries].T, 
+  dd_cross_section[0] = (VAR_DATA)Linear_Interpolation(	T_table, 
 							material->Nuclear_Inelastic[index].A_Energy_list[secondary_index],
 							material->Nuclear_Inelastic[index].A_Energy_list[secondary_index+1], 
 							dd_cross_section1[0],
 							dd_cross_section2[0]);
 
   for(i=1; i<13; i++){
-    dd_cross_section[i] = dd_cross_section[i-1] + (VAR_DATA)Linear_Interpolation(	secondary_hadron[*Nbr_secondaries].T, 
+    dd_cross_section[i] = dd_cross_section[i-1] + (VAR_DATA)Linear_Interpolation(	T_table, 
 											material->Nuclear_Inelastic[index].A_Energy_list[secondary_index],
 											material->Nuclear_Inelastic[index].A_Energy_list[secondary_index+1], 
 											dd_cross_section1[i],
