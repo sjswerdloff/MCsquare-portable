@@ -1,8 +1,10 @@
 # Does the Windows build give the same dose as the Linux build? Portable MCsquare at this commit,
 # built with GCC on each (Linux: make MCsquare_portable; Windows: make MCsquare_win_portable in
 # MSYS2 UCRT64), runs the field-edge case (200 MeV, 15 x 15 cm, 300 mm water cube, 3 threads, two seeds).
-# The analysis script compares "before" with "after", so Linux is labelled "before" and Windows "after":
-# its difference column reads Windows minus Linux, beside each platform's seed-to-seed noise.
+# Each job prints its own profile table (field_edge_profile.py: CAX dose and lateral % of CAX, per seed
+# and mean); the two tables are compared by hand. Dose files are not moved between jobs because artifact
+# upload on this Gitea is refused (it advertises an upload URL on port 80). Linux runs are labelled
+# "before" and Windows "after" only to keep their output directories apart.
 
 name: Windows vs Linux field-edge (portable)
 
@@ -38,10 +40,8 @@ jobs:
             start=$(date +%s); ./MCsquare_portable cfg_$s.txt > log_$s.txt 2>&1 || { tail -20 log_$s.txt; exit 1; }
             echo "RUN linux_$s seed=$seed wall_s=$(( $(date +%s) - start ))"; test -s out_E200_S150_before_$s/Dose.raw
           done
-      - uses: actions/upload-artifact@c6a366c94c3e0affe28c06c8df20a878f24da3cf # v3.2.2
-        with:
-          name: linux-dose
-          path: out_E200_S150_before_*/Dose.raw
+          echo "=== LINUX profile"
+          uv run --no-project --with numpy python validation/field_edge_profile.py "$PWD" E200_S150 before
 
   windows:
     name: Windows portable (MinGW-w64 gcc)
@@ -88,23 +88,6 @@ jobs:
             "RUN windows_$s seed=$seed rc=$rc wall_s=$([int]((Get-Date) - $t).TotalSeconds)"
             if ($rc -ne 0 -or -not (Test-Path "out_E200_S150_after_$s\Dose.raw")) { Get-Content "log_$s.txt" -Tail 20; throw "run $s failed" }
           }
-      - uses: actions/upload-artifact@c6a366c94c3e0affe28c06c8df20a878f24da3cf # v3.2.2
-        with:
-          name: windows-dose
-          path: out_E200_S150_after_*/Dose.raw
-
-  compare:
-    name: Compare (Windows minus Linux)
-    needs: [linux, windows]
-    runs-on: linux
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@a9bc5e6ef2cb54c177f32aa5726adaa15e7e2d59 # v3.1.0
-        with: { name: linux-dose, path: run }
-      - uses: actions/download-artifact@a9bc5e6ef2cb54c177f32aa5726adaa15e7e2d59 # v3.1.0
-        with: { name: windows-dose, path: run }
-      - name: Table
-        run: |
-          ls -la run/*/Dose.raw
-          echo "Columns: before% = Linux; fix-bef = Windows minus Linux; noise = Linux seed A-B; noise_fix = Windows seed A-B"
-          uv run --no-project --with numpy python validation/field_edge_analyse.py "$PWD/run" E200_S150
+          "=== WINDOWS profile"
+          & "$uvd\uv.exe" run --no-project --with numpy python validation\field_edge_profile.py "$PWD" E200_S150 after
+          if ($LASTEXITCODE) { throw "profile failed" }
