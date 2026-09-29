@@ -41,16 +41,15 @@ jobs:
             # First run initialises the keyring; a core update can end the shell, so update twice.
             & "$m\usr\bin\bash.exe" -lc 'pacman -Syuu --noconfirm' 2>&1 | Select-Object -Last 5
             & "$m\usr\bin\bash.exe" -lc 'pacman -Syuu --noconfirm' 2>&1 | Select-Object -Last 5
-            & "$m\usr\bin\bash.exe" -lc 'pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-gcc make' 2>&1 | Select-Object -Last 5
+            & "$m\usr\bin\bash.exe" -lc 'pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libgomp make' 2>&1 | Select-Object -Last 5
             if (-not (Test-Path "$m\ucrt64\bin\gcc.exe")) { throw "UCRT64 gcc not installed" }
           }
-
-      - name: Where is libgomp (diagnostic)
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Continue'
-          $env:MSYSTEM = 'UCRT64'
-          & C:\mcsq-win\msys64\usr\bin\bash.exe -lc 'pacman -Fy >/dev/null 2>&1; pacman -F libgomp.dll.a; pacman -F libgomp-1.dll; pacman -F libgomp.a; pacman -Ss gomp' 2>&1 | ForEach-Object { "$_" }
+          # OpenMP is a separate package (GCC 16 in MSYS2); a box that got gcc before this line may lack it.
+          if (-not (Test-Path "$m\ucrt64\lib\libgomp.dll.a")) {
+            $env:MSYSTEM = 'UCRT64'
+            & "$m\usr\bin\bash.exe" -lc 'pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-libgomp' 2>&1 | Select-Object -Last 3
+            if (-not (Test-Path "$m\ucrt64\lib\libgomp.dll.a")) { throw "libgomp not installed" }
+          }
 
       - name: Build MCsquare_win_portable.exe
         shell: powershell
