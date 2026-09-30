@@ -75,6 +75,7 @@ jobs:
           # Python + numpy from MSYS2's own packages (pacman verifies their signatures) into the verified
           # tree ensure-msys2.ps1 manages; no separate download. --needed makes it a no-op once installed.
           & "$m\usr\bin\bash.exe" -lc 'pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-numpy' 2>&1 | Select-Object -Last 3
+          if ($LASTEXITCODE) { throw "pacman install of python/numpy failed ($LASTEXITCODE)" }  # before any check an older install could satisfy
           $py = "$m\ucrt64\bin\python.exe"
           if (-not (Test-Path $py)) { throw "MSYS2 python not installed" }
           & $py -c "import numpy, sys; print('python', sys.version.split()[0], 'numpy', numpy.__version__)"
