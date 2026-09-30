@@ -76,6 +76,12 @@ from the input file.
   `Scanners/default` maps 0 HU to Schneider_AT_AG_SI4, not water: this applied to all earlier field-edge work
   (#16, the upstream report, #31).
 - **Scoring:** one Cartesian grid in both codes, 1 mm in every direction.
+  - **Beam axis placement, the same in every arm:** on the corner shared by the four central voxels (x = y = 0 is
+    the edge between lateral indices 199 and 200), as in the TOPAS files (smoke-test centroid −0.08 to −0.01 mm).
+    Verified per arm by the fitted centroid of its first run lying within ±0.1 mm of 0 in x and y; an arm that fails
+    this is fixed before any further runs. Reason: each arm is compared directly with TOPAS, so a half-voxel offset
+    between codes would enter σ(z) and the core annuli against a 0.2 mm margin, and nothing downstream would flag it
+    (clement-7074f29f, review 6814).
   - Layout: TOPAS binary is x-fastest, depth = 349.5 − k mm. MCsquare's axis order is to be confirmed.
   - The shared analysis script is tested on an asymmetric synthetic phantom in both layouts before any real data.
 - **TOPAS scorers:**
@@ -91,7 +97,11 @@ Proposed **confirmatory set, 200 MeV:**
 - R80;
 - σ(z) at two depths, from a Gaussian fit to the lateral core (not second moments, which neutron/gamma outliers
   dominate: 3.9–5.0 mm against 3.0 mm in the smoke test);
-- ring-integrated dose fractions (annuli of the 1 mm grid) at two depths.
+- ring-integrated dose fractions at two depths: the dose in an annulus of the 1 mm grid (by voxel-centre radius)
+  divided by the dose integrated over the **whole scored 400 × 400 mm plane at the same depth**, both from the same
+  scorer (TOPAS `Dose` for the primary comparison). Chosen over central-axis normalisation because it neither
+  inherits the noise of the central voxels nor depends on the two codes' absolute dose normalisation. The annulus
+  edges are fixed before data (OPEN with the depths).
 
 Everything else is **exploratory**: 100 and 150 MeV, R20, distal 80–20, the IDD normalised at 20–30 mm, the
 secondary TOPAS arm.
