@@ -1,9 +1,21 @@
 """Pre-registered analysis for the cross-platform study (validation/win_linux_equivalence_design.md).
 
-Usage: python platform_study_analyse.py <records.jsonl> <look: 1 or 2>
+Usage: python platform_study_analyse.py <records.jsonl> <look: 1 or 2> <look-1 verdicts.json>
 
 <records.jsonl> holds one STUDY_RESULT record per line (the JSON after "STUDY_RESULT "), for every seed of every
 wave so far. All records are pooled; none is dropped. Needs numpy and scipy.
+
+VALIDATION, before any inference (fails closed; added 2026-10-01 on alden-ec2221c7's review 6821, before any
+STUDY_RESULT was read): look must be 1 or 2; study id must be pe1; every record's (platform, seed) must be in the
+expected set for that look and every expected seed present exactly once; each record's commit must be the frozen
+study commit, or the re-run commit for exactly the two recorded interrupted seeds; within each platform every shared
+input hash must be identical; cube.raw (written in binary mode) must be identical across ALL platforms; text inputs
+may differ in bytes across platforms only (git line-ending translation on Windows), which is reported, since their
+content is fixed by the commit. A non-finite endpoint value makes that endpoint unable to pass.
+
+STOP STATE: look 1 writes its verdicts to <look-1 verdicts.json> (refusing to overwrite). Look 2 reads it; a
+comparison that stopped at look 1 is reported as frozen and is not recomputed, and does not enter look 2's Holm
+family. Look 2 requires the wave-2 commit to be frozen in WAVE2_COMMIT first.
 
 Per comparison (windows vs linux, macos vs linux), per endpoint, Welch two-sample on per-seed values
 (ln dose for CAX), and:
@@ -17,6 +29,7 @@ or INCONCLUSIVE (look 2). An endpoint with any missing R, or any invalid CAX dos
 
 import json
 import math
+import os
 import sys
 from collections import defaultdict
 
@@ -29,6 +42,16 @@ LATERAL = [f"lateral_{d}_{o}" for d in (127, 201) for o in (5, 10, 20, 30)]
 CAX = ["cax_127", "cax_201", "cax_i23"]
 RANGE = ["r80_mm", "r20_mm"]
 ENDPOINTS = LATERAL + CAX + RANGE
+
+STUDY = "pe1"
+STUDY_COMMIT = "7d07db0145671924428936d5a7fa896d8c3f8e22"
+RERUN_COMMIT = "600c66e0fe19adaaee49e51fa023edf89c47f299"  # adds only the re-run workflow to STUDY_COMMIT
+RERUN_SEEDS = {("windows", 1008), ("linux", 2003)}
+WAVE2_COMMIT = None  # frozen here, before wave 2 starts, if wave 2 is run
+WAVE_SEEDS = {1: {"windows": range(1001, 1017), "linux": range(2001, 2017), "macos": range(3001, 3017)},
+              2: {"windows": range(1017, 1033), "linux": range(2017, 2033), "macos": range(3017, 3033)}}
+COMPARED = ("windows", "macos")
+TEXT_INPUTS = ["plan E200_S150.txt", "cube.mhd", "BDL", "HU_Density", "HU_Material"]
 
 
 def margin(ep: str) -> tuple[float, float]:
@@ -48,12 +71,63 @@ def values(recs: list[dict], ep: str) -> tuple[np.ndarray, str | None]:
         v = r["metrics"].get(ep)
         if v is None:
             return np.array([]), "missing (no crossing) in seed %d" % r["seed"]
+        if not math.isfinite(v):
+            return np.array([]), "non-finite value in seed %d" % r["seed"]
         if ep in CAX:
-            if not (math.isfinite(v) and v > 0):
+            if not v > 0:
                 return np.array([]), "invalid dose in seed %d" % r["seed"]
             v = math.log(v)
         out.append(float(v))
     return np.array(out), None
+
+
+def refuse(why: str) -> None:
+    raise SystemExit("REFUSING TO ANALYSE: " + why)
+
+
+def expected(look: int, continuing: set[str]) -> set[tuple[str, int]]:
+    """Every (platform, seed) the data must hold at this look."""
+    exp = {(p, s) for p, r in WAVE_SEEDS[1].items() for s in r}
+    if look == 2:
+        for p in continuing | {"linux"}:
+            exp |= {(p, s) for s in WAVE_SEEDS[2][p]}
+    return exp
+
+
+def validate(recs: list[dict], look: int, continuing: set[str]) -> None:
+    """Fail closed before inference on anything but the complete, expected, same-provenance dataset."""
+    if not recs:
+        refuse("no records")
+    for r in recs:
+        if r.get("study") != STUDY:
+            refuse(f"record from study {r.get('study')!r}, expected {STUDY!r}")
+    keys = [(r.get("platform"), r.get("seed")) for r in recs]
+    dup = {k for k in keys if keys.count(k) > 1}
+    if dup:
+        refuse(f"duplicate records for {sorted(dup)}")
+    got, exp = set(keys), expected(look, continuing)
+    if got != exp:
+        refuse(f"seed set is not the expected one for look {look}: missing {sorted(exp - got)}, unexpected {sorted(got - exp)}")
+    for r, key in zip(recs, keys):
+        wave = 1 if any(key[1] in rng for rng in WAVE_SEEDS[1].values()) else 2
+        ok = {STUDY_COMMIT} | ({RERUN_COMMIT} if key in RERUN_SEEDS else set())
+        if wave == 2:
+            ok = {WAVE2_COMMIT} if WAVE2_COMMIT else set()
+        if r.get("commit") not in ok:
+            refuse(f"{key} built at commit {r.get('commit')!r}, allowed {sorted(ok) or 'none (WAVE2_COMMIT not frozen)'}")
+    for plat in {k[0] for k in keys}:
+        mine = [r for r in recs if r["platform"] == plat]
+        for name in TEXT_INPUTS + ["cube.raw"]:
+            if len({r["sha256"][name] for r in mine}) != 1:
+                refuse(f"{plat}: input {name} differs between seeds")
+        if len({r["materials"]["combined_sha256"] for r in mine}) != 1:
+            refuse(f"{plat}: Materials tree differs between seeds")
+    if len({r["sha256"]["cube.raw"] for r in recs}) != 1:
+        refuse("cube.raw differs between platforms")
+    for name in TEXT_INPUTS:
+        by_plat = {r["platform"]: r["sha256"][name] for r in recs}
+        if len(set(by_plat.values())) != 1:
+            print(f"note: text input {name} differs in bytes across platforms (content fixed by commit): {by_plat}")
 
 
 def welch(a: np.ndarray, b: np.ndarray) -> tuple[float, float, float]:
@@ -64,17 +138,26 @@ def welch(a: np.ndarray, b: np.ndarray) -> tuple[float, float, float]:
     return float(a.mean() - b.mean()), math.sqrt(se2), df
 
 
-def main(path: str, look: int) -> None:
+def main(path: str, look: int, verdict_path: str) -> None:
+    if look not in (1, 2):
+        refuse(f"look must be 1 or 2, got {look}")
+    frozen = {}
+    if look == 1:
+        if os.path.exists(verdict_path):
+            refuse(f"{verdict_path} exists: look 1 was already analysed")
+        continuing = set(COMPARED)
+    else:
+        if not os.path.exists(verdict_path):
+            refuse(f"look 2 needs look 1's verdicts at {verdict_path}")
+        frozen = json.load(open(verdict_path))
+        continuing = {p for p in COMPARED if frozen.get(p, "").startswith("CONTINUE")}
+        if not continuing:
+            refuse("no comparison continued at look 1; there is no look 2")
     recs = [json.loads(line) for line in open(path) if line.strip()]
+    validate(recs, look, continuing)
     by = defaultdict(list)
     for r in recs:
         by[r["platform"]].append(r)
-    seen = set()
-    for r in recs:
-        key = (r["platform"], r["seed"])
-        if key in seen:
-            raise SystemExit(f"duplicate record for {key}: refusing to analyse")
-        seen.add(key)
     print(f"look {look}; seeds per platform: " + ", ".join(f"{p} {len(v)}" for p, v in sorted(by.items())))
     for p, v in sorted(by.items()):
         hosts = defaultdict(int)
@@ -83,8 +166,8 @@ def main(path: str, look: int) -> None:
         flags = {ep: sum(1 for r in v if r["metrics"].get(ep.replace("_mm", "_crossings"), 1) > 1) for ep in RANGE}
         print(f"  {p}: hosts {dict(hosts)}; seeds with ambiguous crossings {flags}")
     rows, pvals = [], []
-    for plat in ("windows", "macos"):
-        if plat not in by or "linux" not in by:
+    for plat in COMPARED:
+        if plat not in continuing:
             continue
         for ep in ENDPOINTS:
             a, why_a = values(by[plat], ep)
@@ -130,6 +213,10 @@ def main(path: str, look: int) -> None:
         print(f"{plat:9} {ep:16} {scale(s['d']):+10.4f} [{scale(s['ci'][0]):+10.4f},{scale(s['ci'][1]):+10.4f}] "
               f"[{scale(s['sim'][0]):+10.4f},{scale(s['sim'][1]):+10.4f}] {mtxt:>18} {' '.join(tags)}")
     print()
+    for plat in COMPARED:
+        if plat not in continuing:
+            print(f"VERDICT {plat} vs linux: frozen at look 1: {frozen[plat]}")
+    out = {}
     for plat, v in verdict.items():
         if v["pass"] == len(ENDPOINTS):
             res = "EQUIVALENT"
@@ -138,7 +225,13 @@ def main(path: str, look: int) -> None:
         else:
             res = "CONTINUE to wave 2" if look == 1 else "INCONCLUSIVE"
         print(f"VERDICT {plat} vs linux (look {look}): {res}  ({v['pass']}/{len(ENDPOINTS)} endpoints pass)")
+        out[plat] = res
+    if look == 1:
+        with open(verdict_path, "x") as f:
+            json.dump(out, f, indent=1, sort_keys=True)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], int(sys.argv[2]))
+    if len(sys.argv) != 4:
+        refuse("usage: platform_study_analyse.py <records.jsonl> <look> <look-1 verdicts.json>")
+    main(sys.argv[1], int(sys.argv[2]), sys.argv[3])

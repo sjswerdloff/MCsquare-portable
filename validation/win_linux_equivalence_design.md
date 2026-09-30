@@ -2,14 +2,24 @@
 
 Margins decided by sjswerdloff, 2026-09-30. The macOS arm64 arm was added on his instruction the same day, before any study data.
 
-Status: **design only. No study data exists.** The analysis below is fixed before any study run. The only data seen
-so far is the two-seed pilot on #28 (comment 27347), which is used here for planning and is **excluded** from the
-study analysis. Changes after the first study result would be visible in this file's git history.
+Status: **wave 1 runs started; no study result has been read.** This is pre-analysis specification, which is not the
+same claim as pre-run registration (see Order of events). The only data seen so far is the two-seed pilot on #28
+(comment 27347), which is used for planning and is **excluded** from the study analysis. Changes after the first
+study result would be visible in this file's git history.
 
 **Order of events (sjswerdloff, 2026-09-30: "just run them all").** Wave 1 was started before this design and its
 implementation were reviewed. The per-seed metric code (`platform_study_metrics.py`, with synthetic R80/R20 tests
 in `test_platform_study_metrics.py`) and this design were committed at the commit the run uses. The analysis script
 (`platform_study_analyse.py`) is committed before any `STUDY_RESULT` is read, and the git history shows that order.
+Recorded timestamps (NZDT):
+- 2026-09-30 17:04 — `7d07db0`, the commit wave 1 builds from (design, metric code, workflow).
+- 2026-09-30 17:07 — `373961a`, the analysis script. Wave 1 was already running.
+- 2026-09-30, during wave 1 — seeds windows 1008 and linux 2003 interrupted by a runner relabel; re-run at `600c66e`
+  (rule in "Interrupted seeds").
+- 2026-10-01, during wave 1, before any result was read — review-driven amendments (alden-ec2221c7, review 6821):
+  the analyzer validates the dataset and fails closed before inference, and keeps a stop state between looks; the
+  workflow refuses a failed build or stale output (prospective, for wave 2; no completed seed is re-run or dropped).
+- First inspection of results: recorded here when it happens.
 
 ## Question
 
@@ -110,7 +120,12 @@ Pilot planning numbers, normal approximation, 90% power, one-sided α = 0.025 pe
 - **Equivalence:** TOST for each endpoint. It passes if the (1 − 2α) CI for W − L lies inside ±δ.
   - Equivalence is claimed **per comparison** (Windows vs Linux, macOS vs Linux), only if all 13 of its endpoints
     pass. That is an intersection-union test, so no multiplicity adjustment is needed for either claim.
-  - "All three platforms equivalent" is claimed only if both comparisons pass, which is again intersection-union.
+  - If both comparisons pass, the claim is: **both tested configurations are equivalent to the Linux reference, for
+    these endpoints and margins.** It is not a claim that Windows and macOS are within the margins of each other
+    (e.g. CAX ratios 1.004 and 0.996 both pass against Linux, but differ from each other by ~0.8%), nor that each
+    Windows host individually agrees (the Windows arm pools the tested host mixture), nor that other fields, media or
+    halo configurations (e.g. #33's pencil beams in water) behave the same. It can inform the choice of platform for
+    #33, not certify it.
   - **Each comparison stops independently** under the stopping rule. A comparison that has stopped runs no more
     seeds; the Linux reference keeps running while either comparison needs wave 2.
 - **Sequential looks:** at most two, with α split by Bonferroni: α = 0.025 at each look, so a 95% CI per look. That
