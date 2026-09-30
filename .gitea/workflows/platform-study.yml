@@ -1,0 +1,134 @@
+# Cross-platform study, wave 1 (validation/win_linux_equivalence_design.md). One job per seed, three arms in
+# parallel: Linux (HP, WSL2), Windows (any Windows runner, host recorded), macOS arm64 (Mac Studio).
+# Each job builds at this commit, runs one seed, and keeps its outputs + record.json in a per-seed directory
+# on that machine that must not already exist (never overwritten, never deleted). The STUDY_RESULT line in each
+# job log is what the pre-registered analysis (validation/platform_study_analyse.py) reads.
+# Runs only on pushes to connor/platform-study-run, so design edits elsewhere cannot cancel a wave.
+
+name: Platform study (wave 1)
+
+on:
+  push:
+    branches: [connor/platform-study-run]
+
+env:
+  PRIMARIES: "3e7"
+  STUDY: pe1
+
+jobs:
+  linux:
+    name: Linux seed ${{ matrix.seed }}
+    runs-on: linux
+    timeout-minutes: 170
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build, run, record
+        run: |
+          set -euo pipefail
+          SEED=${{ matrix.seed }}
+          D="$HOME/fe-study/$STUDY/linux/seed_$SEED"
+          if [ -e "$D" ]; then echo "$D exists: not overwriting"; exit 1; fi
+          hostname; lscpu | grep 'Model name'; CC="$(gcc --version | head -1)"; echo "$CC"
+          make MCsquare_portable
+          uv run --no-project --with numpy python validation/field_edge_make_cases.py 200 150
+          printf '%s\n' "Num_Threads 3" "Num_Primaries $PRIMARIES" "RNG_Seed $SEED" "CT_File cube.mhd" \
+            "HU_Density_Conversion_File Scanners/default/HU_Density_Conversion.txt" \
+            "HU_Material_Conversion_File Scanners/default/HU_Material_Conversion.txt" \
+            "BDL_Machine_Parameter_File BDL/BDL_default_DN_RangeShifter.txt" \
+            "BDL_Plan_File E200_S150.txt" "Output_Directory out_seed" "Dose_MHD_Output True" > cfg.txt
+          mkdir -p out_seed
+          start=$(date +%s); ./MCsquare_portable cfg.txt > log.txt 2>&1 || { tail -20 log.txt; exit 1; }
+          echo "RUN linux seed=$SEED wall_s=$(( $(date +%s) - start ))"; test -s out_seed/Dose.raw
+          mkdir -p "$D"; cp out_seed/Dose.raw out_seed/Dose.mhd cfg.txt E200_S150.txt cube.mhd log.txt "$D"/
+          PYTHONPATH=validation uv run --no-project --with numpy python validation/platform_study_record.py \
+            "$D" out_seed linux "$SEED" ./MCsquare_portable "$CC" "$GITHUB_SHA"
+
+  macos:
+    name: macOS seed ${{ matrix.seed }}
+    runs-on: stuart-m3ultra-canary
+    timeout-minutes: 170
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [3001, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010, 3011, 3012, 3013, 3014, 3015, 3016]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build, run, record
+        run: |
+          set -euo pipefail
+          SEED=${{ matrix.seed }}
+          UV="$(command -v uv || true)"; [ -n "$UV" ] || UV="$HOME/.local/bin/uv"
+          [ -x "$UV" ] || { echo "no uv on this runner"; exit 1; }
+          D="$HOME/fe-study/$STUDY/macos/seed_$SEED"
+          if [ -e "$D" ]; then echo "$D exists: not overwriting"; exit 1; fi
+          hostname; sysctl -n machdep.cpu.brand_string; CC="$(clang --version | head -1)"; echo "$CC"
+          make MCsquare_arm64
+          "$UV" run --no-project --with numpy python validation/field_edge_make_cases.py 200 150
+          printf '%s\n' "Num_Threads 3" "Num_Primaries $PRIMARIES" "RNG_Seed $SEED" "CT_File cube.mhd" \
+            "HU_Density_Conversion_File Scanners/default/HU_Density_Conversion.txt" \
+            "HU_Material_Conversion_File Scanners/default/HU_Material_Conversion.txt" \
+            "BDL_Machine_Parameter_File BDL/BDL_default_DN_RangeShifter.txt" \
+            "BDL_Plan_File E200_S150.txt" "Output_Directory out_seed" "Dose_MHD_Output True" > cfg.txt
+          mkdir -p out_seed
+          start=$(date +%s); ./MCsquare_arm64 cfg.txt > log.txt 2>&1 || { tail -20 log.txt; exit 1; }
+          echo "RUN macos seed=$SEED wall_s=$(( $(date +%s) - start ))"; test -s out_seed/Dose.raw
+          mkdir -p "$D"; cp out_seed/Dose.raw out_seed/Dose.mhd cfg.txt E200_S150.txt cube.mhd log.txt "$D"/
+          PYTHONPATH=validation "$UV" run --no-project --with numpy python validation/platform_study_record.py \
+            "$D" out_seed macos "$SEED" ./MCsquare_arm64 "$CC" "$GITHUB_SHA"
+
+  windows:
+    name: Windows seed ${{ matrix.seed }}
+    runs-on: windows
+    timeout-minutes: 170
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: MSYS2 + UCRT64 GCC (verified, once per box)
+        shell: powershell
+        run: |
+          & .\.gitea\scripts\ensure-msys2.ps1
+      - name: Build, run, record
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $seed = ${{ matrix.seed }}
+          $D = "C:\mcsq-win\fe-study\$env:STUDY\windows\seed_$seed"
+          if (Test-Path $D) { throw "$D exists: not overwriting" }
+          $m = 'C:\mcsq-win\msys64-20260927'
+          $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
+          "$env:COMPUTERNAME  $((Get-CimInstance Win32_Processor).Name)"
+          & "$m\usr\bin\bash.exe" -lc 'pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-numpy' 2>&1 | Select-Object -Last 3
+          if ($LASTEXITCODE) { throw "pacman install of python/numpy failed ($LASTEXITCODE)" }
+          $py = "$m\ucrt64\bin\python.exe"
+          if (-not (Test-Path $py)) { throw "MSYS2 python not installed" }
+          $cc = (& "$m\ucrt64\bin\gcc.exe" --version | Select-Object -First 1)
+          $cc
+          & "$m\usr\bin\bash.exe" -lc 'make MCsquare_win_portable' 2>&1 | Select-Object -Last 3
+          if (-not (Test-Path MCsquare_win_portable.exe)) { throw "build failed" }
+          $env:PATH = "$m\ucrt64\bin;$env:PATH"
+          & $py validation\field_edge_make_cases.py 200 150
+          if ($LASTEXITCODE) { throw "case generation failed" }
+          @("Num_Threads 3", "Num_Primaries $env:PRIMARIES", "RNG_Seed $seed", "CT_File cube.mhd",
+            "HU_Density_Conversion_File Scanners/default/HU_Density_Conversion.txt",
+            "HU_Material_Conversion_File Scanners/default/HU_Material_Conversion.txt",
+            "BDL_Machine_Parameter_File BDL/BDL_default_DN_RangeShifter.txt",
+            "BDL_Plan_File E200_S150.txt", "Output_Directory out_seed", "Dose_MHD_Output True") |
+            Set-Content -Encoding Ascii cfg.txt
+          New-Item -ItemType Directory -Force out_seed | Out-Null
+          $t = Get-Date
+          & .\MCsquare_win_portable.exe cfg.txt *> log.txt
+          $rc = $LASTEXITCODE
+          "RUN windows seed=$seed rc=$rc wall_s=$([int]((Get-Date) - $t).TotalSeconds)"
+          if ($rc -ne 0 -or -not (Test-Path out_seed\Dose.raw)) { Get-Content log.txt -Tail 20; throw "run failed" }
+          New-Item -ItemType Directory -Force $D | Out-Null
+          Copy-Item out_seed\Dose.raw, out_seed\Dose.mhd, cfg.txt, E200_S150.txt, cube.mhd, log.txt $D
+          $env:PYTHONPATH = 'validation'
+          & $py validation\platform_study_record.py $D out_seed windows $seed .\MCsquare_win_portable.exe "$cc" $env:GITHUB_SHA
+          if ($LASTEXITCODE) { throw "record failed" }

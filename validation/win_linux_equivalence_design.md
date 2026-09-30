@@ -6,6 +6,11 @@ Status: **design only. No study data exists.** The analysis below is fixed befor
 so far is the two-seed pilot on #28 (comment 27347), which is used here for planning and is **excluded** from the
 study analysis. Changes after the first study result would be visible in this file's git history.
 
+**Order of events (sjswerdloff, 2026-09-30: "just run them all").** Wave 1 was started before this design and its
+implementation were reviewed. The per-seed metric code (`platform_study_metrics.py`, with synthetic R80/R20 tests
+in `test_platform_study_metrics.py`) and this design were committed at the commit the run uses. The analysis script
+(`platform_study_analyse.py`) is committed before any `STUDY_RESULT` is read, and the git history shows that order.
+
 ## Question
 
 The same source revision is built three ways:
@@ -19,17 +24,16 @@ difference** at all (secondary, reported but not used to stop)?
 
 ## Fixed conditions (identical on both platforms)
 
-- **Machines (sjswerdloff, 2026-09-30):** Linux on the HP (DESKTOP-5H86O9N, i5-6500T, WSL2 Ubuntu), which has the
-  only Linux runner. Windows native on the Lenovo (DESKTOP-SR5GKKA, i5-6400T). macOS arm64 on the Mac Studio
-  (M3 Ultra), pinned by its existing runner label `stuart-m3ultra-canary`. All three arms run in parallel.
-  - **Why this is sound:** both are Skylake. Both builds target generic x86-64 (no `-march=native`), and both
-    Windows boxes use the same MSYS2 GCC 16.2.0. The same instruction stream should compute identically on either
-    machine.
-  - **Consequence:** the comparison is strictly *Windows-on-Lenovo vs Linux-on-HP*, and the host is recorded for
-    every seed.
-  - **Placement:** each Windows seed must run on the Lenovo, pinned by a per-box runner label. Any Windows seed that
-    runs on another host is excluded **before** analysis, recorded as such, and replaced by the next unused seed in
-    that platform's stream.
+- **Machines (sjswerdloff, 2026-09-30, "just run them all"):**
+  - **Linux** on the HP (DESKTOP-5H86O9N, i5-6500T, WSL2 Ubuntu), which has the only Linux runner.
+  - **Windows native** on whichever Windows runner takes each seed: the HP or the Lenovo (DESKTOP-SR5GKKA, i5-6400T).
+    There is no per-box label yet.
+  - **macOS arm64** on the Mac Studio (M3 Ultra), pinned by its runner label `stuart-m3ultra-canary`.
+  - All three arms run in parallel.
+  - **Why mixing Windows hosts is acceptable:** both are Skylake. Builds target generic x86-64 (no `-march=native`),
+    and both Windows boxes use the same MSYS2 GCC 16.2.0, so the same instruction stream should compute identically.
+  - **Every seed records its host.** A Windows-by-host breakdown is reported as **exploratory** only. The confirmatory
+    Windows arm pools all Windows seeds whichever host ran them, and no seed is excluded for its host.
 - **Source revision:** one commit, recorded. Both builds come from it, at `-O3`, with their compiler versions logged.
 - **Case:** 200 MeV, 15 × 15 cm field, 300 mm water cube with 2 mm voxels, `BDL_default_DN_RangeShifter.txt`, the
   default Scanners conversion files. `Num_Threads 3`, `Num_Primaries 3e7`, `Dose_MHD_Output True`.
