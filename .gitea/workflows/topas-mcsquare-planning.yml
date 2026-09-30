@@ -88,13 +88,16 @@ jobs:
             case "$spec" in *:9001[0-9][0-9]) ;; *) echo "planning seeds are 9001xx only: $spec"; exit 1;; esac
             N=${spec%%:*}; SEED=${spec##*:}; D="$ROOT/E${ENERGY}_N${N}_seed${SEED}"
             mkdir "$D" "$D/out"
-            printf '%s\n' "Num_Threads $THREADS" "Num_Primaries $N" "RNG_Seed $SEED" "CT_File $CASE/water.mhd" \
+            # MCsquare's config parser splits values on whitespace, and the T7 path has a space in it, so every path
+            # in config.txt is relative to the run directory (cwd) or absolute without spaces (clement-7074f29f, #40).
+            printf '%s\n' "Num_Threads $THREADS" "Num_Primaries $N" "RNG_Seed $SEED" "CT_File ../case/water.mhd" \
               "HU_Density_Conversion_File $GITHUB_WORKSPACE/Scanners/Water_Phantom/HU_Density_Conversion.txt" \
               "HU_Material_Conversion_File $GITHUB_WORKSPACE/Scanners/Water_Phantom/HU_Material_Conversion.txt" \
-              "BDL_Machine_Parameter_File $CASE/bdl_E$ENERGY.txt" "BDL_Plan_File $CASE/plan_E$ENERGY.txt" \
-              "Output_Directory $D/out" "Dose_MHD_Output True" > "$D/config.txt"
+              "BDL_Machine_Parameter_File ../case/bdl_E$ENERGY.txt" "BDL_Plan_File ../case/plan_E$ENERGY.txt" \
+              "Output_Directory out" "Dose_MHD_Output True" > "$D/config.txt"
+            awk 'NF != 2 {bad=1; print "config line is not KEY VALUE: " $0} END {exit bad}' "$D/config.txt"
             start=$(date +%s)
-            "$B/MCsquare" "$D/config.txt" > "$D/log.txt" 2>&1 || { tail -20 "$D/log.txt"; exit 1; }
+            (cd "$D" && MCsquare_Materials_Dir="$GITHUB_WORKSPACE/Materials/" "$B/MCsquare" config.txt) > "$D/log.txt" 2>&1 || { tail -20 "$D/log.txt"; exit 1; }
             WALL=$(( $(date +%s) - start ))
             SIM=$(grep -o 'Nbr primaries simulated: [0-9]*' "$D/log.txt" | awk '{print $4}')
             echo "Nbr primaries simulated: $SIM (requested $N; may exceed it slightly, see #39)"
