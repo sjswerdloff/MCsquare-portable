@@ -10,7 +10,7 @@ The TOPAS side of the MCsquare-vs-TOPAS comparison. It runs on the Mac Studio ag
 | `run_topas.sh <run_dir>` | Runs TOPAS with the required environment and writes `provenance.txt`: host, UTC times, exit code, wall time, sha256 of inputs and outputs, and the EM physics that actually ran (the "Use ICRU90 data" line, 0 for option 0 and 1 for option 4). Refuses to start below `MIN_FREE_GB` (default 100) free on the output volume. |
 
 Study outputs go to `/Volumes/T7 Shield/MonteCarlo_runs/` (the home volume is nearly full). Launch heavy runs
-detached, e.g. `nohup ./run_topas.sh <dir> > /dev/null 2>&1 < /dev/null &`, Never launch the `topas` binary itself through
+detached, e.g. `nohup ./run_topas.sh <dir> > /dev/null 2>&1 < /dev/null &`. Never launch the `topas` binary itself through
 `/usr/bin/time` or `env -i`: macOS strips `DYLD_*` from those, and topas then fails to load its libraries.
 Wrapping `run_topas.sh` is safe, because it sets the environment inside the script (that is how the timings were taken).
 
