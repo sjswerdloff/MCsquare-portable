@@ -1,6 +1,6 @@
 """Pre-registered analysis for the cross-platform study (validation/win_linux_equivalence_design.md).
 
-Usage: python platform_study_analyse.py <records.jsonl> <look: 1 or 2> <look-1 verdicts.json>
+Usage: python platform_study_analyse.py <records.jsonl> <look: 1 or 2> <look-1 verdicts.json> [--manifest <p>] [--wave2 <p>]
 
 <records.jsonl> holds one STUDY_RESULT record per line (the JSON after "STUDY_RESULT "), for every seed of every
 wave so far. All records are pooled; none is dropped. Needs numpy and scipy.
@@ -8,14 +8,25 @@ wave so far. All records are pooled; none is dropped. Needs numpy and scipy.
 VALIDATION, before any inference (fails closed; added 2026-10-01 on alden-ec2221c7's review 6821, before any
 STUDY_RESULT was read): look must be 1 or 2; study id must be pe1; every record's (platform, seed) must be in the
 expected set for that look and every expected seed present exactly once; each record's commit must be the frozen
-study commit, or the re-run commit for exactly the two recorded interrupted seeds; within each platform every shared
-input hash must be identical; cube.raw (written in binary mode) must be identical across ALL platforms; text inputs
-may differ in bytes across platforms only (git line-ending translation on Windows), which is reported, since their
-content is fixed by the commit. A non-finite endpoint value makes that endpoint unable to pass.
+study commit, or the re-run commit for exactly the two recorded interrupted seeds.
 
-STOP STATE: look 1 writes its verdicts to <look-1 verdicts.json> (refusing to overwrite). Look 2 reads it; a
-comparison that stopped at look 1 is reported as frozen and is not recomputed, and does not enter look 2's Holm
-family. Look 2 requires the wave-2 commit to be frozen in WAVE2_COMMIT first.
+INPUT IDENTITY is checked against a FROZEN EXPECTED MANIFEST (platform_study_manifest.json, next to this file, produced
+by platform_study_manifest.py from the study commit; --manifest overrides the path; the run refuses if it is absent or
+records a different study commit). Per record: text inputs (plan, cube.mhd, BDL, HU_Density, HU_Material) and the
+Materials tree digest must equal the manifest's LF variant on linux and macos, and its LF or CRLF variant on windows
+(CRLF is allowed on windows only); cube.raw must equal the manifest's value exactly; the config hash must equal the
+manifest's hash for that (platform, seed) exactly. All records of a platform must share one binary sha256, which is
+printed. Anything else refuses, naming the record and field. There is no "differs but content is fixed by commit" path.
+A non-finite endpoint value makes that endpoint unable to pass.
+
+STOP STATE AND BINDING: look 1 writes <look-1 verdicts.json> (refusing to overwrite) holding "verdicts" (per comparison)
+plus sha256 of this analyzer file, sha256 of the manifest file, and a fingerprint of the wave-1 records used (sha256 of
+the canonical JSON, sort_keys, one record per line, records sorted by (platform, seed)). Look 2 recomputes all three
+from what it is given and refuses on any mismatch, so the analyzer, the manifest or any wave-1 record cannot change
+between the looks. The wave-2 commit lives OUTSIDE that binding, in platform_study_wave2.json ({"wave2_commit": null}
+until wave 2 is frozen; --wave2 overrides the path); it is read at validation time and wave-2 records are refused
+while it is null or the file is absent. A comparison that stopped at
+look 1 is reported as frozen and is not recomputed, and does not enter look 2's Holm family.
 
 Per comparison (windows vs linux, macos vs linux), per endpoint, Welch two-sample on per-seed values
 (ln dose for CAX), and:
@@ -27,11 +38,13 @@ Verdict per comparison: EQUIVALENT if all 13 pass; NON-EQUIVALENT if any NONEQ; 
 or INCONCLUSIVE (look 2). An endpoint with any missing R, or any invalid CAX dose, cannot pass.
 """
 
+import hashlib
 import json
 import math
 import os
 import sys
 from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
 from scipy import stats
@@ -47,10 +60,12 @@ STUDY = "pe1"
 STUDY_COMMIT = "7d07db0145671924428936d5a7fa896d8c3f8e22"
 RERUN_COMMIT = "600c66e0fe19adaaee49e51fa023edf89c47f299"  # adds only the re-run workflow to STUDY_COMMIT
 RERUN_SEEDS = {("windows", 1008), ("linux", 2003)}
-WAVE2_COMMIT = None  # frozen here, before wave 2 starts, if wave 2 is run
 WAVE_SEEDS = {1: {"windows": range(1001, 1017), "linux": range(2001, 2017), "macos": range(3001, 3017)},
               2: {"windows": range(1017, 1033), "linux": range(2017, 2033), "macos": range(3017, 3033)}}
 COMPARED = ("windows", "macos")
+MANIFEST_PATH = Path(__file__).with_name("platform_study_manifest.json")
+WAVE2_PATH = Path(__file__).with_name("platform_study_wave2.json")  # {"wave2_commit": null | "<40 hex>"}; not bound at look 1
+CRLF_PLATFORMS = {"windows"}  # the only platform whose checkout/text-mode writes may legitimately give CRLF
 TEXT_INPUTS = ["plan E200_S150.txt", "cube.mhd", "BDL", "HU_Density", "HU_Material"]
 
 
@@ -94,7 +109,21 @@ def expected(look: int, continuing: set[str]) -> set[tuple[str, int]]:
     return exp
 
 
-def validate(recs: list[dict], look: int, continuing: set[str]) -> None:
+def load_wave2_commit(path: Path | str) -> str | None:
+    """The frozen wave-2 commit, or None while it is null or the file is absent."""
+    path = Path(path)
+    if not path.is_file():
+        return None
+    try:
+        c = json.loads(path.read_text())["wave2_commit"]
+    except (ValueError, KeyError, TypeError) as e:
+        refuse(f"{path} is malformed ({type(e).__name__}: {e})")
+    if c is not None and not (isinstance(c, str) and len(c) == 40 and set(c) <= set("0123456789abcdef")):
+        refuse(f"{path}: wave2_commit must be null or a 40-hex commit id, got {c!r}")
+    return c
+
+
+def validate(recs: list[dict], look: int, continuing: set[str], manifest: dict, wave2_commit: str | None = None) -> None:
     """Fail closed before inference on anything but the complete, expected, same-provenance dataset."""
     if not recs:
         refuse("no records")
@@ -107,27 +136,101 @@ def validate(recs: list[dict], look: int, continuing: set[str]) -> None:
         refuse(f"duplicate records for {sorted(dup)}")
     got, exp = set(keys), expected(look, continuing)
     if got != exp:
-        refuse(f"seed set is not the expected one for look {look}: missing {sorted(exp - got)}, unexpected {sorted(got - exp)}")
+        refuse(f"seed set is not the expected one for look {look}: missing {sorted(exp - got)}, "
+               f"unexpected {sorted(got - exp)}")
     for r, key in zip(recs, keys):
         wave = 1 if any(key[1] in rng for rng in WAVE_SEEDS[1].values()) else 2
         ok = {STUDY_COMMIT} | ({RERUN_COMMIT} if key in RERUN_SEEDS else set())
         if wave == 2:
-            ok = {WAVE2_COMMIT} if WAVE2_COMMIT else set()
+            ok = {wave2_commit} if wave2_commit else set()
         if r.get("commit") not in ok:
-            refuse(f"{key} built at commit {r.get('commit')!r}, allowed {sorted(ok) or 'none (WAVE2_COMMIT not frozen)'}")
-    for plat in {k[0] for k in keys}:
-        mine = [r for r in recs if r["platform"] == plat]
-        for name in TEXT_INPUTS + ["cube.raw"]:
-            if len({r["sha256"][name] for r in mine}) != 1:
-                refuse(f"{plat}: input {name} differs between seeds")
-        if len({r["materials"]["combined_sha256"] for r in mine}) != 1:
-            refuse(f"{plat}: Materials tree differs between seeds")
-    if len({r["sha256"]["cube.raw"] for r in recs}) != 1:
-        refuse("cube.raw differs between platforms")
-    for name in TEXT_INPUTS:
-        by_plat = {r["platform"]: r["sha256"][name] for r in recs}
-        if len(set(by_plat.values())) != 1:
-            print(f"note: text input {name} differs in bytes across platforms (content fixed by commit): {by_plat}")
+            refuse(f"{key} built at commit {r.get('commit')!r}, allowed {sorted(ok) or 'none (wave2_commit not frozen)'}")
+    check_inputs(recs, manifest)
+    check_binaries(recs)
+
+
+def sha_of(path: Path | str) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def load_manifest(path: Path | str) -> dict:
+    """The frozen expected-input manifest; refuses if absent, malformed, or for a different study commit."""
+    path = Path(path)
+    if not path.is_file():
+        refuse(f"manifest {path} is absent")
+    try:
+        m = json.loads(path.read_text())
+        if m["study_commit"] != STUDY_COMMIT:
+            refuse(f"manifest is for study commit {m['study_commit']!r}, expected {STUDY_COMMIT!r}")
+        for name in TEXT_INPUTS:
+            m["text"][name]["LF"], m["text"][name]["CRLF"]
+        m["cube.raw"], m["config"], m["materials"]["LF"], m["materials"]["CRLF"]
+    except (ValueError, KeyError, TypeError) as e:
+        refuse(f"manifest {path} is malformed ({type(e).__name__}: {e})")
+    return m
+
+
+def allowed_variants(plat: str, variants: dict[str, set[str]]) -> set[str]:
+    """LF variant(s) for every platform; CRLF variant(s) added on windows only."""
+    return set(variants["LF"]) | (set(variants["CRLF"]) if plat in CRLF_PLATFORMS else set())
+
+
+def check_inputs(recs: list[dict], manifest: dict) -> None:
+    """Every record's input hashes must be one of the manifest's approved values for its platform."""
+    for r in recs:
+        plat, seed = r["platform"], r["seed"]
+        who = f"record ({plat}, {seed})"
+        sh = r.get("sha256", {})
+        for name in TEXT_INPUTS:
+            ok = allowed_variants(plat, {v: {manifest["text"][name][v]} for v in ("LF", "CRLF")})
+            if sh.get(name) not in ok:
+                refuse(f"{who}: field sha256[{name!r}] = {sh.get(name)!r} is not an approved {plat} variant "
+                       "of the frozen input")
+        if sh.get("cube.raw") != manifest["cube.raw"]:
+            refuse(f"{who}: field sha256['cube.raw'] = {sh.get('cube.raw')!r} is not the frozen cube.raw")
+        mats = {v: set(manifest["materials"][v].values()) for v in ("LF", "CRLF")}
+        got = r.get("materials", {}).get("combined_sha256")
+        if got not in allowed_variants(plat, mats):
+            refuse(f"{who}: field materials.combined_sha256 = {got!r} is not an approved {plat} Materials digest")
+        want = manifest["config"].get(plat, {}).get(str(seed))
+        if want is None:
+            refuse(f"{who}: the manifest holds no config hash for ({plat}, {seed})")
+        if sh.get("config") != want:
+            refuse(f"{who}: field sha256['config'] = {sh.get('config')!r} is not the expected cfg.txt hash "
+                   f"for ({plat}, {seed})")
+
+
+def check_binaries(recs: list[dict]) -> None:
+    """One binary sha256 per platform; the approved hashes are printed by main."""
+    for plat in sorted({r["platform"] for r in recs}):
+        hashes = {r.get("sha256", {}).get("binary") for r in recs if r["platform"] == plat}
+        if len(hashes) != 1 or None in hashes:
+            refuse(f"{plat}: records do not share one binary sha256 "
+                   f"({len(hashes)} distinct values: {sorted(map(str, hashes))})")
+
+
+def fingerprint(recs: list[dict]) -> str:
+    """sha256 of the canonical JSON of these records: sort_keys, one record per line, sorted by (platform, seed)."""
+    lines = (json.dumps(r, sort_keys=True) for r in sorted(recs, key=lambda r: (r["platform"], r["seed"])))
+    return hashlib.sha256("".join(line + "\n" for line in lines).encode()).hexdigest()
+
+
+def wave1_records(recs: list[dict]) -> list[dict]:
+    """The wave-1 subset (by seed) of the supplied records."""
+    return [r for r in recs if r["seed"] in {s for rng in WAVE_SEEDS[1].values() for s in rng}]
+
+
+def check_binding(state: dict, recs: list[dict], manifest_path: Path | str) -> None:
+    """Look 2: the analyzer, the manifest and the wave-1 records must be exactly what look 1 used."""
+    for key in ("analyzer_sha256", "manifest_sha256", "wave1_fingerprint", "verdicts"):
+        if key not in state:
+            refuse(f"look-1 state lacks {key!r}")
+    if state["analyzer_sha256"] != sha_of(__file__):
+        refuse("the analyzer file changed since look 1")
+    if state["manifest_sha256"] != sha_of(manifest_path):
+        refuse("the manifest file changed since look 1")
+    if state["wave1_fingerprint"] != fingerprint(wave1_records(recs)):
+        refuse("the wave-1 records differ from the ones look 1 analysed")
 
 
 def welch(a: np.ndarray, b: np.ndarray) -> tuple[float, float, float]:
@@ -138,10 +241,13 @@ def welch(a: np.ndarray, b: np.ndarray) -> tuple[float, float, float]:
     return float(a.mean() - b.mean()), math.sqrt(se2), df
 
 
-def main(path: str, look: int, verdict_path: str) -> None:
+def main(path: str, look: int, verdict_path: str, manifest_path: Path | str | None = None,
+         wave2_path: Path | str | None = None) -> None:
     if look not in (1, 2):
         refuse(f"look must be 1 or 2, got {look}")
-    frozen = {}
+    manifest_path = manifest_path or MANIFEST_PATH
+    manifest = load_manifest(manifest_path)
+    frozen, state = {}, {}
     if look == 1:
         if os.path.exists(verdict_path):
             refuse(f"{verdict_path} exists: look 1 was already analysed")
@@ -149,16 +255,22 @@ def main(path: str, look: int, verdict_path: str) -> None:
     else:
         if not os.path.exists(verdict_path):
             refuse(f"look 2 needs look 1's verdicts at {verdict_path}")
-        frozen = json.load(open(verdict_path))
+        state = json.load(open(verdict_path))
+        frozen = state.get("verdicts", {}) if isinstance(state, dict) else {}
         continuing = {p for p in COMPARED if frozen.get(p, "").startswith("CONTINUE")}
         if not continuing:
             refuse("no comparison continued at look 1; there is no look 2")
     recs = [json.loads(line) for line in open(path) if line.strip()]
-    validate(recs, look, continuing)
+    validate(recs, look, continuing, manifest, load_wave2_commit(wave2_path or WAVE2_PATH))
+    if look == 2:
+        check_binding(state, recs, manifest_path)
     by = defaultdict(list)
     for r in recs:
         by[r["platform"]].append(r)
     print(f"look {look}; seeds per platform: " + ", ".join(f"{p} {len(v)}" for p, v in sorted(by.items())))
+    print("approved binary sha256 per platform: "
+          + ", ".join(f"{p} {v[0]['sha256']['binary']}" for p, v in sorted(by.items())))
+    print(f"analyzer sha256 {sha_of(__file__)}; manifest sha256 {sha_of(manifest_path)}")
     for p, v in sorted(by.items()):
         hosts = defaultdict(int)
         for r in v:
@@ -228,10 +340,14 @@ def main(path: str, look: int, verdict_path: str) -> None:
         out[plat] = res
     if look == 1:
         with open(verdict_path, "x") as f:
-            json.dump(out, f, indent=1, sort_keys=True)
+            json.dump({"verdicts": out, "analyzer_sha256": sha_of(__file__), "manifest_sha256": sha_of(manifest_path),
+                       "wave1_fingerprint": fingerprint(wave1_records(recs))}, f, indent=1, sort_keys=True)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        refuse("usage: platform_study_analyse.py <records.jsonl> <look> <look-1 verdicts.json>")
-    main(sys.argv[1], int(sys.argv[2]), sys.argv[3])
+    args, opts = sys.argv[1:], {}
+    while len(args) >= 2 and args[-2] in ("--manifest", "--wave2"):
+        opts[args[-2]], args = args[-1], args[:-2]
+    if len(args) != 3:
+        refuse("usage: platform_study_analyse.py <records.jsonl> <look> <look-1 verdicts.json> [--manifest <p>] [--wave2 <p>]")
+    main(args[0], int(args[1]), args[2], opts.get("--manifest"), opts.get("--wave2"))

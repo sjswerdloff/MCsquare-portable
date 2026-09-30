@@ -19,6 +19,12 @@ Recorded timestamps (NZDT):
 - 2026-10-01, during wave 1, before any result was read — review-driven amendments (alden-ec2221c7, review 6821):
   the analyzer validates the dataset and fails closed before inference, and keeps a stop state between looks; the
   workflow refuses a failed build or stale output (prospective, for wave 2; no completed seed is re-run or dropped).
+- 2026-10-01, still before any result was read (alden-ec2221c7, review comment 27527): input identity is verified
+  against a frozen manifest (`validation/platform_study_manifest.py` / `.json`, built from `7d07db0`: LF, or CRLF on
+  Windows only, for every text input; `cube.raw` exact; the reconstructed `cfg.txt` per platform and seed; one binary
+  hash per platform); look-1 verdicts are bound to the analyzer, the manifest and the wave-1 records; the wave-2
+  commit lives in `validation/platform_study_wave2.json`; the workflow builds with `make -B` into an exclusively
+  created `out_seed` and deletes nothing.
 - First inspection of results: recorded here when it happens.
 
 ## Question

@@ -33,15 +33,14 @@ jobs:
           D="$HOME/fe-study/$STUDY/linux/seed_$SEED"
           if [ -e "$D" ]; then echo "$D exists: not overwriting"; exit 1; fi
           hostname; lscpu | grep 'Model name'; CC="$(gcc --version | head -1)"; echo "$CC"
-          rm -rf out_seed MCsquare_portable   # a stale binary or output in a reused workspace must not count as this run's
-          make MCsquare_portable
+          make -B MCsquare_portable   # -B: rebuild unconditionally, so a stale binary cannot stand in for this run's
           uv run --no-project --with numpy python validation/field_edge_make_cases.py 200 150
           printf '%s\n' "Num_Threads 3" "Num_Primaries $PRIMARIES" "RNG_Seed $SEED" "CT_File cube.mhd" \
             "HU_Density_Conversion_File Scanners/default/HU_Density_Conversion.txt" \
             "HU_Material_Conversion_File Scanners/default/HU_Material_Conversion.txt" \
             "BDL_Machine_Parameter_File BDL/BDL_default_DN_RangeShifter.txt" \
             "BDL_Plan_File E200_S150.txt" "Output_Directory out_seed" "Dose_MHD_Output True" > cfg.txt
-          mkdir out_seed
+          mkdir out_seed   # no -p: an existing out_seed fails the job (set -e)
           start=$(date +%s); ./MCsquare_portable cfg.txt > log.txt 2>&1 || { tail -20 log.txt; exit 1; }
           echo "RUN linux seed=$SEED wall_s=$(( $(date +%s) - start ))"; test -s out_seed/Dose.raw
           mkdir -p "$D"; cp out_seed/Dose.raw out_seed/Dose.mhd cfg.txt E200_S150.txt cube.mhd log.txt "$D"/
@@ -67,15 +66,14 @@ jobs:
           D="$HOME/fe-study/$STUDY/macos/seed_$SEED"
           if [ -e "$D" ]; then echo "$D exists: not overwriting"; exit 1; fi
           hostname; sysctl -n machdep.cpu.brand_string; CC="$(clang --version | head -1)"; echo "$CC"
-          rm -rf out_seed MCsquare_arm64   # a stale binary or output in a reused workspace must not count as this run's
-          make MCsquare_arm64
+          make -B MCsquare_arm64   # -B: rebuild unconditionally, so a stale binary cannot stand in for this run's
           "$UV" run --no-project --with numpy python validation/field_edge_make_cases.py 200 150
           printf '%s\n' "Num_Threads 3" "Num_Primaries $PRIMARIES" "RNG_Seed $SEED" "CT_File cube.mhd" \
             "HU_Density_Conversion_File Scanners/default/HU_Density_Conversion.txt" \
             "HU_Material_Conversion_File Scanners/default/HU_Material_Conversion.txt" \
             "BDL_Machine_Parameter_File BDL/BDL_default_DN_RangeShifter.txt" \
             "BDL_Plan_File E200_S150.txt" "Output_Directory out_seed" "Dose_MHD_Output True" > cfg.txt
-          mkdir out_seed
+          mkdir out_seed   # no -p: an existing out_seed fails the job (set -e)
           start=$(date +%s); ./MCsquare_arm64 cfg.txt > log.txt 2>&1 || { tail -20 log.txt; exit 1; }
           echo "RUN macos seed=$SEED wall_s=$(( $(date +%s) - start ))"; test -s out_seed/Dose.raw
           mkdir -p "$D"; cp out_seed/Dose.raw out_seed/Dose.mhd cfg.txt E200_S150.txt cube.mhd log.txt "$D"/
@@ -112,9 +110,7 @@ jobs:
           if (-not (Test-Path $py)) { throw "MSYS2 python not installed" }
           $cc = (& "$m\ucrt64\bin\gcc.exe" --version | Select-Object -First 1)
           $cc
-          # A stale binary or output in a reused workspace must not count as this run's.
-          Remove-Item -Recurse -Force out_seed, MCsquare_win_portable.exe -ErrorAction SilentlyContinue
-          & "$m\usr\bin\bash.exe" -lc 'make MCsquare_win_portable' 2>&1 | Select-Object -Last 3
+          & "$m\usr\bin\bash.exe" -lc 'make -B MCsquare_win_portable' 2>&1 | Select-Object -Last 3
           if ($LASTEXITCODE -ne 0) { throw "build failed: make exit $LASTEXITCODE" }
           if (-not (Test-Path MCsquare_win_portable.exe)) { throw "build failed: no binary" }
           $env:PATH = "$m\ucrt64\bin;$env:PATH"
@@ -126,7 +122,7 @@ jobs:
             "BDL_Machine_Parameter_File BDL/BDL_default_DN_RangeShifter.txt",
             "BDL_Plan_File E200_S150.txt", "Output_Directory out_seed", "Dose_MHD_Output True") |
             Set-Content -Encoding Ascii cfg.txt
-          New-Item -ItemType Directory out_seed | Out-Null
+          New-Item -ItemType Directory out_seed -ErrorAction Stop | Out-Null   # no -Force: an existing out_seed is an error
           $t = Get-Date
           & .\MCsquare_win_portable.exe cfg.txt *> log.txt
           $rc = $LASTEXITCODE
