@@ -23,28 +23,40 @@ profiled**.
 
 ## Accuracy guardrails (must come before any speed claim)
 
-1. **Changes that keep the arithmetic the same** (link-time and profile-guided optimisation, threading and
-   work-distribution changes that don't alter per-history arithmetic): on **1 thread**, where runs are seed-reproducible
-   (#39 affects >1 thread only), require **bit-identical** `Dose.raw` against the current build for several seeds and
-   energies. Pass/fail, no judgement.
-2. **Changes that alter floating-point results** (vectorised maths, NEON intrinsics with different rounding): bitwise
-   identity isn't possible. They need the statistical comparison this repo already has: R80, σ and ring energy
-   fractions against the current build over multiple seeds, reported against the reference bands in
-   `validation/topas_design.md`. **These are physics-adjacent and need sjswerdloff's approval** under the
-   no-physics-changes rule for portable.
-3. **Excluded:** `-ffast-math` and similar. It licenses reordering and dropping operations in ways that can't be
-   audited for medical-grade use.
+1. **Same-arithmetic check, for the deterministic path.** On **1 thread**, where runs are seed-reproducible (#39
+   affects >1 thread only), require **bit-identical** `Dose.raw` against the current build for several seeds and
+   energies. A change is in this class only if it actually MEETS that criterion. No optimisation is assumed to
+   preserve IEEE results because of its name; LTO and PGO usually do, but the test decides.
+2. **Production-thread checks, for anything touching threading or work distribution.** A 1-thread pass is not
+   sufficient here, because the changed behaviour only exists with >1 thread. At the intended thread count require:
+   - actual primary accounting: simulated count against requested, with no lost or duplicated work;
+   - an account of how RNG streams are constructed and in what order draws happen, and what that changes;
+   - a multi-run statistical comparison against the current build.
+3. **Floating-point-changing work** (vectorised maths, NEON intrinsics with different rounding): bitwise identity isn't
+   possible. Such work needs **change-specific accuracy requirements, justified and agreed BEFORE any speed claim**,
+   with an uncertainty and acceptance decision for each quantity it could affect. **The reference bands in
+   `validation/topas_design.md` are reporting references for the TOPAS comparison, not acceptance criteria for an
+   optimisation**: a difference inside those bands does not establish that no accuracy was lost. Study plots against
+   the bands stay descriptive. These changes are physics-adjacent and need sjswerdloff's approval under the
+   no-physics-changes rule for portable. The review and evidence have to be for the production configuration (build,
+   flags, threads), even when a 1-thread control passes.
+4. **Excluded by policy:** `-ffast-math` and similar flags, because they relax floating-point semantics (ordering,
+   NaN/inf handling, reassociation) that the transport code relies on.
+
+**Timing baselines are recorded with their conditions:** compiler and version, flags, binary sha256, host, thread
+count, inputs (case and config hashes), and the actual simulated history count. Otherwise an apparent speed-up can be
+a workload change: #39's shared counter can overshoot N, and an idle host is not a loaded one.
 
 ## Candidate levers, cheapest first
 
 | # | lever | scope | expected | accuracy class |
 |---|---|---|---|---|
 | 0 | clean baseline on an idle Studio, then profile (`sample`/Instruments, clang `-Rpass=loop-vectorize` / `-Rpass-missed`) | all | tells us where time goes | none, measurement only |
-| 1 | link-time optimisation (`-flto`) and profile-guided optimisation (`-fprofile-generate` / `-fprofile-use`) | any compiler/host | typically 10–30% | 1: bit-identical at 1 thread |
-| 2 | hand out primaries in blocks instead of one atomic increment each | all hosts | unknown until profiled | 1, if per-history arithmetic is unchanged |
-| 3 | vectorised maths: SLEEF via clang `-fveclib`, or Apple Accelerate/vForce | SLEEF: any ARM or x86; Accelerate: macOS | the most plausible route to 2× **if** maths calls dominate | 2: statistical, needs approval |
-| 4 | NEON intrinsics for one or two hot kernels the compiler fails on | any AArch64 | only if the profile shows it | 2 |
-| 5 | Metal GPU port | Apple only | where 10×-class gains live for this kind of code | a port, not an optimisation; full validation |
+| 1 | link-time optimisation (`-flto`) and profile-guided optimisation (`-fprofile-generate` / `-fprofile-use`) | any compiler/host | heuristic only: often 10–30% in other codes, not measured here | 1, if the 1-thread bitwise criterion is actually met |
+| 2 | hand out primaries in blocks instead of one atomic increment each | all hosts | unknown until profiled | 2: production-thread checks (1-thread bitwise is not enough) |
+| 3 | vectorised maths: SLEEF via clang `-fveclib=SLEEFGNUABI` (needs libsleef at link time), or Apple Accelerate/vForce | SLEEF: any ARM or x86; Accelerate: macOS | the most plausible route to 2× **if** maths calls dominate (heuristic) | 3: change-specific criteria, needs approval |
+| 4 | NEON intrinsics for one or two hot kernels the compiler fails on | any AArch64 | only if the profile shows it | 3 |
+| 5 | Metal GPU port | Apple only | heuristic: other GPU Monte Carlo codes report 10×-class gains; nothing measured for this engine | a port, not an optimisation; full validation |
 
 Hand-written assembly isn't listed separately. Intrinsics get the same vector instructions and stay reviewable, and
 assembly is only worth it if a profiled kernel resists both the compiler and intrinsics.
@@ -53,7 +65,7 @@ assembly is only worth it if a profiled kernel resists both the compiler and int
 
 - **Any AArch64** (Apple M-series, AWS Graviton, Ampere, Linux ARM): levers 1–4 with SLEEF, and host tuning via
   `-mcpu=native` as today.
-- **Apple only:** Accelerate (also the only supported route to the M-series matrix units) and Metal.
+- **Apple only:** Accelerate and Metal. Accelerate is also Apple's only supported route to the CPU-side AMX matrix units. Those are distinct from the GPU, which is reached through Metal, and from the Neural Engine, which isn't relevant here.
 - **ARM servers only:** SVE (Graviton/Neoverse). The M1–M3 chips don't have it, so it can't be developed or tested on
   the Studio.
 - **Recommendation:** target ARM generally (NEON + SLEEF + LTO/PGO) and keep Apple-only paths optional, added only if a
@@ -61,6 +73,7 @@ assembly is only worth it if a profiled kernel resists both the compiler and int
 
 ## Suggested first step, when this is picked up
 
-A clean baseline and a profile on the Studio, then lever 1 behind the 1-thread bit-identical check. That shows within
-about a day whether 2× is plausible without changing the arithmetic. It must not change the build used by an
-in-progress validation study; the TOPAS comparison (#32/#33) pins its own build.
+A clean, recorded baseline and a profile on the Studio, then lever 1 checked against guardrail 1. That shows where
+the time goes, and whether lever 1 meets the bitwise criterion and what it buys. It does not by itself say whether 2×
+is reachable. None of this may change the build used by an in-progress validation study: the TOPAS comparison
+(#32/#33) pins its own build.
