@@ -60,7 +60,7 @@ def write_bdl(energy: float, nozzle_mm: float) -> str:
         "# two identical rows bracketing the energy; see validation/topas_design.md",
         "",
         "Nozzle exit to Isocenter distance",
-        f"{nozzle_mm:.1f}",
+        NOZZLE_FMT.format(nozzle_mm),  # NOZZLE_FMT: validate() checks this serialised value
         "",
         "SMX to Isocenter distance",
         f"{SM_DISTANCE_MM:.1f}",
@@ -107,7 +107,7 @@ def write_plan(energy: float, iso: tuple[float, float, float]) -> str:
         "###PatientSupportAngle",
         "0.000000",
         "###IsocenterPosition",
-        f"{iso[0]:f}\t {iso[1]:f}\t {iso[2]:f}",
+        "\t ".join(COORD_FMT.format(c) for c in iso),
         "###NumberOfControlPoints",
         "1",
         "",
@@ -131,6 +131,13 @@ def write_plan(energy: float, iso: tuple[float, float, float]) -> str:
 
 
 ENERGY_RANGE_MEV = (10, 300)
+NOZZLE_FMT = "{:.1f}"  # as written into the BDL
+COORD_FMT = "{:f}"  # as written into the plan
+
+
+def serialised(nozzle: float, iso_y: float) -> tuple[float, float]:
+    """The nozzle and isocentre depth exactly as the files will carry them (alden-ec2221c7, #40: 0.01 -> 0.0)."""
+    return float(NOZZLE_FMT.format(nozzle)), float(COORD_FMT.format(iso_y))
 
 
 def validate(energy: float, nx: int, ny: int, nz: int, iso_y: float, nozzle: float) -> None:
@@ -176,12 +183,16 @@ def main() -> None:
     )
     a = p.parse_args()
     try:
-        validate(a.energy, a.nx, a.ny, a.nz, a.iso_y, a.nozzle)
+        for name, v in (("iso_y", a.iso_y), ("nozzle", a.nozzle)):
+            if not math.isfinite(v):
+                raise ValueError(f"{name} must be finite, got {v}")
+        nozzle_s, iso_y_s = serialised(a.nozzle, a.iso_y)
+        validate(a.energy, a.nx, a.ny, a.nz, iso_y_s, nozzle_s)  # the values the files will contain, not the inputs
     except ValueError as e:
         p.error(str(e))
-    iso = (a.nx / 2, a.iso_y, a.nz / 2)
+    iso = (a.nx / 2, iso_y_s, a.nz / 2)
     write_ct(a.nx, a.ny, a.nz)
-    print(write_bdl(a.energy, a.nozzle))
+    print(write_bdl(a.energy, nozzle_s))
     print(write_plan(a.energy, iso))
 
 

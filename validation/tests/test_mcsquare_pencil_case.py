@@ -39,6 +39,9 @@ def test_valid_case_writes_all_inputs_with_lf_and_exact_bdl_header(tmp_path):
         ["200", "--iso-y", "6", "--nozzle", "-1"],
         ["200", "--iso-y", "6", "--nx", "5"],  # odd lateral size
         ["200", "--iso-y", "0", "--ny", "0"],
+        ["200", "--iso-y", "6", "--nozzle", "0.01"],  # serialises to 0.0: the source-on-face trap again
+        ["200", "--iso-y", "6", "--nozzle", "0.04"],
+        ["200", "--iso-y", "4.99", "--nozzle", "1.04"],  # raw plane 6.03 outside; written 5.99 inside
     ],
 )
 def test_invalid_settings_are_refused_and_write_nothing(tmp_path, args):
@@ -46,3 +49,11 @@ def test_invalid_settings_are_refused_and_write_nothing(tmp_path, args):
     r = _run(tmp_path, *full)
     assert r.returncode != 0
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("nozzle, written", [("0.05", "0.1"), ("0.96", "1.0")])
+def test_nozzle_rounding_edge_is_accepted_only_when_the_written_value_is_valid(tmp_path, nozzle, written):
+    r = _run(tmp_path, "200", "--nx", "4", "--ny", "6", "--nz", "4", "--iso-y", "6", "--nozzle", nozzle)
+    assert r.returncode == 0, r.stderr
+    lines = (tmp_path / "bdl_E200.txt").read_text().splitlines()
+    assert lines[lines.index("Nozzle exit to Isocenter distance") + 1] == written

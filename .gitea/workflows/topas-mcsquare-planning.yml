@@ -89,7 +89,7 @@ jobs:
           (cd "$ROOT/snapshot" && find Materials -type f -print0 | sort -z | xargs -0 shasum -a 256 > materials_sha256.txt)
           SNAP="$ROOT/snapshot"
           # A failed run still leaves a record of what it was and why it stopped.
-          fail_run() { printf '{"seed": %s, "requested": "%s", "status": "%s"}\n' "$SEED" "$N" "$1" > "$D/run.json"; echo "$1: refusing"; exit 1; }
+          fail_run() { printf '{"seed": %s, "requested": "%s", "transport_status": "%s"}\n' "$SEED" "$N" "$1" > "$D/run.json"; echo "$1: refusing"; exit 1; }
           CASE="$ROOT/case"; mkdir "$CASE"
           (cd "$CASE" && "$UV" run --no-project --with numpy python "$SNAP/mcsquare_pencil_case.py" \
             "$ENERGY" --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1)
@@ -115,7 +115,7 @@ jobs:
             if grep -q 'generated outside the geometry' "$D/log.txt"; then fail_run "primaries_outside_geometry"; fi
             (cd "$D/out" && shasum -a 256 Dose.raw Dose.mhd > sha256.txt)
             REQ=$(printf '%.0f' "$N")
-            printf '{"seed": %s, "requested": %s, "simulated": %s, "overshoot": %s, "threads": %s, "energy_mev": %s, "binary_sha256": "%s", "start_utc": "%s", "end_utc": "%s", "wall_s": %s, "status": "ok"}\n' \
+            printf '{"seed": %s, "requested": %s, "simulated": %s, "overshoot": %s, "threads": %s, "energy_mev": %s, "binary_sha256": "%s", "start_utc": "%s", "end_utc": "%s", "wall_s": %s, "transport_status": "ok"}\n' \
               "$SEED" "$REQ" "$SIM" "$((SIM - REQ))" "$THREADS" "$ENERGY" "$(awk '{print $1}' "$B/sha256.txt")" "$START_UTC" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$WALL" > "$D/run.json"
             cat "$D/run.json"
             echo "RUN seed=$SEED N=$N wall_s=$WALL"

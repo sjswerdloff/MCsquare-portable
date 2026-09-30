@@ -161,7 +161,7 @@ jobs:
               "Output_Directory $D\out", "Dose_MHD_Output True") | Set-Content -Encoding Ascii "$D\config.txt"
             $t = Get-Date; $startUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
             $req = [int64][double]$N
-            function Fail-Run($status) { "{`"seed`": $SEED, `"requested`": $req, `"status`": `"$status`"}" | Set-Content -Encoding Ascii "$D\run.json"; throw "run $SEED $status" }
+            function Fail-Run($status) { "{`"seed`": $SEED, `"requested`": $req, `"transport_status`": `"$status`"}" | Set-Content -Encoding Ascii "$D\run.json"; throw "run $SEED $status" }
             $ErrorActionPreference = 'Continue'
             & "$B\MCsquare.exe" "$D\config.txt" *> "$D\log.txt"
             $rc = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
@@ -175,7 +175,7 @@ jobs:
             if (Select-String -Path "$D\log.txt" -Pattern 'generated outside the geometry' -Quiet) { Fail-Run "primaries_outside_geometry" }
             Get-ChildItem "$D\out\Dose.raw", "$D\out\Dose.mhd" | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content -Encoding Ascii "$D\out\sha256.txt"
             $binsha = ((Get-Content "$B\sha256.txt") -split '\s+')[0]
-            "{`"seed`": $SEED, `"requested`": $req, `"simulated`": $sim, `"overshoot`": $($sim - $req), `"threads`": $env:THREADS, `"energy_mev`": $env:ENERGY, `"binary_sha256`": `"$binsha`", `"start_utc`": `"$startUtc`", `"end_utc`": `"$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))`", `"wall_s`": $wall, `"status`": `"ok`"}" | Set-Content -Encoding Ascii "$D\run.json"
+            "{`"seed`": $SEED, `"requested`": $req, `"simulated`": $sim, `"overshoot`": $($sim - $req), `"threads`": $env:THREADS, `"energy_mev`": $env:ENERGY, `"binary_sha256`": `"$binsha`", `"start_utc`": `"$startUtc`", `"end_utc`": `"$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))`", `"wall_s`": $wall, `"transport_status`": `"ok`"}" | Set-Content -Encoding Ascii "$D\run.json"
             Get-Content "$D\run.json"
             "RUN seed=$SEED N=$N rc=$rc wall_s=$wall"
             & $py "$SNAP\pencil_endpoints.py" mcsquare "$D\out\Dose.mhd" --label "openmcsquare_fix_$($env:TARGET)_E$($env:ENERGY)_N$($N)_seed$($SEED)_wall$wall" | Tee-Object -FilePath "$D\endpoints.json"
