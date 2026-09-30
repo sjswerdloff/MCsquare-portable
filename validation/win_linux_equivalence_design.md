@@ -1,4 +1,6 @@
-# Windows vs Linux dose: pre-registered design (margins decided by sjswerdloff, 2026-09-30)
+# Portable MCsquare across platforms (Windows, Linux, macOS arm64): pre-registered design
+
+Margins decided by sjswerdloff, 2026-09-30. The macOS arm64 arm was added on his instruction the same day, before any study data.
 
 Status: **design only. No study data exists.** The analysis below is fixed before any study run. The only data seen
 so far is the two-seed pilot on #28 (comment 27347), which is used here for planning and is **excluded** from the
@@ -6,15 +8,20 @@ study analysis. Changes after the first study result would be visible in this fi
 
 ## Question
 
-On the same machine, the same source revision gives dose distributions from `MCsquare_win_portable.exe` (Windows
-native, MSYS2 UCRT64 GCC) and `MCsquare_portable` (Linux/WSL2, gcc). Do these differ from each other by less than a
-stated tolerance (**equivalence**, primary)? Is there **any detectable difference** at all (secondary, reported but
-not used to stop)?
+The same source revision is built three ways:
+- `MCsquare_win_portable.exe`: Windows native, MSYS2 UCRT64 GCC;
+- `MCsquare_portable`: Linux/WSL2, gcc;
+- `MCsquare_arm64`: macOS arm64, Apple clang + Homebrew libomp.
+
+Linux is the reference. There are two comparisons: **Windows vs Linux** and **macOS vs Linux**. For each, do the
+dose distributions differ by less than a stated tolerance (**equivalence**, primary)? Is there **any detectable
+difference** at all (secondary, reported but not used to stop)?
 
 ## Fixed conditions (identical on both platforms)
 
 - **Machines (sjswerdloff, 2026-09-30):** Linux on the HP (DESKTOP-5H86O9N, i5-6500T, WSL2 Ubuntu), which has the
-  only Linux runner. Windows native on the Lenovo (DESKTOP-SR5GKKA, i5-6400T).
+  only Linux runner. Windows native on the Lenovo (DESKTOP-SR5GKKA, i5-6400T). macOS arm64 on the Mac Studio
+  (M3 Ultra), pinned by its existing runner label `stuart-m3ultra-canary`. All three arms run in parallel.
   - **Why this is sound:** both are Skylake. Both builds target generic x86-64 (no `-march=native`), and both
     Windows boxes use the same MSYS2 GCC 16.2.0. The same instruction stream should compute identically on either
     machine.
@@ -29,7 +36,8 @@ not used to stop)?
 - **Seeds: distinct streams per platform, so the two samples are independent.**
   - Windows: wave 1 uses 1001–1016, wave 2 uses 1017–1032.
   - Linux: wave 1 uses 2001–2016, wave 2 uses 2017–2032.
-  - No seed runs on both platforms.
+  - macOS: wave 1 uses 3001–3016, wave 2 uses 3017–3032.
+  - No seed runs on more than one platform. `Num_Threads 3` on all three.
 
 ## Metrics per seed (fixed voxel locations, computed identically on both platforms)
 
@@ -92,23 +100,26 @@ Pilot planning numbers, normal approximation, 90% power, one-sided α = 0.025 pe
   independent by construction, because each platform uses its own seeds (see Fixed conditions). Whether same-seed
   pairing would have helped is **unestablished**; two pilot seeds cannot estimate that correlation.
 - **Equivalence:** TOST for each endpoint. It passes if the (1 − 2α) CI for W − L lies inside ±δ.
-  - Equivalence of the platforms is claimed only if **all 13 endpoints pass**. That is an intersection-union test,
-    so no multiplicity adjustment is needed across endpoints for that joint claim.
+  - Equivalence is claimed **per comparison** (Windows vs Linux, macOS vs Linux), only if all 13 of its endpoints
+    pass. That is an intersection-union test, so no multiplicity adjustment is needed for either claim.
+  - "All three platforms equivalent" is claimed only if both comparisons pass, which is again intersection-union.
+  - **Each comparison stops independently** under the stopping rule. A comparison that has stopped runs no more
+    seeds; the Linux reference keeps running while either comparison needs wave 2.
 - **Sequential looks:** at most two, with α split by Bonferroni: α = 0.025 at each look, so a 95% CI per look. That
   keeps the overall one-sided error at or below 0.05 whatever happens at the first look.
 - **Difference detection (secondary, confirmatory at familywise 0.05):** two-sided Welch test per endpoint,
-  Holm-adjusted across the 13 endpoints at **α = 0.025 per look**, so two looks give familywise ≤ 0.05. A detected
+  Holm-adjusted across all **26** endpoint-comparisons at **α = 0.025 per look**, so two looks give familywise ≤ 0.05. A detected
   difference inside the margin is compatible with equivalence and is reported as such.
-- **Non-equivalence (confirmatory, study-wide):** at each look, simultaneous two-sided CIs for all 13 endpoints at
-  confidence 1 − 0.025/13 (Bonferroni over endpoints; each two-sided CI covers both directions). Over two looks, the
+- **Non-equivalence (confirmatory, study-wide):** at each look, simultaneous two-sided CIs for all 26 endpoint-comparisons at
+  confidence 1 − 0.025/26 (Bonferroni over endpoints and both comparisons; each two-sided CI covers both directions). Over two looks, the
   familywise chance of a false non-equivalence claim is ≤ 0.05. A per-look 95% CI lying outside ±δ is only an
   **exploratory flag**.
 
 ## Stopping rule (fixed now)
 
-After **wave 1** (16 seeds per platform):
+Applied to **each comparison separately**. After **wave 1** (16 seeds per platform):
 1. **All 13 TOST CIs (95% at this look) inside ±δ:** equivalence claimed. Stop.
-2. **Any endpoint's simultaneous CI (confidence 1 − 0.025/13) lies entirely outside ±δ:** non-equivalence is
+2. **Any endpoint's simultaneous CI (confidence 1 − 0.025/26) lies entirely outside ±δ:** non-equivalence is
    claimed for that endpoint under the stated error budget. Stop. This is a statistical decision, not an
    impossibility: more independent data could still shift that interval.
 3. **Otherwise:** run **wave 2** (seeds 1017–1032) and analyse **all 32 seeds per platform pooled**. Wave 1 is
@@ -124,7 +135,7 @@ After **wave 1** (16 seeds per platform):
   - compiler version, source commit, host, start and end time;
   - the per-seed metrics as one JSON line in the job log.
 - **Where it is kept:** under a per-study directory on the machine (`C:\mcsq-win\fe-study\<study-id>\` and
-  `~/fe-study/<study-id>/` in WSL2). It is written once, and nothing in it is overwritten or deleted by any workflow.
+  `~/fe-study/<study-id>/` in WSL2 and on the Mac Studio). It is written once, and nothing in it is overwritten or deleted by any workflow.
   Artifact upload to Gitea currently fails (it advertises an upload URL on port 80), so the files stay on the HP
   unless that is fixed.
 
