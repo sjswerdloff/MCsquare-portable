@@ -75,13 +75,23 @@ jobs:
           cat "$B/build.txt"
           # Study outputs go to the T7, never the system disk (sjswerdloff). Fail closed if it is absent or read-only.
           [ -d "$STUDY_ROOT" ] || { echo "$STUDY_ROOT not present (T7 not mounted?): refusing"; exit 1; }
-          PROBE="$STUDY_ROOT/.write_probe_$GITHUB_RUN_NUMBER"; : > "$PROBE" && rm "$PROBE" || { echo "$STUDY_ROOT not writable: refusing"; exit 1; }
           ROOT="$STUDY_ROOT/planning/mcsquare-portable-$TARGET/$GITHUB_SHA/E${ENERGY}_run${GITHUB_RUN_NUMBER}"
           FREE_GB=$(df -g "$STUDY_ROOT" | awk 'NR==2 {print $4}')
           [ "$FREE_GB" -ge 20 ] || { echo "only ${FREE_GB} GB free on the T7: refusing"; exit 1; }
-          mkdir -p "$(dirname "$ROOT")"; mkdir "$ROOT"   # a second run at the same commit fails here, never overwrites
+          mkdir -p "$(dirname "$ROOT")"
+          mkdir "$ROOT" || { echo "cannot create $ROOT (exists, or the T7 is not writable): refusing"; exit 1; }
+          # Snapshot what runs, so nothing depends on the mutable checkout: scripts, scanner tables, materials hash.
+          mkdir "$ROOT/snapshot"
+          cp validation/mcsquare_pencil_case.py validation/pencil_endpoints.py Scanners/Water_Phantom/HU_*.txt "$ROOT/snapshot/"
+          cp "$B/build.txt" "$ROOT/snapshot/build.txt"; cp "$B/sha256.txt" "$ROOT/snapshot/binary_sha256.txt"
+          (cd "$ROOT/snapshot" && shasum -a 256 *.py *.txt > sha256.txt)
+          cp -R Materials "$ROOT/snapshot/Materials"
+          (cd "$ROOT/snapshot" && find Materials -type f -print0 | sort -z | xargs -0 shasum -a 256 > materials_sha256.txt)
+          SNAP="$ROOT/snapshot"
+          # A failed run still leaves a record of what it was and why it stopped.
+          fail_run() { printf '{"seed": %s, "requested": "%s", "status": "%s"}\n' "$SEED" "$N" "$1" > "$D/run.json"; echo "$1: refusing"; exit 1; }
           CASE="$ROOT/case"; mkdir "$CASE"
-          (cd "$CASE" && "$UV" run --no-project --with numpy python "$GITHUB_WORKSPACE/validation/mcsquare_pencil_case.py" \
+          (cd "$CASE" && "$UV" run --no-project --with numpy python "$SNAP/mcsquare_pencil_case.py" \
             "$ENERGY" --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1)
           (cd "$CASE" && shasum -a 256 water.raw water.mhd "bdl_E$ENERGY.txt" "plan_E$ENERGY.txt" > inputs_sha256.txt)
           for spec in $RUNS; do
@@ -91,21 +101,25 @@ jobs:
             # MCsquare's config parser splits values on whitespace, and the T7 path has a space in it, so every path
             # in config.txt is relative to the run directory (cwd) or absolute without spaces (clement-7074f29f, #40).
             printf '%s\n' "Num_Threads $THREADS" "Num_Primaries $N" "RNG_Seed $SEED" "CT_File ../case/water.mhd" \
-              "HU_Density_Conversion_File $GITHUB_WORKSPACE/Scanners/Water_Phantom/HU_Density_Conversion.txt" \
-              "HU_Material_Conversion_File $GITHUB_WORKSPACE/Scanners/Water_Phantom/HU_Material_Conversion.txt" \
+              "HU_Density_Conversion_File ../snapshot/HU_Density_Conversion.txt" \
+              "HU_Material_Conversion_File ../snapshot/HU_Material_Conversion.txt" \
               "BDL_Machine_Parameter_File ../case/bdl_E$ENERGY.txt" "BDL_Plan_File ../case/plan_E$ENERGY.txt" \
               "Output_Directory out" "Dose_MHD_Output True" > "$D/config.txt"
             awk 'NF != 2 {bad=1; print "config line is not KEY VALUE: " $0} END {exit bad}' "$D/config.txt"
-            start=$(date +%s)
-            (cd "$D" && MCsquare_Materials_Dir="$GITHUB_WORKSPACE/Materials/" "$B/MCsquare" config.txt) > "$D/log.txt" 2>&1 || { tail -20 "$D/log.txt"; exit 1; }
+            start=$(date +%s); START_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            (cd "$D" && MCsquare_Materials_Dir="$SNAP/Materials/" "$B/MCsquare" config.txt) > "$D/log.txt" 2>&1 || { tail -20 "$D/log.txt"; fail_run "mcsquare_exit_nonzero"; }
             WALL=$(( $(date +%s) - start ))
-            SIM=$(grep -o 'Nbr primaries simulated: [0-9]*' "$D/log.txt" | awk '{print $4}')
+            SIM=$(grep -o 'Nbr primaries simulated: [0-9]*' "$D/log.txt" | awk '{print $4}' || true)
             echo "Nbr primaries simulated: $SIM (requested $N; may exceed it slightly, see #39)"
-            [ -n "$SIM" ] && [ "$SIM" -ge "$(printf '%.0f' "$N")" ] || { echo "simulated count below N: refusing"; exit 1; }
-            if grep -q 'generated outside the geometry' "$D/log.txt"; then echo "primaries missed the phantom: refusing"; exit 1; fi
+            [ -n "$SIM" ] && [ "$SIM" -ge "$(printf '%.0f' "$N")" ] || fail_run "simulated_count_below_requested"
+            if grep -q 'generated outside the geometry' "$D/log.txt"; then fail_run "primaries_outside_geometry"; fi
             (cd "$D/out" && shasum -a 256 Dose.raw Dose.mhd > sha256.txt)
+            REQ=$(printf '%.0f' "$N")
+            printf '{"seed": %s, "requested": %s, "simulated": %s, "overshoot": %s, "threads": %s, "energy_mev": %s, "binary_sha256": "%s", "start_utc": "%s", "end_utc": "%s", "wall_s": %s, "status": "ok"}\n' \
+              "$SEED" "$REQ" "$SIM" "$((SIM - REQ))" "$THREADS" "$ENERGY" "$(awk '{print $1}' "$B/sha256.txt")" "$START_UTC" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$WALL" > "$D/run.json"
+            cat "$D/run.json"
             echo "RUN seed=$SEED N=$N wall_s=$WALL"
-            "$UV" run --no-project --with numpy --with scipy python "$GITHUB_WORKSPACE/validation/pencil_endpoints.py" \
+            "$UV" run --no-project --with numpy --with scipy python "$SNAP/pencil_endpoints.py" \
               mcsquare "$D/out/Dose.mhd" --label "portable_${TARGET}_E${ENERGY}_N${N}_seed${SEED}_wall${WALL}" | tee "$D/endpoints.json"
           done
           echo "outputs: $ROOT"

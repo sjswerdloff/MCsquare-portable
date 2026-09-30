@@ -20,7 +20,8 @@ Endpoints, per run:
                  no background). sigma = mean of the two fits; failed if it does not converge or leaves [1, 20].
   ring_{d}_{lo}_{hi}  energy fraction in the slab: dose in voxels whose centre radius is in [lo, hi), divided
                  by the dose over the whole scored plane in the slab.
-Diagnostics: sigma per axis, fitted centres (the centroid check), absolute IDD maximum, and the entrance slab
+Diagnostics: sigma per axis, fitted centres (the centroid check), the RAW IDD maximum (labelled with each code's
+normalisation, not comparable across codes), and the entrance slab
 (d = 3 mm), whose sigma checks the sampled spot against the BDL on the real build.
 
 Usage:
@@ -176,7 +177,7 @@ def endpoints(d: np.ndarray) -> dict:
     ca, cb = lateral_centres(d.shape[1]), lateral_centres(d.shape[2])
     radius = np.sqrt(ca[:, None] ** 2 + cb[None, :] ** 2)
     idd = d.sum(axis=(1, 2))
-    out: dict = {"idd_max": float(idd.max())}
+    out: dict = {"idd_max_raw": float(idd.max())}
     out["R80"], out["R80_multiple_crossings"] = r80(idd)
     for depth in SLAB_DEPTHS_MM:
         slab = d[slab_indices(depth)].sum(axis=0)
@@ -190,6 +191,16 @@ def endpoints(d: np.ndarray) -> dict:
             ring = float(slab[(radius >= lo) & (radius < hi)].sum())
             out[f"ring_{depth}_{lo}_{hi}"] = ring / total if total > 0 else None
     return out
+
+
+# The endpoints are ratios and shapes, so they do not depend on absolute scale. idd_max_raw DOES, and the two codes write
+# different quantities, so it is labelled and not comparable across codes until a validated per-primary path exists.
+NORMALISATION = {
+    "mcsquare": "Dose.mhd as MCsquare writes it: already PER SIMULATED PRIMARY (compute_scoring.c PostProcess_Scoring "
+    "multiplies by normalization / Nbr_simulated_primaries, then divides by voxel volume in cm3). The magnitude fits "
+    "eV per cm3 per primary; conversion to Gy is not validated. Do not divide by N again.",
+    "topas": "TOPAS Sum scorer as written: total over all histories, in Gy. Not divided by N.",
+}
 
 
 def main() -> int:
@@ -206,7 +217,13 @@ def main() -> int:
         canonical = canonical_from_topas
     if not np.allclose(spacing, [1.0, 1.0, 1.0]):
         raise SystemExit(f"expected 1 mm voxels, got {spacing}")
-    record = {"label": a.label, "layout": a.layout, "dims": dims, **endpoints(canonical(raw))}
+    record = {
+        "label": a.label,
+        "layout": a.layout,
+        "dims": dims,
+        "normalisation": NORMALISATION[a.layout],
+        **endpoints(canonical(raw)),
+    }
     print("ENDPOINTS " + json.dumps(record, sort_keys=True))
     return 0
 

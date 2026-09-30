@@ -43,9 +43,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           # The committed bytes, not the checkout's (autocrlf may rewrite line endings); cmd redirection keeps them.
-          cmd /c "git -c core.autocrlf=false show HEAD:$env:PATCH > fix.patch"
-          if ($LASTEXITCODE) { throw "could not write fix.patch" }
-          if ((Get-FileHash fix.patch -Algorithm SHA256).Hash.ToLower() -ne $env:PATCH_SHA256) { throw "patch sha256 mismatch" }
+          # Run-specific names, created exclusively: nothing that already exists is removed or overwritten.
+          $tag = "$env:GITHUB_RUN_ID"; $fixp = "fix_$tag.patch"; $tarp = "up_$tag.tar"; $upd = "up_fix_$tag"
+          foreach ($x in $fixp, $tarp, $upd) { if (Test-Path $x) { throw "$x already exists: refusing" } }
+          cmd /c "git -c core.autocrlf=false show HEAD:$env:PATCH > $fixp"
+          if ($LASTEXITCODE) { throw "could not write $fixp" }
+          if ((Get-FileHash $fixp -Algorithm SHA256).Hash.ToLower() -ne $env:PATCH_SHA256) { throw "patch sha256 mismatch" }
           $B = "C:\mcsq-win\builds\$($env:UPSTREAM.Substring(0,12))+$($env:PATCH_SHA256.Substring(0,12))\$env:TARGET"
           if (Test-Path "$B\sha256.txt") { "already built: $B"; Get-Content "$B\build.txt","$B\sha256.txt"; exit 0 }
           if (Test-Path $B) { throw "$B exists without sha256.txt (interrupted build): refusing" }
@@ -60,14 +63,14 @@ jobs:
           $mkllib = Split-Path (Get-ChildItem C:\mcsq-win\mkl -Recurse -Filter mkl_core_dll.lib | Select-Object -First 1).FullName
           $mklinc = Split-Path (Get-ChildItem C:\mcsq-win\mkl -Recurse -Filter mkl.h | Select-Object -First 1).FullName
           $env:INCLUDE = "$ompinc;$mklinc;$env:INCLUDE"; $env:LIB = "$cmplib;$mkllib;$env:LIB"; $env:PATH = "$(Split-Path $icl);$env:PATH"
-          git -c core.autocrlf=false archive -o up.tar $env:UPSTREAM
-          Remove-Item -Recurse -Force up_fix -ErrorAction SilentlyContinue; New-Item -ItemType Directory up_fix | Out-Null
-          tar -xf up.tar -C up_fix; if ($LASTEXITCODE) { throw "tar failed" }
+          git -c core.autocrlf=false archive -o $tarp $env:UPSTREAM
+          New-Item -ItemType Directory $upd | Out-Null
+          tar -xf $tarp -C $upd; if ($LASTEXITCODE) { throw "tar failed" }
           $ErrorActionPreference = 'Continue'
-          git apply --verbose --directory=up_fix fix.patch 2>&1 | ForEach-Object { "$_" }
+          git apply --verbose --directory=$upd $fixp 2>&1 | ForEach-Object { "$_" }
           $ok = ($LASTEXITCODE -eq 0); $ErrorActionPreference = 'Stop'
           if (-not $ok) { throw "patch did not apply" }
-          Push-Location up_fix
+          Push-Location $upd
           Set-Content -Encoding Ascii version.h "#define VERSION `"85bf2911 + fix patch $($env:PATCH_SHA256.Substring(0,12)), icl 2021.1 (Windows) + MKL 2021.1.1 (NuGet DLL)`""
           $src = (Get-ChildItem src\*.c).FullName
           $flags = @('-Qopenmp','-Qstd=c99','-MT','-Qdiag-disable:10441','/O3','/QxCORE-AVX2')
@@ -78,7 +81,7 @@ jobs:
           Pop-Location
           New-Item -ItemType Directory -Force (Split-Path $B) | Out-Null
           New-Item -ItemType Directory $B | Out-Null   # fails if a concurrent build created it
-          Copy-Item up_fix\MCsquare_win_avx2.exe "$B\MCsquare.exe"
+          Copy-Item "$upd\MCsquare_win_avx2.exe" "$B\MCsquare.exe"
           @("upstream $env:UPSTREAM", "patch sha256 $env:PATCH_SHA256", "commit $env:GITHUB_SHA", "host $env:COMPUTERNAME",
             "cpu $((Get-CimInstance Win32_Processor).Name)", "compiler $icl", "flags $($flags -join ' ') + MKL DLL import libs") |
             Set-Content -Encoding Ascii "$B\build.txt"
@@ -132,8 +135,14 @@ jobs:
           # Upstream's own data (Materials, Scanners) from 85bf2911: the arm runs upstream's code on upstream's data.
           git -c core.autocrlf=false archive -o "$ROOT\updata.tar" $env:UPSTREAM Materials Scanners
           tar -xf "$ROOT\updata.tar" -C $ROOT; if ($LASTEXITCODE) { throw "tar failed" }
+          $SNAP = "$ROOT\snapshot"; New-Item -ItemType Directory $SNAP | Out-Null
+          Copy-Item validation\mcsquare_pencil_case.py, validation\pencil_endpoints.py, "$B\build.txt" $SNAP
+          Copy-Item "$B\sha256.txt" "$SNAP\binary_sha256.txt"
+          Get-ChildItem $SNAP -File | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content -Encoding Ascii "$SNAP\sha256.txt"
+          Get-ChildItem "$ROOT\Materials", "$ROOT\Scanners" -Recurse -File | Sort-Object FullName | Get-FileHash -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $($_.Path.Substring($ROOT.Length + 1))" } | Set-Content -Encoding Ascii "$SNAP\upstream_data_sha256.txt"
           Push-Location $CASE
-          & $py "$env:GITHUB_WORKSPACE\validation\mcsquare_pencil_case.py" $env:ENERGY --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1
+          & $py "$SNAP\mcsquare_pencil_case.py" $env:ENERGY --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1
           if ($LASTEXITCODE) { throw "case generation failed" }
           Get-ChildItem | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content -Encoding Ascii inputs_sha256.txt
           Pop-Location
@@ -150,16 +159,26 @@ jobs:
               "HU_Material_Conversion_File $ROOT\Scanners\Water_Phantom\HU_Material_Conversion.txt",
               "BDL_Machine_Parameter_File $CASE\bdl_E$($env:ENERGY).txt", "BDL_Plan_File $CASE\plan_E$($env:ENERGY).txt",
               "Output_Directory $D\out", "Dose_MHD_Output True") | Set-Content -Encoding Ascii "$D\config.txt"
-            $t = Get-Date
+            $t = Get-Date; $startUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            $req = [int64][double]$N
+            function Fail-Run($status) { "{`"seed`": $SEED, `"requested`": $req, `"status`": `"$status`"}" | Set-Content -Encoding Ascii "$D\run.json"; throw "run $SEED $status" }
             $ErrorActionPreference = 'Continue'
             & "$B\MCsquare.exe" "$D\config.txt" *> "$D\log.txt"
             $rc = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
             $wall = [int]((Get-Date) - $t).TotalSeconds
-            if ($rc -ne 0 -or -not (Test-Path "$D\out\Dose.raw")) { Get-Content "$D\log.txt" -Tail 30; throw "run $SEED failed (rc $rc)" }
-            Select-String -Path "$D\log.txt" -Pattern 'Nbr primaries simulated' | ForEach-Object { $_.Line }
-            if (Select-String -Path "$D\log.txt" -Pattern 'generated outside the geometry' -Quiet) { throw "primaries missed the phantom: refusing" }
+            if ($rc -ne 0 -or -not (Test-Path "$D\out\Dose.raw")) { Get-Content "$D\log.txt" -Tail 30; Fail-Run "mcsquare_rc_$rc" }
+            $m = Select-String -Path "$D\log.txt" -Pattern 'Nbr primaries simulated: (\d+)' | Select-Object -First 1
+            if (-not $m) { Fail-Run "no_primaries_line" }
+            $sim = [int64]$m.Matches[0].Groups[1].Value
+            "Nbr primaries simulated: $sim (requested $req; may exceed it slightly, see #39)"
+            if ($sim -lt $req) { Fail-Run "simulated_count_below_requested" }
+            if (Select-String -Path "$D\log.txt" -Pattern 'generated outside the geometry' -Quiet) { Fail-Run "primaries_outside_geometry" }
+            Get-ChildItem "$D\out\Dose.raw", "$D\out\Dose.mhd" | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content -Encoding Ascii "$D\out\sha256.txt"
+            $binsha = ((Get-Content "$B\sha256.txt") -split '\s+')[0]
+            "{`"seed`": $SEED, `"requested`": $req, `"simulated`": $sim, `"overshoot`": $($sim - $req), `"threads`": $env:THREADS, `"energy_mev`": $env:ENERGY, `"binary_sha256`": `"$binsha`", `"start_utc`": `"$startUtc`", `"end_utc`": `"$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))`", `"wall_s`": $wall, `"status`": `"ok`"}" | Set-Content -Encoding Ascii "$D\run.json"
+            Get-Content "$D\run.json"
             "RUN seed=$SEED N=$N rc=$rc wall_s=$wall"
-            & $py "$env:GITHUB_WORKSPACE\validation\pencil_endpoints.py" mcsquare "$D\out\Dose.mhd" --label "openmcsquare_fix_$($env:TARGET)_E$($env:ENERGY)_N$($N)_seed$($SEED)_wall$wall" | Tee-Object -FilePath "$D\endpoints.json"
+            & $py "$SNAP\pencil_endpoints.py" mcsquare "$D\out\Dose.mhd" --label "openmcsquare_fix_$($env:TARGET)_E$($env:ENERGY)_N$($N)_seed$($SEED)_wall$wall" | Tee-Object -FilePath "$D\endpoints.json"
             if ($LASTEXITCODE) { throw "endpoints failed for $SEED" }
           }
           Pop-Location

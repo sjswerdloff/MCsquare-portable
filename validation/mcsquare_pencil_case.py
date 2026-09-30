@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import math
 
 import numpy as np
 
@@ -129,6 +130,34 @@ def write_plan(energy: float, iso: tuple[float, float, float]) -> str:
     return name
 
 
+ENERGY_RANGE_MEV = (10, 300)
+
+
+def validate(energy: float, nx: int, ny: int, nz: int, iso_y: float, nozzle: float) -> None:
+    """Refuse settings that would write a case MCsquare runs silently wrong, before anything is written.
+
+    Raises:
+        ValueError: naming the first violated condition.
+    """
+    for name, v in (("energy", energy), ("iso_y", iso_y), ("nozzle", nozzle)):
+        if not math.isfinite(v):
+            raise ValueError(f"{name} must be finite, got {v}")
+    if energy != round(energy) or not ENERGY_RANGE_MEV[0] <= energy <= ENERGY_RANGE_MEV[1]:
+        raise ValueError(f"energy must be a whole number of MeV in {ENERGY_RANGE_MEV} (file names use it), got {energy}")
+    if min(nx, ny, nz) <= 0:
+        raise ValueError(f"dimensions must be positive, got {nx} {ny} {nz}")
+    if nx % 2 or nz % 2:
+        raise ValueError("nx and nz must be even so the axis sits on the shared corner of the four central voxels")
+    if not 0 <= iso_y <= ny:
+        raise ValueError(f"iso_y must lie within the CT depth [0, {ny}] mm, got {iso_y}")
+    if nozzle <= 0:
+        raise ValueError(f"nozzle must be positive, got {nozzle}")
+    if iso_y + nozzle <= ny:
+        # The beam enters at y = NY travelling to -y; a source on or inside the CT starts in voxel index NY (one past
+        # the grid) or mid-phantom, and the dose lands in the wrong place with exit 0.
+        raise ValueError(f"source plane iso_y + nozzle = {iso_y + nozzle} mm must lie outside the CT (> {ny} mm)")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("energy", type=float)
@@ -146,8 +175,10 @@ def main() -> None:
         "source 1 mm upstream; MCsquare's air polynomial then removes 0.47-0.77 keV (200-100 MeV).",
     )
     a = p.parse_args()
-    if a.nx % 2 or a.nz % 2:
-        p.error("nx and nz must be even so the axis sits on the shared corner of the four central voxels")
+    try:
+        validate(a.energy, a.nx, a.ny, a.nz, a.iso_y, a.nozzle)
+    except ValueError as e:
+        p.error(str(e))
     iso = (a.nx / 2, a.iso_y, a.nz / 2)
     write_ct(a.nx, a.ny, a.nz)
     print(write_bdl(a.energy, a.nozzle))
