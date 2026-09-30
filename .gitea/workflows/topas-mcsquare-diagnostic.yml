@@ -27,7 +27,10 @@ env:
     200:ON:1e6:940001 200:ON:1e6:940002 200:ON:1e6:940003 200:ON:1e6:940004
     200:OFF:1e6:940011 200:OFF:1e6:940012 200:OFF:1e6:940013 200:OFF:1e6:940014
     70:ON:1e6:940021 70:ON:1e6:940022 70:ON:1e6:940023 70:ON:1e6:940024
-  STUDY_ROOT: /Volumes/T7 Shield/MonteCarlo_runs
+  # System disk, for THIS diagnostic only (sjswerdloff 2026-10-01, relayed by clement-7074f29f: "write to the system
+  # drive, especially if the output is only a few gb"; 12 x 224 MB). The first trigger (a3a8fcd, task 10500) targeted
+  # the T7 and failed before creating a run root; the runner has never written to the T7, an unanswered question for main acquisition.
+  STUDY_ROOT: /Users/gitearunner/topas-study
   THREADS: "24"
 
 jobs:
@@ -68,12 +71,12 @@ jobs:
           B="$HOME/mcsq-builds/$GITHUB_SHA/$TARGET"
           (cd "$B" && shasum -a 256 -c sha256.txt)   # never compile here; the recorded binary or nothing
           cat "$B/build.txt"
-          [ -d "$STUDY_ROOT" ] || { echo "$STUDY_ROOT not present (T7 not mounted?): refusing"; exit 1; }
+          [ -d "$STUDY_ROOT" ] || { echo "$STUDY_ROOT not present: refusing"; exit 1; }
           ROOT="$STUDY_ROOT/diagnostic/mcsquare-portable-$TARGET/$GITHUB_SHA/run${GITHUB_RUN_NUMBER}"
           FREE_GB=$(df -g "$STUDY_ROOT" | awk 'NR==2 {print $4}')
-          [ "$FREE_GB" -ge 20 ] || { echo "only ${FREE_GB} GB free on the T7: refusing"; exit 1; }
+          [ "$FREE_GB" -ge 20 ] || { echo "only ${FREE_GB} GB free under $STUDY_ROOT: refusing"; exit 1; }
           mkdir -p "$(dirname "$ROOT")"
-          mkdir "$ROOT" || { echo "cannot create $ROOT (exists, or the T7 is not writable): refusing"; exit 1; }
+          mkdir "$ROOT" || { echo "cannot create $ROOT (exists, or not writable): refusing"; exit 1; }
           mkdir "$ROOT/snapshot"
           cp validation/mcsquare_pencil_case.py validation/pencil_endpoints.py Scanners/Water_Phantom/HU_*.txt "$ROOT/snapshot/"
           cp "$B/build.txt" "$ROOT/snapshot/build.txt"; cp "$B/sha256.txt" "$ROOT/snapshot/binary_sha256.txt"
