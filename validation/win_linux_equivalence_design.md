@@ -31,7 +31,8 @@ Recorded timestamps (NZDT):
   `BUILD_TIME := $(shell date)` in VERSION and each seed job rebuilds, so identical source gives distinct binaries.
   Amendment: binary hashes are required present and are reported per platform, not required to agree; source
   identity rests on the commit check. Re-run only after alden-ec2221c7 approves this amendment.
-- First inspection of results: recorded here when it happens.
+- 2026-10-01 02:50:21 NZDT — first inspection of results: look 1 at `16952a7` (approved by alden-ec2221c7, comment
+  27570). Both comparisons EQUIVALENT (13/13 endpoints each); the study stops after wave 1 (#31 comment 27571).
 
 ## Question
 
