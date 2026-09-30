@@ -11,10 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pencil_endpoints import (
     _integrated_gaussian,
     canonical_from_mcsquare,
+    canonical_from_topas,
     endpoints,
     lateral_centres,
     r80,
     read_mhd,
+    read_topas_bin,
     slab_indices,
 )
 
@@ -129,3 +131,71 @@ def test_nonfinite_dose_is_refused():
     d[5, 5, 5] = np.nan
     with pytest.raises(ValueError):
         endpoints(d)
+
+
+def _write_topas(tmp_path, v, header_bins=None, report="Sum", scorer="Dose", extra_bytes=b"", drop_bytes=0):
+    """Write v[ix, iy, kz] as TOPAS does: doubles, x fastest, plus a .binheader."""
+    nx, ny, nz = header_bins or v.shape
+    payload = np.asfortranarray(v, dtype="<f8").tobytes(order="F")
+    payload = payload[: len(payload) - drop_bytes] + extra_bytes
+    (tmp_path / "dose.bin").write_bytes(payload)
+    (tmp_path / "dose.binheader").write_text(
+        f"# TOPAS Version: 4.3\n# Results for scorer: {scorer}\n"
+        f"# X in {nx} bins of 0.1 cm\n# Y in {ny} bins of 0.1 cm\n# Z in {nz} bins of 0.1 cm\n"
+        f"# DoseToMedium ( Gy ) : {report}   \n"
+        "# Binary file: dose.bin\n"
+    )
+    return tmp_path / "dose.bin"
+
+
+def test_topas_layout_on_asymmetric_phantom(tmp_path):
+    """A marked voxel at TOPAS (ix, iy, kz) lands at canonical (depth from the z = +HLZ face, ix, iy)."""
+    nx, ny, nz = 4, 6, 10
+    v = np.zeros((nx, ny, nz))
+    v[1, 4, nz - 1] = 1.0  # entrance face (the beam comes in at +z)
+    v[3, 0, 0] = 2.0  # far face
+    arr, dims, spacing = read_topas_bin(_write_topas(tmp_path, v))
+    assert dims == [nx, ny, nz] and spacing == pytest.approx([1.0, 1.0, 1.0])
+    assert np.array_equal(arr, v)  # x-fastest byte order read back exactly
+    d = canonical_from_topas(arr)
+    assert d.shape == (nz, nx, ny)
+    assert d[0, 1, 4] == 1.0  # entrance voxel is depth bin 0
+    assert d[nz - 1, 3, 0] == 2.0  # far face is the last depth bin
+    assert d.sum() == 3.0
+
+
+def test_topas_reader_accepts_the_valid_control(tmp_path):
+    v = np.arange(8.0).reshape(2, 2, 2)
+    arr, _, _ = read_topas_bin(_write_topas(tmp_path, v))
+    assert np.array_equal(arr, v)
+
+
+@pytest.mark.parametrize("extra", range(1, 8))
+def test_topas_reader_rejects_trailing_partial_double(tmp_path, extra):
+    with pytest.raises(ValueError):
+        read_topas_bin(_write_topas(tmp_path, np.zeros((2, 2, 2)), extra_bytes=b"\0" * extra))
+
+
+@pytest.mark.parametrize("drop", [1, 7, 8])
+def test_topas_reader_rejects_truncation(tmp_path, drop):
+    with pytest.raises(ValueError):
+        read_topas_bin(_write_topas(tmp_path, np.zeros((2, 2, 2)), drop_bytes=drop))
+
+
+def test_topas_reader_rejects_header_demanding_more_voxels(tmp_path):
+    with pytest.raises(ValueError):
+        read_topas_bin(_write_topas(tmp_path, np.zeros((2, 2, 2)), header_bins=(2, 2, 3)))
+
+
+@pytest.mark.parametrize(
+    "report, scorer",
+    [("Mean", "DoseSum"), ("Mean", "Dose"), ("Sum Mean", "Dose"), ("Mean Sum", "Dose"), ("Standard_Deviation", "Sum")],
+)
+def test_topas_reader_rejects_anything_but_a_single_sum_report(tmp_path, report, scorer):
+    with pytest.raises(ValueError):
+        read_topas_bin(_write_topas(tmp_path, np.zeros((2, 2, 2)), report=report, scorer=scorer))
+
+
+def test_topas_reader_rejects_zero_bins(tmp_path):
+    with pytest.raises(ValueError):
+        read_topas_bin(_write_topas(tmp_path, np.zeros((2, 2, 2)), header_bins=(0, 2, 2)))

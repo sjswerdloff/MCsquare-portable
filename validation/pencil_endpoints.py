@@ -4,9 +4,12 @@ Every endpoint is computed on one CANONICAL array D[k, a, b]:
   k  depth bin, centre (k + 0.5) mm below the entrance surface
   a, b  lateral bins, 1 mm, centres (i + 0.5 - N/2) mm, so the beam axis is the shared corner of the four
         central voxels (x = y = 0 between indices N/2 - 1 and N/2)
-Loaders map each code's own layout onto it. Only the MCsquare loader is here so far; its layout was established
-on an asymmetric probe (gantry 0: MCsquare's internal y is the beam axis, and the beam enters through the
-y = NY face, so depth bin k is MCsquare index j = NY - 1 - k).
+Loaders map each code's own layout onto it.
+  MCsquare  established on an asymmetric probe (gantry 0: MCsquare's internal y is the beam axis, and the beam
+            enters through the y = NY face, so depth bin k is MCsquare index j = NY - 1 - k).
+  TOPAS     validation/topas/: binary doubles, x fastest (Fortran order), so the file is v[ix, iy, kz]; the beam
+            enters at z = +HLZ travelling -z, so depth bin k is TOPAS index kz = NZ - 1 - k. Lateral bins are
+            centred on the phantom, which puts the axis on the shared corner, as the canonical array requires.
 
 Endpoints, per run:
   R80            whole-plane IDD, first downward crossing of 0.8 x max distal to the maximum, linear
@@ -22,11 +25,13 @@ Diagnostics: sigma per axis, fitted centres (the centroid check), absolute IDD m
 
 Usage:
   python pencil_endpoints.py mcsquare <Dose.mhd> [--label TEXT]      prints one JSON line
+  python pencil_endpoints.py topas <dose.bin> [--label TEXT]         reads <dose>.binheader beside it
 """
 
 import argparse
 import json
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -59,6 +64,53 @@ def read_mhd(path: Path) -> tuple[np.ndarray, list[int], list[float]]:
         raise ValueError(f"{raw}: {raw.stat().st_size} bytes, header says {dims} ({expected} bytes)")
     data = np.fromfile(raw, dtype="<f4")
     return data.reshape(dims[2], dims[1], dims[0]), dims, spacing
+
+
+_TOPAS_AXIS = re.compile(r"^#\s*([XYZ]) in (\d+) bins? of ([0-9.eE+-]+) (cm|mm)\s*$")
+# The quantity line, e.g. "# DoseToMedium ( Gy ) : Sum". The reports follow the colon after the unit.
+_TOPAS_REPORT = re.compile(r"^#\s*\S+\s*\(\s*[^()]*\)\s*:\s*(.+?)\s*$")
+
+
+def read_topas_bin(path: Path) -> tuple[np.ndarray, list[int], list[float]]:
+    """Read a TOPAS binary Sum scorer; returns v[ix, iy, kz], DimSize (x, y, z) and spacing in mm (x, y, z).
+
+    Dimensions and spacing come from the .binheader written beside the .bin, never assumed."""
+    header = path.with_suffix(".binheader")
+    axes: dict[str, tuple[int, float]] = {}
+    reports: list[list[str]] = []
+    for line in header.read_text().splitlines():
+        m = _TOPAS_AXIS.match(line.strip())
+        if m:
+            if m.group(1) in axes:
+                raise ValueError(f"{header}: axis {m.group(1)} declared twice")
+            width = float(m.group(3)) * (10.0 if m.group(4) == "cm" else 1.0)
+            axes[m.group(1)] = (int(m.group(2)), width)
+            continue
+        r = _TOPAS_REPORT.match(line.strip())
+        if r:
+            reports.append(r.group(1).split())
+    if set(axes) != {"X", "Y", "Z"}:
+        raise ValueError(f"{header}: expected X, Y and Z bin lines, found {sorted(axes)}")
+    # Exactly one quantity line, reporting exactly one column, and that column is Sum. A multi-report file
+    # interleaves columns, so reading it as one Sum array would be silently wrong.
+    if reports != [["Sum"]]:
+        raise ValueError(f"{header}: expected exactly one quantity line reporting only Sum, found {reports}")
+    dims = [axes[a][0] for a in "XYZ"]
+    spacing = [axes[a][1] for a in "XYZ"]
+    if any(n <= 0 for n in dims) or not all(math.isfinite(w) and w > 0 for w in spacing):
+        raise ValueError(f"{header}: non-positive or non-finite geometry {dims} {spacing}")
+    expected_bytes = 8 * dims[0] * dims[1] * dims[2]
+    actual_bytes = path.stat().st_size
+    # Check BYTES, not values: np.fromfile silently drops a trailing partial double.
+    if actual_bytes != expected_bytes:
+        raise ValueError(f"{path}: {actual_bytes} bytes, header implies {expected_bytes}")
+    data = np.fromfile(path, dtype="<f8")
+    return data.reshape(dims, order="F"), dims, spacing
+
+
+def canonical_from_topas(xyz: np.ndarray) -> np.ndarray:
+    """TOPAS v[ix, iy, kz], beam entering at z = +HLZ and travelling to -z, to D[k, x, y]."""
+    return np.ascontiguousarray(xyz[:, :, ::-1].transpose(2, 0, 1))
 
 
 def canonical_from_mcsquare(zyx: np.ndarray) -> np.ndarray:
@@ -142,14 +194,19 @@ def endpoints(d: np.ndarray) -> dict:
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("layout", choices=["mcsquare"])
+    p.add_argument("layout", choices=["mcsquare", "topas"])
     p.add_argument("dose", type=Path)
     p.add_argument("--label", default="")
     a = p.parse_args()
-    zyx, dims, spacing = read_mhd(a.dose)
-    if spacing != [1.0, 1.0, 1.0]:
+    if a.layout == "mcsquare":
+        raw, dims, spacing = read_mhd(a.dose)
+        canonical = canonical_from_mcsquare
+    else:
+        raw, dims, spacing = read_topas_bin(a.dose)
+        canonical = canonical_from_topas
+    if not np.allclose(spacing, [1.0, 1.0, 1.0]):
         raise SystemExit(f"expected 1 mm voxels, got {spacing}")
-    record = {"label": a.label, "dims": dims, **endpoints(canonical_from_mcsquare(zyx))}
+    record = {"label": a.label, "layout": a.layout, "dims": dims, **endpoints(canonical(raw))}
     print("ENDPOINTS " + json.dumps(record, sort_keys=True))
     return 0
 
