@@ -1,0 +1,90 @@
+# Stage-1 PLANNING runs for the portable MCsquare arm (issue #32, validation/topas_design.md). Excluded from
+# inference: they estimate per-run variance, check the history ladder (1e7 vs 1e6), the entrance spot sigma against
+# the BDL on the real build, and the centroid. 200 MeV only. Seeds 9001xx are reserved for this planning set.
+#
+# BUILD and RUN are separate jobs (sjswerdloff). The build job compiles once per commit into a write-once
+# directory on the Studio with the binary's sha256, compiler and flags; the run job never compiles, and refuses
+# unless the binary's sha256 matches the recorded one. Each run writes into its own new directory and never
+# overwrites one.
+
+name: TOPAS comparison, MCsquare planning (portable, Studio)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['connor/topas-mcsquare-*']
+    paths:
+      - .gitea/workflows/topas-mcsquare-planning.yml
+      - validation/mcsquare_pencil_case.py
+      - validation/pencil_endpoints.py
+
+env:
+  TARGET: arm64-mcpu-native
+  EXTRA_CFLAGS: -mcpu=native
+  ENERGY: "200"
+  THREADS: "24"
+
+jobs:
+  build:
+    name: Build (write-once)
+    runs-on: stuart-m3ultra-canary
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build into builds/<commit>/<target>
+        run: |
+          set -euo pipefail
+          B="$HOME/mcsq-builds/$GITHUB_SHA/$TARGET"
+          if [ -e "$B/sha256.txt" ]; then echo "already built: $B"; cat "$B/build.txt" "$B/sha256.txt"; exit 0; fi
+          if [ -e "$B" ]; then echo "$B exists without sha256.txt (interrupted build): refusing"; exit 1; fi
+          make -B MCsquare_arm64 EXTRA_CFLAGS="$EXTRA_CFLAGS"
+          mkdir -p "$(dirname "$B")"; mkdir "$B"   # no -p on the leaf: a concurrent builder fails here
+          cp MCsquare_arm64 "$B/MCsquare"
+          { echo "commit $GITHUB_SHA"; echo "host $(hostname)"; echo "cpu $(sysctl -n machdep.cpu.brand_string)";
+            echo "compiler $(clang --version | head -1)"; echo "target MCsquare_arm64 EXTRA_CFLAGS=$EXTRA_CFLAGS"; } > "$B/build.txt"
+          (cd "$B" && shasum -a 256 MCsquare > sha256.txt)
+          chmod a-w "$B/MCsquare" "$B/build.txt" "$B/sha256.txt"
+          cat "$B/build.txt" "$B/sha256.txt"
+
+  planning:
+    name: Planning runs (1e7 x 4, 1e6 x 4)
+    needs: build
+    runs-on: stuart-m3ultra-canary
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify binary, generate the case, run, record
+        run: |
+          set -euo pipefail
+          UV="$(command -v uv || true)"; [ -n "$UV" ] || UV="$HOME/.local/bin/uv"
+          [ -x "$UV" ] || { echo "no uv on this runner"; exit 1; }
+          B="$HOME/mcsq-builds/$GITHUB_SHA/$TARGET"
+          (cd "$B" && shasum -a 256 -c sha256.txt)   # never compile here; the recorded binary or nothing
+          cat "$B/build.txt"
+          ROOT="$HOME/topas-study/planning/portable-$TARGET/$GITHUB_SHA"
+          FREE_GB=$(df -g "$HOME" | awk 'NR==2 {print $4}')
+          [ "$FREE_GB" -ge 20 ] || { echo "only ${FREE_GB} GB free on the home volume: refusing"; exit 1; }
+          mkdir -p "$(dirname "$ROOT")"; mkdir "$ROOT"   # a second run at the same commit fails here, never overwrites
+          CASE="$ROOT/case"; mkdir "$CASE"
+          (cd "$CASE" && "$UV" run --no-project --with numpy python "$GITHUB_WORKSPACE/validation/mcsquare_pencil_case.py" \
+            "$ENERGY" --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1)
+          (cd "$CASE" && shasum -a 256 water.raw water.mhd "bdl_E$ENERGY.txt" "plan_E$ENERGY.txt" > inputs_sha256.txt)
+          for spec in 1e7:900101 1e7:900102 1e7:900103 1e7:900104 1e6:900111 1e6:900112 1e6:900113 1e6:900114; do
+            N=${spec%%:*}; SEED=${spec##*:}; D="$ROOT/E${ENERGY}_N${N}_seed${SEED}"
+            mkdir "$D" "$D/out"
+            printf '%s\n' "Num_Threads $THREADS" "Num_Primaries $N" "RNG_Seed $SEED" "CT_File $CASE/water.mhd" \
+              "HU_Density_Conversion_File $GITHUB_WORKSPACE/Scanners/Water_Phantom/HU_Density_Conversion.txt" \
+              "HU_Material_Conversion_File $GITHUB_WORKSPACE/Scanners/Water_Phantom/HU_Material_Conversion.txt" \
+              "BDL_Machine_Parameter_File $CASE/bdl_E$ENERGY.txt" "BDL_Plan_File $CASE/plan_E$ENERGY.txt" \
+              "Output_Directory $D/out" "Dose_MHD_Output True" > "$D/config.txt"
+            start=$(date +%s)
+            "$B/MCsquare" "$D/config.txt" > "$D/log.txt" 2>&1 || { tail -20 "$D/log.txt"; exit 1; }
+            WALL=$(( $(date +%s) - start ))
+            grep 'Nbr primaries simulated' "$D/log.txt"
+            if grep -q 'generated outside the geometry' "$D/log.txt"; then echo "primaries missed the phantom: refusing"; exit 1; fi
+            (cd "$D/out" && shasum -a 256 Dose.raw Dose.mhd > sha256.txt)
+            echo "RUN seed=$SEED N=$N wall_s=$WALL"
+            "$UV" run --no-project --with numpy --with scipy python "$GITHUB_WORKSPACE/validation/pencil_endpoints.py" \
+              mcsquare "$D/out/Dose.mhd" --label "portable_${TARGET}_E${ENERGY}_N${N}_seed${SEED}_wall${WALL}" | tee "$D/endpoints.json"
+          done
+          echo "outputs: $ROOT"
