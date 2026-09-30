@@ -11,8 +11,10 @@ are marked.
 
 ## Question
 
-Does the #16 fix (`3efa0d0`: secondary emission angles sampled at the table energy) move MCsquare's lateral halo
-**toward** an independent Geant4/TOPAS model? The primary comparison is **fixed vs fix-reverted**, each against TOPAS.
+How well does MCsquare **after the #16 fix** agree with an independent Geant4/TOPAS model, on depth dose, lateral
+spread and the low-dose halo? Two MCsquare builds are compared with TOPAS: portable MCsquare, and OpenMCsquare
+85bf2911 with the same fix applied (sjswerdloff, 2026-10-01). No before/after contrast is made here; the pre-fix
+comparison is the upstream report's, and it is not rebuilt.
 
 Not claimed: better agreement than Huang et al. 2018 (doi:10.1002/acm2.12420). They used a different Geant4
 (10.x), different physics lists and a real nozzle model, so the two studies are not comparable on agreement.
@@ -37,9 +39,8 @@ Not claimed: better agreement than Huang et al. 2018 (doi:10.1002/acm2.12420). T
 
 | arm | build | where |
 |---|---|---|
-| **fixed** | portable main | Linux runner (HP) |
-| **reverted** | portable main with `3efa0d0` reverted, same compiler, host and RNG | Linux runner (HP) |
-| upstream | 85bf2911, icc, unfixed. Baseline only: it also differs in RNG (MKL vs PCG), perf refactors and compiler | Linux runner (HP) |
+| **portable** | portable main (includes the fix) | platform decided after #31: if Windows/macOS/Linux are equivalent, the Studio |
+| **OpenMCsquare + fix** | 85bf2911 with `fix_secondary_angle_energy.patch`, built with icc 2021.1 (the #17 recipe) | Linux runner (HP) |
 | **TOPAS opt0** | OpenTOPAS 4.3.0 / Geant4 11.3.2, EM option 0: same stopping power as MCsquare to <0.01% above 50 MeV | Mac Studio |
 | TOPAS opt4 | the same with EM option 4 (secondary; range shifts by +0.08/+0.26/+0.27 mm at 100/150/200 MeV) | Mac Studio |
 
@@ -93,7 +94,7 @@ Proposed **confirmatory set, 200 MeV:**
 - ring-integrated dose fractions (annuli of the 1 mm grid) at two depths.
 
 Everything else is **exploratory**: 100 and 150 MeV, R20, distal 80–20, the IDD normalised at 20–30 mm, the
-secondary TOPAS arms, and upstream.
+secondary TOPAS arm.
 
 Huang's "dose beyond 40 mm > 1e-4 of CAX" is a threshold, not a quantity equivalence can be tested on, so it is
 reported descriptively only.
@@ -105,11 +106,10 @@ reported descriptively only.
   11 min per 1e7-history TOPAS seed at 16 threads.
 - Per-seed uncertainty comes only from the spread between seeds. The review reports that MCsquare's own
   uncertainty covers voxels above 50% of max only (not re-read).
-- **#16 question:** per annulus, D_arm = |ln(arm / TOPAS opt0)|, tested for D_fixed < D_reverted. Both share the
-  TOPAS sample, so the test is a bootstrap over seeds.
-- **Agreement with TOPAS:** TOST against sjswerdloff's margins. Proposed from Huang as a starting point: R80
-  0.5 mm, σ 0.2 mm. The halo ratio margin needs its own argument, and it must be smaller than the #16 effect, or
-  every arm passes and the fix is invisible.
+- **Agreement with TOPAS, per MCsquare arm:** TOST against sjswerdloff's margins. Proposed from Huang as a starting
+  point: R80 0.5 mm, σ 0.2 mm. The halo ratio margin needs its own argument. Portable and OpenMCsquare + fix are
+  each reported against TOPAS opt0, and against each other; they differ in RNG (PCG vs MKL VSL), performance
+  refactors and compiler, so a difference between them is reported as a build difference, not attributed.
 - A stopping rule, written before data, as in #31.
 
 ## Unit-level check (cheap, before stage 1)
