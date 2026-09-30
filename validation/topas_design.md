@@ -49,7 +49,7 @@ Not claimed: better agreement than Huang et al. 2018 (doi:10.1002/acm2.12420). T
 | **portable** | portable main (includes the fix) | platform decided after #31: if Windows/macOS/Linux are equivalent, the Studio |
 | **OpenMCsquare + fix** | 85bf2911 with `fix_secondary_angle_energy.patch`, built with icc 2021.1 (the #17 recipe) | Linux runner (HP) |
 | **TOPAS opt0** | OpenTOPAS 4.3.0 / Geant4 11.3.2, EM option 0: same stopping power as MCsquare to <0.01% above 50 MeV | Mac Studio |
-| TOPAS opt4 | the same with EM option 4 (secondary; range shifts by +0.08/+0.26/+0.27 mm at 100/150/200 MeV) | Mac Studio |
+| TOPAS opt4 | the same with EM option 4 (secondary; its stopping-power table integrates to CSDA ranges +0.08/+0.26/+0.27 mm different at 100/150/200 MeV, an integral difference, not a measured R80 shift) | Mac Studio |
 
 TOPAS modules for both TOPAS arms, set explicitly:
 - EM (opt0 or opt4);
@@ -109,7 +109,7 @@ endpoints, exploratory only.
 | endpoint | definition |
 |---|---|
 | R80 | IDD = dose summed over the **whole 400 × 400 mm plane** at each 1 mm depth bin. R80 is the first downward crossing of 0.8 × max(IDD) distal to the maximum, by linear interpolation between the two voxel-centre depths bracketing it (the #31 rule, `platform_study_metrics.distal_level`). No crossing: undefined, the endpoint cannot pass. More than one crossing: first one used, run flagged. |
-| σ at 100 mm, σ at 200 mm | slab = the 5 depth bins centred on that depth (z ± 2.5 mm). Profiles = the slab's dose projected onto x (summed over y) and onto y. Each is fitted over \|x\| ≤ 10 mm with a **voxel-integrated** Gaussian (erf differences over each 1 mm bin), free amplitude, centre and σ, no background term. σ = mean of the x and y fits. A fit that does not converge, or gives σ outside [1, 20] mm, is failed: the endpoint cannot pass. |
+| σ at 100 mm, σ at 200 mm | slab = the **six** 1 mm depth bins whose edges span [d − 3, d + 3) mm, i.e. bin centres d − 2.5 … d + 2.5 mm (TOPAS indices k = 349.5 − centre), midpoint exactly d. The same slabs are used for the rings. A synthetic boundary-value test pins the selected indices before any data. Profiles = the slab's dose projected onto x (summed over y) and onto y. Each is fitted over \|x\| ≤ 10 mm with a **voxel-integrated** Gaussian (erf differences over each 1 mm bin), free amplitude, centre and σ, no background term. σ = mean of the x and y fits (confirmatory); σ_x and σ_y are also reported separately as diagnostics, to expose a directional defect. A fit that does not converge, or gives σ outside [1, 20] mm, is failed: the endpoint cannot pass. |
 | halo fraction, 2 rings × 2 depths | same slabs. Energy fraction in a ring = dose in voxels whose centre radius r is in the ring, divided by the dose over the whole scored plane in that slab. In water with equal voxel volumes this is the fraction of **deposited energy** in the slab, not a dose ratio. Confirmatory rings: 20 ≤ r < 40 mm and 40 ≤ r < 80 mm. Exploratory rings: [0,5), [5,10), [10,20), [80,200) mm. |
 
 Everything else is **exploratory**: 100 and 150 MeV, R20, distal 80–20, IDD shape, the other rings, TOPAS opt4, and
@@ -129,7 +129,7 @@ fraction is not a measured halo effect.
   intervals on those per-run values. The planning runs check that per-run values are approximately normal and that
   the estimators have converged at the chosen histories per run. If they are not, the estimand is revisited
   **before** confirmatory acquisition, not after.
-- **Invalid data never passes.** A zero or non-finite fraction, an undefined R80, or a failed fit makes that endpoint
+- **Invalid data never passes.** A fraction that is non-positive, non-finite or above 1, an undefined R80, or a failed fit makes that endpoint
   unable to pass. There are no pseudocounts, and no run or ring is dropped selectively. Histories per run are
   chosen from the planning runs so that the confirmatory rings are non-zero in every run. An all-zero result says
   nothing about rare events and is reported as such.
@@ -137,8 +137,15 @@ fraction is not a measured halo effect.
   per-run variance, sparse-ring behaviour, and grid and estimator convergence. They also serve as the source and
   geometry check below.
 - **Fixed sample, one look.** After the planning runs, B runs per arm and H histories per run are frozen in this file,
-  from sjswerdloff's margins, power 0.9, and an assumed true discrepancy (0 and half-margin both stated). One-sided
-  α = 0.05 per TOST, i.e. 90% CIs.
+  so that the **joint** probability that every confirmatory endpoint of an arm passes is at least 0.9 under the
+  assumed true discrepancies (0 and half-margin, both stated). It is estimated by simulation that resamples the
+  planning runs' per-run endpoint vectors, preserving their dependence; per-endpoint power alone is not the target
+  (seven endpoints at 0.9 each give only about 0.48 jointly if independent). One-sided α = 0.05 per TOST, i.e.
+  90% CIs.
+- **Margins come first and stand on their own:** sjswerdloff sets them on a physical basis (what discrepancy would
+  matter), independent of the planning data. Planning variance only decides feasibility and B/H; a margin is never
+  chosen so that observed pilot disagreement passes. This draft stays **not frozen** until the margin rationale, B,
+  H, seeds, builds and analysis code are all committed.
 - **Per-arm equivalence claim:** every confirmatory endpoint passes. That is an intersection-union test, so no
   multiplicity adjustment is needed. Each MCsquare arm's claim is made separately. Any individual endpoint
   advertised as a finding outside that joint claim is exploratory. Insufficient precision is reported as
@@ -158,9 +165,10 @@ fraction is not a measured halo effect.
 - **Diagnostic, from the planning runs:** the fitted centroid of each arm, with its uncertainty from the planning
   runs' spread. A centroid outside ±0.1 mm by more than that uncertainty stops the study for a geometry
   investigation **before** any confirmatory run. No confirmatory run is repaired or discarded after being looked at.
-- **Beam model on the real builds:** the 1e-6 rad divergence / 1e-3 correlation BDL is checked on the actual gcc
-  (portable, Linux and macOS) and icc (OpenMCsquare) builds: sampled σ_x and σ_θ against the BDL, and no NaN.
-  clement-7074f29f's check was clang on arm64.
+- **Beam model on the real builds:** the 1e-6 rad divergence / 1e-3 correlation BDL is checked on each actual build
+  used (portable: gcc on Linux/Windows, Apple clang on macOS; OpenMCsquare: icc): sampled σ_x and σ_θ against the
+  BDL, and no NaN. clement-7074f29f's check compiled `diagonalize()` alone with clang -O2 on arm64; it does not
+  substitute for the real builds.
 
 ## Relation to #31
 
@@ -175,7 +183,8 @@ Histogram the fixed sampler's emission angles against the ICRU 63 input tables (
 
 ## Provenance
 
-- **TOPAS:** Clement's `make_run.sh` / `run_topas.sh` (office repo `6489450`). One directory per run, named for
+- **TOPAS:** `validation/topas/` in this repository (`stage1_base.txt`, `make_run.sh`, `run_topas.sh`, from #35;
+  cited by commit once #35 merges, not by the office tree). One directory per run, named for
   every choice, never reused. `provenance.txt` records host, UTC start and end, exit code, wall time, sha256 of the
   inputs and outputs, and the physics as run.
   Outputs go to `/Volumes/T7 Shield/MonteCarlo_runs/` on the Studio (sjswerdloff's call; the home volume is 94%
