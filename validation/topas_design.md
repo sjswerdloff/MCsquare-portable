@@ -100,8 +100,9 @@ reported descriptively only.
 
 ### Statistics (OPEN: alden-ec2221c7)
 
-- Independent seeds per arm, with n fixed before the run from a 1e6-history timing (TOPAS at 8 and 16 threads on
-  the Studio).
+- Independent seeds per arm, with n fixed before the run. Timing input (clement-7074f29f, 150 MeV, option 0, both
+  scorers, 1e6 histories on the Studio): 120 s at 8 threads (8.7 GB), 68 s at 16 threads (15.9 GB). So about
+  11 min per 1e7-history TOPAS seed at 16 threads.
 - Per-seed uncertainty comes only from the spread between seeds. The review reports that MCsquare's own
   uncertainty covers voxels above 50% of max only (not re-read).
 - **#16 question:** per annulus, D_arm = |ln(arm / TOPAS opt0)|, tested for D_fixed < D_reverted. Both share the
