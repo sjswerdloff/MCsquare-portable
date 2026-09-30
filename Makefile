@@ -64,13 +64,14 @@ MC2_gcc_UMCG : $(SRC)
 	gcc $(SRC) -fcilkplus -fopenmp -lmkl_intel_lp64 -lmkl_core -lmkl_gnu_thread -lm -ldl $(OPTIONS) $(LIB_PATH) -static -m64 -march=corei7-avx  -I/opt/intel/compilers_and_libraries_2018.2.199/linux/mkl/include/ -L/opt/intel/compilers_and_libraries_2018.2.199/linux/mkl/lib/intel64_lin -o MC2_gcc
 
 # Portable builds - no Intel MKL dependency (uses PCG random number generator)
+# EXTRA_CFLAGS (empty by default) adds host tuning, e.g. make MCsquare_arm64 EXTRA_CFLAGS=-mcpu=native (issue #36).
 # Requires: mkl-to-pcg64 branch changes (PCG replaces MKL VSL, floorf replaces vsFloor)
 
 MCsquare_portable : $(SRC)
-	gcc $(SRC) -fopenmp -lgomp -lpthread -lm -ldl -O3 $(FULL_VERSION) -m64 -o MCsquare_portable
+	gcc $(SRC) -fopenmp -lgomp -lpthread -lm -ldl -O3 $(EXTRA_CFLAGS) $(FULL_VERSION) -m64 -o MCsquare_portable
 
 MCsquare_arm64 : $(SRC)
-	clang $(SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O3 $(FULL_VERSION) -o MCsquare_arm64
+	clang $(SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O3 $(EXTRA_CFLAGS) $(FULL_VERSION) -o MCsquare_arm64
 
 # Windows x86-64 with MinGW-w64 GCC (MSYS2 UCRT64 shell): make MCsquare_win_portable
 # Uses its own source list: on Windows COMSPEC is set, so $(SRC) above is the Intel `src\*.c` form.
@@ -78,7 +79,7 @@ MCsquare_arm64 : $(SRC)
 # at run time: run it in the UCRT64 shell, put ucrt64\bin on PATH, or copy those DLLs next to it.
 WIN_SRC = $(wildcard src/*.c)
 MCsquare_win_portable : $(WIN_SRC)
-	gcc $(WIN_SRC) -fopenmp -lm -O3 $(FULL_VERSION) -o MCsquare_win_portable.exe
+	gcc $(WIN_SRC) -fopenmp -lm -O3 $(EXTRA_CFLAGS) $(FULL_VERSION) -o MCsquare_win_portable.exe
 
 # Windows regression test for the temporary-folder removal (#12, #28). CI runs it with a fresh root.
 test_remove_tmp_win : tests/test_remove_temporary_folders_win.c $(WIN_SRC)

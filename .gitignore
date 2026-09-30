@@ -6,6 +6,7 @@ MCsquare_linux*
 MCsquare_win*
 *.py
 !validation/*.py
+!validation/tests/*.py
 old_versions
 .venv/
 validation/.venv/

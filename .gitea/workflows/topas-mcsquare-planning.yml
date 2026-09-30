@@ -1,0 +1,125 @@
+# Stage-1 PLANNING runs for the portable MCsquare arm (issue #32, validation/topas_design.md). Excluded from
+# inference: they estimate per-run variance, check the history ladder (1e7 vs 1e6), the entrance spot sigma against
+# the BDL on the real build, and the centroid. 200 MeV only. Seeds 9001xx are reserved for this planning set.
+#
+# BUILD and RUN are separate jobs (sjswerdloff). The build job compiles once per commit into a write-once
+# directory on the Studio with the binary's sha256, compiler and flags; the run job never compiles, and refuses
+# unless the binary's sha256 matches the recorded one. Each run writes into its own new directory and never
+# overwrites one.
+
+name: TOPAS comparison, MCsquare planning (portable, Studio)
+
+# THIS FILE IS THE REQUEST. It runs on a push that changes this file (never the shared scripts, which would re-run
+# the Studio on every script edit), with the energy and run list below; dispatch works too for anyone with write
+# access to the API. History: 200 MeV 1e7x4 + 1e6x4 at ba204d5 (task 10447); 100 MeV pair for the R80 check next.
+on:
+  push:
+    branches: ['connor/topas-mcsquare-*']
+    paths: [.gitea/workflows/topas-mcsquare-planning.yml]
+  workflow_dispatch:
+    inputs:
+      energy:
+        description: Energy (MeV)
+        default: "100"
+      runs:
+        description: Space-separated N:seed pairs (planning seeds 9001xx only)
+        default: ""
+
+env:
+  TARGET: arm64-mcpu-native
+  EXTRA_CFLAGS: -mcpu=native
+  ENERGY: ${{ inputs.energy || '100' }}
+  # Empty = build only, run nothing. Set it (with the energy) in the same commit that requests runs.
+  # History: 200 MeV 1e7x4 + 1e6x4 (task 10447, ba204d5); 100 MeV 1e6 900121-2 (0783c45).
+  RUNS: ${{ inputs.runs || '' }}
+  STUDY_ROOT: /Volumes/T7 Shield/MonteCarlo_runs
+  THREADS: "24"
+
+jobs:
+  build:
+    name: Build (write-once)
+    runs-on: stuart-m3ultra-canary
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build into builds/<commit>/<target>
+        run: |
+          set -euo pipefail
+          B="$HOME/mcsq-builds/$GITHUB_SHA/$TARGET"
+          if [ -e "$B/sha256.txt" ]; then echo "already built: $B"; cat "$B/build.txt" "$B/sha256.txt"; exit 0; fi
+          if [ -e "$B" ]; then echo "$B exists without sha256.txt (interrupted build): refusing"; exit 1; fi
+          make -B MCsquare_arm64 EXTRA_CFLAGS="$EXTRA_CFLAGS"
+          mkdir -p "$(dirname "$B")"; mkdir "$B"   # no -p on the leaf: a concurrent builder fails here
+          cp MCsquare_arm64 "$B/MCsquare"
+          { echo "commit $GITHUB_SHA"; echo "host $(hostname)"; echo "cpu $(sysctl -n machdep.cpu.brand_string)";
+            echo "compiler $(clang --version | head -1)"; echo "target MCsquare_arm64 EXTRA_CFLAGS=$EXTRA_CFLAGS"; } > "$B/build.txt"
+          (cd "$B" && shasum -a 256 MCsquare > sha256.txt)
+          chmod a-w "$B/MCsquare" "$B/build.txt" "$B/sha256.txt"
+          cat "$B/build.txt" "$B/sha256.txt"
+
+  planning:
+    name: Planning runs (${{ inputs.energy || '100' }} MeV)
+    needs: build
+    runs-on: stuart-m3ultra-canary
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify binary, generate the case, run, record
+        run: |
+          set -euo pipefail
+          UV="$(command -v uv || true)"; [ -n "$UV" ] || UV="$HOME/.local/bin/uv"
+          [ -x "$UV" ] || { echo "no uv on this runner"; exit 1; }
+          if [ -z "$RUNS" ]; then echo "no runs requested (RUNS empty): nothing to do"; exit 0; fi
+          B="$HOME/mcsq-builds/$GITHUB_SHA/$TARGET"
+          (cd "$B" && shasum -a 256 -c sha256.txt)   # never compile here; the recorded binary or nothing
+          cat "$B/build.txt"
+          # Study outputs go to the T7, never the system disk (sjswerdloff). Fail closed if it is absent or read-only.
+          [ -d "$STUDY_ROOT" ] || { echo "$STUDY_ROOT not present (T7 not mounted?): refusing"; exit 1; }
+          ROOT="$STUDY_ROOT/planning/mcsquare-portable-$TARGET/$GITHUB_SHA/E${ENERGY}_run${GITHUB_RUN_NUMBER}"
+          FREE_GB=$(df -g "$STUDY_ROOT" | awk 'NR==2 {print $4}')
+          [ "$FREE_GB" -ge 20 ] || { echo "only ${FREE_GB} GB free on the T7: refusing"; exit 1; }
+          mkdir -p "$(dirname "$ROOT")"
+          mkdir "$ROOT" || { echo "cannot create $ROOT (exists, or the T7 is not writable): refusing"; exit 1; }
+          # Snapshot what runs, so nothing depends on the mutable checkout: scripts, scanner tables, materials hash.
+          mkdir "$ROOT/snapshot"
+          cp validation/mcsquare_pencil_case.py validation/pencil_endpoints.py Scanners/Water_Phantom/HU_*.txt "$ROOT/snapshot/"
+          cp "$B/build.txt" "$ROOT/snapshot/build.txt"; cp "$B/sha256.txt" "$ROOT/snapshot/binary_sha256.txt"
+          (cd "$ROOT/snapshot" && shasum -a 256 *.py *.txt > sha256.txt)
+          cp -R Materials "$ROOT/snapshot/Materials"
+          (cd "$ROOT/snapshot" && find Materials -type f -print0 | sort -z | xargs -0 shasum -a 256 > materials_sha256.txt)
+          SNAP="$ROOT/snapshot"
+          # A failed run still leaves a record of what it was and why it stopped.
+          fail_run() { printf '{"seed": %s, "requested": "%s", "transport_status": "%s"}\n' "$SEED" "$N" "$1" > "$D/run.json"; echo "$1: refusing"; exit 1; }
+          CASE="$ROOT/case"; mkdir "$CASE"
+          (cd "$CASE" && "$UV" run --no-project --with numpy python "$SNAP/mcsquare_pencil_case.py" \
+            "$ENERGY" --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1)
+          (cd "$CASE" && shasum -a 256 water.raw water.mhd "bdl_E$ENERGY.txt" "plan_E$ENERGY.txt" > inputs_sha256.txt)
+          for spec in $RUNS; do
+            case "$spec" in *:9001[0-9][0-9]) ;; *) echo "planning seeds are 9001xx only: $spec"; exit 1;; esac
+            N=${spec%%:*}; SEED=${spec##*:}; D="$ROOT/E${ENERGY}_N${N}_seed${SEED}"
+            mkdir "$D" "$D/out"
+            # MCsquare's config parser splits values on whitespace, and the T7 path has a space in it, so every path
+            # in config.txt is relative to the run directory (cwd) or absolute without spaces (clement-7074f29f, #40).
+            printf '%s\n' "Num_Threads $THREADS" "Num_Primaries $N" "RNG_Seed $SEED" "CT_File ../case/water.mhd" \
+              "HU_Density_Conversion_File ../snapshot/HU_Density_Conversion.txt" \
+              "HU_Material_Conversion_File ../snapshot/HU_Material_Conversion.txt" \
+              "BDL_Machine_Parameter_File ../case/bdl_E$ENERGY.txt" "BDL_Plan_File ../case/plan_E$ENERGY.txt" \
+              "Output_Directory out" "Dose_MHD_Output True" > "$D/config.txt"
+            awk 'NF != 2 {bad=1; print "config line is not KEY VALUE: " $0} END {exit bad}' "$D/config.txt"
+            start=$(date +%s); START_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            (cd "$D" && MCsquare_Materials_Dir="$SNAP/Materials/" "$B/MCsquare" config.txt) > "$D/log.txt" 2>&1 || { tail -20 "$D/log.txt"; fail_run "mcsquare_exit_nonzero"; }
+            WALL=$(( $(date +%s) - start ))
+            SIM=$(grep -o 'Nbr primaries simulated: [0-9]*' "$D/log.txt" | awk '{print $4}' || true)
+            echo "Nbr primaries simulated: $SIM (requested $N; may exceed it slightly, see #39)"
+            [ -n "$SIM" ] && [ "$SIM" -ge "$(printf '%.0f' "$N")" ] || fail_run "simulated_count_below_requested"
+            if grep -q 'generated outside the geometry' "$D/log.txt"; then fail_run "primaries_outside_geometry"; fi
+            (cd "$D/out" && shasum -a 256 Dose.raw Dose.mhd > sha256.txt)
+            REQ=$(printf '%.0f' "$N")
+            printf '{"seed": %s, "requested": %s, "simulated": %s, "overshoot": %s, "threads": %s, "energy_mev": %s, "binary_sha256": "%s", "start_utc": "%s", "end_utc": "%s", "wall_s": %s, "transport_status": "ok"}\n' \
+              "$SEED" "$REQ" "$SIM" "$((SIM - REQ))" "$THREADS" "$ENERGY" "$(awk '{print $1}' "$B/sha256.txt")" "$START_UTC" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$WALL" > "$D/run.json"
+            cat "$D/run.json"
+            echo "RUN seed=$SEED N=$N wall_s=$WALL"
+            "$UV" run --no-project --with numpy --with scipy python "$SNAP/pencil_endpoints.py" \
+              mcsquare "$D/out/Dose.mhd" --label "portable_${TARGET}_E${ENERGY}_N${N}_seed${SEED}_wall${WALL}" | tee "$D/endpoints.json"
+          done
+          echo "outputs: $ROOT"
