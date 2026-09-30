@@ -122,4 +122,7 @@ Histogram the fixed sampler's emission angles against the ICRU 63 input tables (
 - **TOPAS:** Clement's `make_run.sh` / `run_topas.sh` (office repo `6489450`). One directory per run, named for
   every choice, never reused. `provenance.txt` records host, UTC start and end, exit code, wall time, sha256 of the
   inputs and outputs, and the physics as run.
+  Outputs go to `/Volumes/T7 Shield/MonteCarlo_runs/` on the Studio (sjswerdloff's call; the home volume is 94%
+  full). `run_topas.sh` refuses to start below 100 GB free (office `9577c82`). Full 3-D is kept for every arm,
+  ~0.86 GB per run (two double-precision scorers), about 51 GB for 10 seeds × 3 energies × 2 TOPAS arms.
 - **MCsquare arms:** as in #31: per-run record.json with sha256s, compiler, commit and host.
