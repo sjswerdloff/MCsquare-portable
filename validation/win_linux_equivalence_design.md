@@ -134,12 +134,16 @@ Applied to **each comparison separately**. After **wave 1** (16 seeds per platfo
 ## Interrupted seeds (added 2026-09-30 during wave 1, before any result was read)
 
 A seed whose job is interrupted by infrastructure before it writes a record is **re-run with the same seed number
-at the same commit**. It produced no data, so re-running it cannot select on results. A seed that completed and wrote
+from the same source tree**. It produced no data, so re-running it cannot select on results. A seed that completed and wrote
 a record is never re-run and never replaced.
 
 Wave 1 had two interruptions when runner labels were reset: Windows 1008 (job 14114, Lenovo) and Linux 2003 (job
 14077, HP). Both were killed mid-simulation. Neither printed its `RUN` line, produced a `STUDY_RESULT`, or created a
 retained directory.
+
+They were re-run at 600c66e (branch `connor/platform-study-rerun`) on sjswerdloff's instruction, started before the
+main run finished. `git diff --stat 7d07db0 600c66e` shows one added file, the re-run workflow, and nothing else. So
+the source, measurement code and data are identical to 7d07db0, and each re-run records its own commit in its record.
 
 ## Provenance (every seed, retained)
 
