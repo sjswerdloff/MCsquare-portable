@@ -65,6 +65,8 @@ def read_mhd(path: Path) -> tuple[np.ndarray, list[int], list[float]]:
 
 
 _TOPAS_AXIS = re.compile(r"^#\s*([XYZ]) in (\d+) bins? of ([0-9.eE+-]+) (cm|mm)\s*$")
+# The quantity line, e.g. "# DoseToMedium ( Gy ) : Sum". The reports follow the colon after the unit.
+_TOPAS_REPORT = re.compile(r"^#\s*\S+\s*\(\s*[^()]*\)\s*:\s*(.+?)\s*$")
 
 
 def read_topas_bin(path: Path) -> tuple[np.ndarray, list[int], list[float]]:
@@ -73,20 +75,34 @@ def read_topas_bin(path: Path) -> tuple[np.ndarray, list[int], list[float]]:
     Dimensions and spacing come from the .binheader written beside the .bin, never assumed."""
     header = path.with_suffix(".binheader")
     axes: dict[str, tuple[int, float]] = {}
+    reports: list[list[str]] = []
     for line in header.read_text().splitlines():
         m = _TOPAS_AXIS.match(line.strip())
         if m:
+            if m.group(1) in axes:
+                raise ValueError(f"{header}: axis {m.group(1)} declared twice")
             width = float(m.group(3)) * (10.0 if m.group(4) == "cm" else 1.0)
             axes[m.group(1)] = (int(m.group(2)), width)
+            continue
+        r = _TOPAS_REPORT.match(line.strip())
+        if r:
+            reports.append(r.group(1).split())
     if set(axes) != {"X", "Y", "Z"}:
         raise ValueError(f"{header}: expected X, Y and Z bin lines, found {sorted(axes)}")
-    if "Sum" not in header.read_text():
-        raise ValueError(f"{header}: expected a Sum report")
+    # Exactly one quantity line, reporting exactly one column, and that column is Sum. A multi-report file
+    # interleaves columns, so reading it as one Sum array would be silently wrong.
+    if reports != [["Sum"]]:
+        raise ValueError(f"{header}: expected exactly one quantity line reporting only Sum, found {reports}")
     dims = [axes[a][0] for a in "XYZ"]
     spacing = [axes[a][1] for a in "XYZ"]
+    if any(n <= 0 for n in dims) or not all(math.isfinite(w) and w > 0 for w in spacing):
+        raise ValueError(f"{header}: non-positive or non-finite geometry {dims} {spacing}")
+    expected_bytes = 8 * dims[0] * dims[1] * dims[2]
+    actual_bytes = path.stat().st_size
+    # Check BYTES, not values: np.fromfile silently drops a trailing partial double.
+    if actual_bytes != expected_bytes:
+        raise ValueError(f"{path}: {actual_bytes} bytes, header implies {expected_bytes}")
     data = np.fromfile(path, dtype="<f8")
-    if data.size != dims[0] * dims[1] * dims[2]:
-        raise ValueError(f"{path}: {data.size} values, header says {dims}")
     return data.reshape(dims, order="F"), dims, spacing
 
 
