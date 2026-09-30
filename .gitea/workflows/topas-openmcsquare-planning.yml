@@ -1,0 +1,160 @@
+# Stage-1 PLANNING runs for the OpenMCsquare + fix arm (issue #32, validation/topas_design.md), on the Lenovo.
+# OpenMCsquare 85bf2911 with validation/topas/openmcsquare/fix_secondary_angle_energy.patch, built with the classic
+# Intel compiler its Makefile.bat names (icl 2021.1, MCsquare_win_avx2 flags). Toolchain differences from
+# Makefile.bat, as in the #26 field-edge work: MKL 2021.1.1 is the NuGet DLL build, so -Qmkl becomes the explicit
+# DLL import libraries, and VERSION comes from a forced include. Excluded from inference; 200 MeV; seeds 9002xx.
+#
+# BUILD and RUN are separate jobs (sjswerdloff). The build writes once to C:\mcsq-win\builds\<upstream>+<patch
+# sha256 prefix>\icl-avx2 with the exe's sha256; the run job never compiles and refuses on a hash mismatch.
+# Each run gets a new directory; nothing is overwritten.
+
+name: TOPAS comparison, OpenMCsquare + fix planning (icl, Lenovo)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['connor/topas-mcsquare-*']
+    paths:
+      - .gitea/workflows/topas-openmcsquare-planning.yml
+      - validation/topas/openmcsquare/**
+      - validation/mcsquare_pencil_case.py
+      - validation/pencil_endpoints.py
+
+env:
+  UPSTREAM: 85bf2911ddadbb40bd41b1a18b4b247536bb33ab
+  PATCH: validation/topas/openmcsquare/fix_secondary_angle_energy.patch
+  PATCH_SHA256: 57bdbf01ac0c194bfd78645c221f93aee89868a2118b2fa3844bb9fef9673d48
+  TARGET: icl-avx2
+  ENERGY: "200"
+  THREADS: "4"
+
+jobs:
+  build:
+    name: Build OpenMCsquare + fix (write-once)
+    runs-on: lenovo-windows-canary
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Build into C:\mcsq-win\builds
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The committed bytes, not the checkout's (autocrlf may rewrite line endings); cmd redirection keeps them.
+          cmd /c "git -c core.autocrlf=false show HEAD:$env:PATCH > fix.patch"
+          if ($LASTEXITCODE) { throw "could not write fix.patch" }
+          if ((Get-FileHash fix.patch -Algorithm SHA256).Hash.ToLower() -ne $env:PATCH_SHA256) { throw "patch sha256 mismatch" }
+          $B = "C:\mcsq-win\builds\$($env:UPSTREAM.Substring(0,12))+$($env:PATCH_SHA256.Substring(0,12))\$env:TARGET"
+          if (Test-Path "$B\sha256.txt") { "already built: $B"; Get-Content "$B\build.txt","$B\sha256.txt"; exit 0 }
+          if (Test-Path $B) { throw "$B exists without sha256.txt (interrupted build): refusing" }
+          "$env:COMPUTERNAME  $((Get-CimInstance Win32_Processor).Name)"
+          if (-not (Get-ChildItem C:\mcsq-win\oneapi -Recurse -Filter icl.exe -ErrorAction SilentlyContinue)) { throw "no icl on this box" }
+          if (-not (Test-Path C:\mcsq-win\mkl\.complete)) { throw "no MKL on this box" }
+          $vc = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+          cmd /c "`"$vc`" >NUL && set" | ForEach-Object { if ($_ -match '^([^=]+)=(.*)$') { Set-Item -Path "env:$($matches[1])" -Value $matches[2] } }
+          $icl    = (Get-ChildItem C:\mcsq-win\oneapi -Recurse -Filter icl.exe | Where-Object FullName -match '\\bin\\intel64\\' | Select-Object -First 1).FullName
+          $ompinc = Split-Path (Get-ChildItem C:\mcsq-win\oneapi -Recurse -Filter omp.h | Where-Object FullName -match '\\compiler\\include' | Select-Object -First 1).FullName
+          $cmplib = Split-Path (Get-ChildItem C:\mcsq-win\oneapi -Recurse -Filter libiomp5md.lib | Where-Object FullName -match '\\intel64_win\\' | Select-Object -First 1).FullName
+          $mkllib = Split-Path (Get-ChildItem C:\mcsq-win\mkl -Recurse -Filter mkl_core_dll.lib | Select-Object -First 1).FullName
+          $mklinc = Split-Path (Get-ChildItem C:\mcsq-win\mkl -Recurse -Filter mkl.h | Select-Object -First 1).FullName
+          $env:INCLUDE = "$ompinc;$mklinc;$env:INCLUDE"; $env:LIB = "$cmplib;$mkllib;$env:LIB"; $env:PATH = "$(Split-Path $icl);$env:PATH"
+          git -c core.autocrlf=false archive -o up.tar $env:UPSTREAM
+          Remove-Item -Recurse -Force up_fix -ErrorAction SilentlyContinue; New-Item -ItemType Directory up_fix | Out-Null
+          tar -xf up.tar -C up_fix; if ($LASTEXITCODE) { throw "tar failed" }
+          $ErrorActionPreference = 'Continue'
+          git apply --verbose --directory=up_fix fix.patch 2>&1 | ForEach-Object { "$_" }
+          $ok = ($LASTEXITCODE -eq 0); $ErrorActionPreference = 'Stop'
+          if (-not $ok) { throw "patch did not apply" }
+          Push-Location up_fix
+          Set-Content -Encoding Ascii version.h "#define VERSION `"85bf2911 + fix patch $($env:PATCH_SHA256.Substring(0,12)), icl 2021.1 (Windows) + MKL 2021.1.1 (NuGet DLL)`""
+          $src = (Get-ChildItem src\*.c).FullName
+          $flags = @('-Qopenmp','-Qstd=c99','-MT','-Qdiag-disable:10441','/O3','/QxCORE-AVX2')
+          $ErrorActionPreference = 'Continue'
+          & $icl $src @flags /FI version.h '/Fe:MCsquare_win_avx2.exe' /nologo /link mkl_intel_lp64_dll.lib mkl_intel_thread_dll.lib mkl_core_dll.lib 2>&1 | Select-Object -Last 15
+          $ok = ($LASTEXITCODE -eq 0); $ErrorActionPreference = 'Stop'
+          if (-not $ok) { throw "icl failed" }
+          Pop-Location
+          New-Item -ItemType Directory -Force (Split-Path $B) | Out-Null
+          New-Item -ItemType Directory $B | Out-Null   # fails if a concurrent build created it
+          Copy-Item up_fix\MCsquare_win_avx2.exe "$B\MCsquare.exe"
+          @("upstream $env:UPSTREAM", "patch sha256 $env:PATCH_SHA256", "commit $env:GITHUB_SHA", "host $env:COMPUTERNAME",
+            "cpu $((Get-CimInstance Win32_Processor).Name)", "compiler $icl", "flags $($flags -join ' ') + MKL DLL import libs") |
+            Set-Content -Encoding Ascii "$B\build.txt"
+          "$((Get-FileHash "$B\MCsquare.exe" -Algorithm SHA256).Hash.ToLower())  MCsquare.exe" | Set-Content -Encoding Ascii "$B\sha256.txt"
+          Get-ChildItem $B | ForEach-Object { $_.IsReadOnly = $true }
+          Get-Content "$B\build.txt","$B\sha256.txt"
+
+  planning:
+    name: Planning runs (1e7 x 4, 1e6 x 4)
+    needs: build
+    runs-on: lenovo-windows-canary
+    timeout-minutes: 170
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: MSYS2 + UCRT64 (verified, once per box)
+        shell: powershell
+        run: |
+          & .\.gitea\scripts\ensure-msys2.ps1
+      - name: Verify binary, generate the case, run, record
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $B = "C:\mcsq-win\builds\$($env:UPSTREAM.Substring(0,12))+$($env:PATCH_SHA256.Substring(0,12))\$env:TARGET"
+          $want = ((Get-Content "$B\sha256.txt") -split '\s+')[0]
+          $have = (Get-FileHash "$B\MCsquare.exe" -Algorithm SHA256).Hash.ToLower()
+          if ($want -ne $have) { throw "binary sha256 $have does not match recorded $want" }
+          Get-Content "$B\build.txt"
+          $m = 'C:\mcsq-win\msys64-20260927'
+          $ErrorActionPreference = 'Continue'
+          & "$m\usr\bin\bash.exe" -lc 'pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-numpy mingw-w64-ucrt-x86_64-python-scipy' 2>&1 | Select-Object -Last 3
+          $rc = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
+          if ($rc) { throw "pacman install failed ($rc)" }
+          $py = "$m\ucrt64\bin\python.exe"
+          & $py -c "import numpy, scipy, sys; print('python', sys.version.split()[0], 'numpy', numpy.__version__, 'scipy', scipy.__version__)"
+          if ($LASTEXITCODE) { throw "numpy/scipy not importable" }
+          $free = [int]((Get-PSDrive C).Free / 1GB)
+          if ($free -lt 20) { throw "only $free GB free on C: refusing" }
+          $ROOT = "C:\mcsq-win\topas-study\planning\openmcsquare-fix-$env:TARGET\$env:GITHUB_SHA"
+          New-Item -ItemType Directory -Force (Split-Path $ROOT) | Out-Null
+          New-Item -ItemType Directory $ROOT | Out-Null   # a second run at this commit fails here
+          $CASE = "$ROOT\case"; New-Item -ItemType Directory $CASE | Out-Null
+          # Upstream's own data (Materials, Scanners) from 85bf2911: the arm runs upstream's code on upstream's data.
+          git -c core.autocrlf=false archive -o "$ROOT\updata.tar" $env:UPSTREAM Materials Scanners
+          tar -xf "$ROOT\updata.tar" -C $ROOT; if ($LASTEXITCODE) { throw "tar failed" }
+          Push-Location $CASE
+          & $py "$env:GITHUB_WORKSPACE\validation\mcsquare_pencil_case.py" $env:ENERGY --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1
+          if ($LASTEXITCODE) { throw "case generation failed" }
+          Get-ChildItem | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content -Encoding Ascii inputs_sha256.txt
+          Pop-Location
+          $rt  = Split-Path (Get-ChildItem C:\mcsq-win\oneapi -Recurse -Filter libiomp5md.dll | Where-Object FullName -match '\\intel64' | Select-Object -First 1).FullName
+          $mkr = Split-Path (Get-ChildItem C:\mcsq-win\mkl -Recurse -Filter 'mkl_core*.dll' | Select-Object -First 1).FullName
+          $env:PATH = "$rt;$mkr;$env:PATH"
+          $env:MCsquare_Materials_Dir = $null
+          Push-Location $ROOT   # MCsquare reads Materials\ relative to the working directory
+          foreach ($spec in '1e7:900201','1e7:900202','1e7:900203','1e7:900204','1e6:900211','1e6:900212','1e6:900213','1e6:900214') {
+            $N, $SEED = $spec.Split(':'); $D = "$ROOT\E$($env:ENERGY)_N$($N)_seed$SEED"
+            New-Item -ItemType Directory $D, "$D\out" | Out-Null
+            @("Num_Threads $env:THREADS", "Num_Primaries $N", "RNG_Seed $SEED", "CT_File $CASE\water.mhd",
+              "HU_Density_Conversion_File $ROOT\Scanners\Water_Phantom\HU_Density_Conversion.txt",
+              "HU_Material_Conversion_File $ROOT\Scanners\Water_Phantom\HU_Material_Conversion.txt",
+              "BDL_Machine_Parameter_File $CASE\bdl_E$($env:ENERGY).txt", "BDL_Plan_File $CASE\plan_E$($env:ENERGY).txt",
+              "Output_Directory $D\out", "Dose_MHD_Output True") | Set-Content -Encoding Ascii "$D\config.txt"
+            $t = Get-Date
+            $ErrorActionPreference = 'Continue'
+            & "$B\MCsquare.exe" "$D\config.txt" *> "$D\log.txt"
+            $rc = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
+            $wall = [int]((Get-Date) - $t).TotalSeconds
+            if ($rc -ne 0 -or -not (Test-Path "$D\out\Dose.raw")) { Get-Content "$D\log.txt" -Tail 30; throw "run $SEED failed (rc $rc)" }
+            Select-String -Path "$D\log.txt" -Pattern 'Nbr primaries simulated' | ForEach-Object { $_.Line }
+            if (Select-String -Path "$D\log.txt" -Pattern 'generated outside the geometry' -Quiet) { throw "primaries missed the phantom: refusing" }
+            "RUN seed=$SEED N=$N rc=$rc wall_s=$wall"
+            & $py "$env:GITHUB_WORKSPACE\validation\pencil_endpoints.py" mcsquare "$D\out\Dose.mhd" --label "openmcsquare_fix_$($env:TARGET)_E$($env:ENERGY)_N$($N)_seed$($SEED)_wall$wall" | Tee-Object -FilePath "$D\endpoints.json"
+            if ($LASTEXITCODE) { throw "endpoints failed for $SEED" }
+          }
+          Pop-Location
+          "outputs: $ROOT"

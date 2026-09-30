@@ -53,9 +53,11 @@ def read_mhd(path: Path) -> tuple[np.ndarray, list[int], list[float]]:
     if header.get("ElementType") != "MET_FLOAT" or header.get("ElementByteOrderMSB", "False") != "False":
         raise ValueError(f"{path}: expected little-endian MET_FLOAT")
     raw = path.parent / header["ElementDataFile"]
+    expected = 4 * dims[0] * dims[1] * dims[2]
+    # Byte length, not element count: np.fromfile silently drops a trailing partial value (alden-ec2221c7, #38).
+    if raw.stat().st_size != expected:
+        raise ValueError(f"{raw}: {raw.stat().st_size} bytes, header says {dims} ({expected} bytes)")
     data = np.fromfile(raw, dtype="<f4")
-    if data.size != dims[0] * dims[1] * dims[2]:
-        raise ValueError(f"{raw}: {data.size} values, header says {dims}")
     return data.reshape(dims[2], dims[1], dims[0]), dims, spacing
 
 

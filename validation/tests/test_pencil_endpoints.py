@@ -39,8 +39,10 @@ def test_mcsquare_layout_on_asymmetric_phantom(tmp_path):
     assert d.sum() == 3.0
 
 
-def test_read_mhd_rejects_size_mismatch(tmp_path):
-    (tmp_path / "d.raw").write_bytes(np.zeros(5, dtype="<f4").tobytes())
+@pytest.mark.parametrize("extra", [b"", b"\x00\x00"])  # short by 3 floats; or exact plus a partial float
+def test_read_mhd_rejects_size_mismatch(tmp_path, extra):
+    n = 5 if not extra else 8
+    (tmp_path / "d.raw").write_bytes(np.zeros(n, dtype="<f4").tobytes() + extra)
     (tmp_path / "d.mhd").write_text(
         "DimSize = 2 2 2\nElementSpacing = 1 1 1\nElementType = MET_FLOAT\nElementDataFile = d.raw\n"
     )

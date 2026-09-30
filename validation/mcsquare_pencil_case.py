@@ -30,7 +30,7 @@ ROW_HALF_GAP_MEV = 1.0
 
 def write_ct(nx: int, ny: int, nz: int) -> None:
     """Write a water CT (0 HU) with 1 mm voxels, x fastest on disk."""
-    with open("water.mhd", "w") as f:
+    with open("water.mhd", "w", newline="\n") as f:  # LF on every platform
         f.write(
             f"ObjectType = Image\nNDims = 3\nDimSize = {nx} {ny} {nz}\nElementSpacing = 1.000000 1.000000 1.000000\n"
             "Offset = 0.000000 0.000000 0.000000\nElementType = MET_FLOAT\nElementByteOrderMSB = False\n"
@@ -73,7 +73,7 @@ def write_bdl(energy: float, nozzle_mm: float) -> str:
         header,
         *rows,
     ]
-    with open(name, "w") as f:
+    with open(name, "w", newline="\n") as f:  # LF on every platform
         f.write("\n".join(text) + "\n")
     return name
 
@@ -124,7 +124,7 @@ def write_plan(energy: float, iso: tuple[float, float, float]) -> str:
         "####X Y Weight",
         "0.000000 0.000000 1.000000",
     ]
-    with open(name, "w") as f:
+    with open(name, "w", newline="\n") as f:  # LF on every platform
         f.write("\n".join(lines) + "\n")
     return name
 
