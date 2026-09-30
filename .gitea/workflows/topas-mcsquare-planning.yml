@@ -23,13 +23,16 @@ on:
         default: "100"
       runs:
         description: Space-separated N:seed pairs (planning seeds 9001xx only)
-        default: "1e6:900121 1e6:900122"
+        default: ""
 
 env:
   TARGET: arm64-mcpu-native
   EXTRA_CFLAGS: -mcpu=native
   ENERGY: ${{ inputs.energy || '100' }}
-  RUNS: ${{ inputs.runs || '1e6:900121 1e6:900122' }}
+  # Empty = build only, run nothing. Set it (with the energy) in the same commit that requests runs.
+  # History: 200 MeV 1e7x4 + 1e6x4 (task 10447, ba204d5); 100 MeV 1e6 900121-2 (0783c45).
+  RUNS: ${{ inputs.runs || '' }}
+  STUDY_ROOT: /Volumes/T7 Shield/MonteCarlo_runs
   THREADS: "24"
 
 jobs:
@@ -66,12 +69,16 @@ jobs:
           set -euo pipefail
           UV="$(command -v uv || true)"; [ -n "$UV" ] || UV="$HOME/.local/bin/uv"
           [ -x "$UV" ] || { echo "no uv on this runner"; exit 1; }
+          if [ -z "$RUNS" ]; then echo "no runs requested (RUNS empty): nothing to do"; exit 0; fi
           B="$HOME/mcsq-builds/$GITHUB_SHA/$TARGET"
           (cd "$B" && shasum -a 256 -c sha256.txt)   # never compile here; the recorded binary or nothing
           cat "$B/build.txt"
-          ROOT="$HOME/topas-study/planning/portable-$TARGET/$GITHUB_SHA/E${ENERGY}_run${GITHUB_RUN_NUMBER}"
-          FREE_GB=$(df -g "$HOME" | awk 'NR==2 {print $4}')
-          [ "$FREE_GB" -ge 20 ] || { echo "only ${FREE_GB} GB free on the home volume: refusing"; exit 1; }
+          # Study outputs go to the T7, never the system disk (sjswerdloff). Fail closed if it is absent or read-only.
+          [ -d "$STUDY_ROOT" ] || { echo "$STUDY_ROOT not present (T7 not mounted?): refusing"; exit 1; }
+          PROBE="$STUDY_ROOT/.write_probe_$GITHUB_RUN_NUMBER"; : > "$PROBE" && rm "$PROBE" || { echo "$STUDY_ROOT not writable: refusing"; exit 1; }
+          ROOT="$STUDY_ROOT/planning/mcsquare-portable-$TARGET/$GITHUB_SHA/E${ENERGY}_run${GITHUB_RUN_NUMBER}"
+          FREE_GB=$(df -g "$STUDY_ROOT" | awk 'NR==2 {print $4}')
+          [ "$FREE_GB" -ge 20 ] || { echo "only ${FREE_GB} GB free on the T7: refusing"; exit 1; }
           mkdir -p "$(dirname "$ROOT")"; mkdir "$ROOT"   # a second run at the same commit fails here, never overwrites
           CASE="$ROOT/case"; mkdir "$CASE"
           (cd "$CASE" && "$UV" run --no-project --with numpy python "$GITHUB_WORKSPACE/validation/mcsquare_pencil_case.py" \
@@ -89,7 +96,9 @@ jobs:
             start=$(date +%s)
             "$B/MCsquare" "$D/config.txt" > "$D/log.txt" 2>&1 || { tail -20 "$D/log.txt"; exit 1; }
             WALL=$(( $(date +%s) - start ))
-            grep 'Nbr primaries simulated' "$D/log.txt"
+            SIM=$(grep -o 'Nbr primaries simulated: [0-9]*' "$D/log.txt" | awk '{print $4}')
+            echo "Nbr primaries simulated: $SIM (requested $N; may exceed it slightly, see #39)"
+            [ -n "$SIM" ] && [ "$SIM" -ge "$(printf '%.0f' "$N")" ] || { echo "simulated count below N: refusing"; exit 1; }
             if grep -q 'generated outside the geometry' "$D/log.txt"; then echo "primaries missed the phantom: refusing"; exit 1; fi
             (cd "$D/out" && shasum -a 256 Dose.raw Dose.mhd > sha256.txt)
             echo "RUN seed=$SEED N=$N wall_s=$WALL"
