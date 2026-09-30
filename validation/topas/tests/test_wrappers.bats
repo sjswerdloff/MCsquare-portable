@@ -131,7 +131,7 @@ prov() { grep "^$2" "$1/provenance.txt"; }
 
 @test "run_topas: malformed or excessive MIN_FREE_GB fails closed without running TOPAS" {
     i=10
-    for v in abc -1 "" 1e3 10000000; do
+    for v in abc -1 "" 1e3 10000000 008 010 00 " 5"; do
         i=$(( i + 1 ))
         d=$(rundir 150 opt0 1 100 2 "a$i")
         MIN_FREE_GB=$v run "$W/bin/run_topas.sh" "$d"
@@ -144,4 +144,30 @@ prov() { grep "^$2" "$1/provenance.txt"; }
 @test "run_topas: not a run directory -> 2" {
     run "$W/bin/run_topas.sh" "$W"
     [ "$status" -eq 2 ]
+}
+
+@test "run_topas: MIN_FREE_GB=0 is a valid decimal and runs" {
+    d=$(rundir 150 opt0 1 100 2)
+    MIN_FREE_GB=0 run "$W/bin/run_topas.sh" "$d"
+    [ "$status" -eq 0 ]
+}
+
+@test "run_topas: relative invocation records the runner's real digest" {
+    d=$(rundir 150 opt0 1 100 2)
+    expected=$(shasum -a 256 "$W/bin/run_topas.sh" | cut -d' ' -f1)
+    [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+    cd "$W"
+    run bin/run_topas.sh "$d"
+    [ "$status" -eq 0 ]
+    prov "$d" "runner sha256: $expected\$"
+    prov "$d" "runner: $W/bin/run_topas.sh\$"
+}
+
+@test "run_topas: every recorded digest is a full 64-hex hash" {
+    d=$(rundir 150 opt0 1 100 2)
+    run "$W/bin/run_topas.sh" "$d"
+    [ "$status" -eq 0 ]
+    n=$(grep -c 'sha256: ' "$d/provenance.txt")
+    [ "$n" -eq 8 ]   # runner, topas_bin, run.txt, base, and 4 outputs
+    [ "$(grep -cE 'sha256: [0-9a-f]{64}$' "$d/provenance.txt")" -eq 8 ]
 }
