@@ -71,8 +71,8 @@ from the input file.
   - single Gaussian (Weight2 = 0), energy spread 0.
   - **Divergence 1e-6 rad. This is a floor.** `diagonalize()` computes the small eigenvalue as a difference of
     values near spot². Below 1e-6 it quantises (~9e-16) and the divergence comes out silently wrong: 1–3% at
-    1e-7, a factor 1000 at 1e-8. At exactly 0 it produces NaN. (clement-7074f29f, clang arm64; gcc/icc checked before acquisition,
-    to match, not run.)
+    1e-7, a factor 1000 at 1e-8. At exactly 0 it produces NaN. (clement-7074f29f, clang arm64; the gcc and icc builds
+    are checked before acquisition, see "Source and geometry check".)
   - Correlation 1e-3, so the denominator is nonzero by construction.
   - Nozzle-to-isocentre 0, isocentre at the surface; SMX/SMY nonzero. (Review's citation `compute_beam_model.c:583-586`: otherwise an air energy-loss polynomial is applied that TOPAS does not model. Not re-read.)
   - The deliberate differences from TOPAS, recorded as such: divergence 1e-6 rad and correlation 1e-3.
