@@ -9,7 +9,7 @@ name: CI Windows
 
 on:
   push:
-    branches: [main, connor/windows-portable]
+    branches: [main]
   pull_request:
     branches: [main]
 

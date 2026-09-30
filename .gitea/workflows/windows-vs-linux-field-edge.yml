@@ -10,9 +10,19 @@ name: Windows vs Linux field-edge (portable)
 
 on:
   workflow_dispatch:
+  # Research run, not CI: it holds both Windows boxes for over an hour, so not on pull requests.
+  # Re-runs on a branch push that changes anything the comparison depends on.
   push:
     branches: [connor/windows-portable]
-    paths: [.gitea/workflows/windows-vs-linux-field-edge.yml]
+    paths:
+      - .gitea/workflows/windows-vs-linux-field-edge.yml
+      - .gitea/scripts/ensure-msys2.ps1
+      - validation/field_edge_*.py
+      - src/**
+      - Makefile
+      - BDL/**
+      - Materials/**
+      - Scanners/**
 
 env:
   PRIMARIES: "3e7"
