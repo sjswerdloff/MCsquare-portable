@@ -17,7 +17,7 @@ sys.path.insert(0, str(HERE))
 import platform_study_analyse as A  # noqa: E402
 
 PLATFORMS = ("windows", "linux", "macos")
-BIN = {"windows": "bin_w", "linux": "bin_l", "macos": "bin_m"}
+BIN = {"windows": "a" * 64, "linux": "b" * 64, "macos": "c" * 64}
 
 
 def syn_manifest() -> dict:
@@ -249,7 +249,7 @@ def test_crlf_materials_on_posix_platform_refuses(tmp_path, plat):
 
 def test_mixed_binary_hashes_within_a_platform_are_reported_not_refused(tmp_path):
     recs = wave(1)
-    next(r for r in recs if r["platform"] == "windows" and r["seed"] == 1012)["sha256"]["binary"] = "other_build"
+    next(r for r in recs if r["platform"] == "windows" and r["seed"] == 1012)["sha256"]["binary"] = "d" * 64
     p = run(tmp_path, recs, 1)
     assert p.returncode == 0 and "windows 2" in p.stdout
 
@@ -264,7 +264,7 @@ def test_missing_binary_hash_refuses(tmp_path):
     for r in recs:
         if r["platform"] == "macos":
             del r["sha256"]["binary"]
-    assert refused(run(tmp_path, recs, 1), "record has no binary sha256")
+    assert refused(run(tmp_path, recs, 1), "binary sha256 missing or not 64 lowercase hex")
 
 
 def test_manifest_absent_refuses(tmp_path):
@@ -441,3 +441,18 @@ def test_malformed_wave2_json_refuses(tmp_path, content):
     ana, _, w2 = two_looks(tmp_path)
     (tmp_path / "wave2.json").write_text(content)
     assert refused(run(tmp_path, wave(1) + w2, 2, analyzer=ana), "wave2")
+
+
+@pytest.mark.parametrize("bad", ["", "abc", "a" * 63, "a" * 65, "g" * 64, "A" * 64, " " + "a" * 63, None, 5])
+def test_malformed_binary_sha256_refuses(tmp_path, bad):
+    recs = wave(1)
+    next(r for r in recs if r["platform"] == "linux" and r["seed"] == 2005)["sha256"]["binary"] = bad
+    assert refused(run(tmp_path, recs, 1), "binary sha256 missing or not 64 lowercase hex")
+
+
+def test_distinct_valid_binary_hashes_within_a_platform_pass(tmp_path):
+    recs = wave(1)
+    for i, r in enumerate(x for x in recs if x["platform"] == "linux"):
+        r["sha256"]["binary"] = f"{i:064x}"
+    p = run(tmp_path, recs, 1)
+    assert p.returncode == 0 and "linux 16" in p.stdout

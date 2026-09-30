@@ -44,6 +44,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -206,8 +207,9 @@ def check_binaries(recs: list[dict]) -> None:
     """Every record carries a binary sha256; distinct values per platform are expected (embedded build time)."""
     for r in recs:
         h = r.get("sha256", {}).get("binary")
-        if not isinstance(h, str) or not h:
-            refuse(f"({r['platform']}, {r['seed']}): record has no binary sha256")
+        # hashlib.hexdigest() is lowercase; exactly 64 lowercase hex characters, nothing else.
+        if not isinstance(h, str) or re.fullmatch(r"[0-9a-f]{64}", h) is None:
+            refuse(f"({r['platform']}, {r['seed']}): binary sha256 missing or not 64 lowercase hex ({h!r})")
 
 
 def fingerprint(recs: list[dict]) -> str:
