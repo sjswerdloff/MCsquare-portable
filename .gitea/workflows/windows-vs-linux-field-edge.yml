@@ -13,7 +13,7 @@ on:
   # Research run, not CI: it holds both Windows boxes for over an hour, so not on pull requests.
   # Re-runs on a branch push that changes anything the comparison depends on.
   push:
-    branches: [connor/windows-portable]
+    branches: ['connor/field-edge-*', 'connor/windows-*']
     paths:
       - .gitea/workflows/windows-vs-linux-field-edge.yml
       - .gitea/scripts/ensure-msys2.ps1
@@ -72,24 +72,16 @@ jobs:
           & "$m\usr\bin\bash.exe" -lc 'make MCsquare_win_portable' 2>&1 | Select-Object -Last 3
           if (-not (Test-Path MCsquare_win_portable.exe)) { throw "build failed" }
           $env:PATH = "$m\ucrt64\bin;$env:PATH"
-          # uv pinned and verified (digest from the astral-sh/uv 0.12.20 release). Never deletes anything:
-          # an existing $uvd is used only if it carries the marker written by this block; otherwise fail closed.
-          # A fresh download goes to a per-run staging dir, and the tree + marker appear by one rename.
-          $uvd = 'C:\mcsq-win\uv-0.12.20'; $uvwant = '95f9bc30fbb3574d276e28ac4a6de932d25153645853d13da8c21eec3bc88d06'
-          if (Test-Path $uvd) {
-            $mk = if (Test-Path "$uvd\.installed-from-sha256") { (Get-Content "$uvd\.installed-from-sha256" -Raw).Trim() } else { '' }
-            if ($mk -ne $uvwant) { throw "$uvd exists without the pinned marker: not using or touching it; ask sjswerdloff" }
-          } else {
-            $st = "C:\mcsq-win\uv-stage-$env:GITHUB_RUN_ID-$PID"
-            New-Item -ItemType Directory $st | Out-Null
-            curl.exe -fsSL -o "$st\uv.zip" https://github.com/astral-sh/uv/releases/download/0.12.20/uv-x86_64-pc-windows-msvc.zip
-            $got = (Get-FileHash "$st\uv.zip" -Algorithm SHA256).Hash.ToLower()
-            if ($got -ne $uvwant) { throw "uv zip sha256 $got, expected ${uvwant}: left in $st for inspection" }
-            Expand-Archive "$st\uv.zip" "$st\uv"
-            Set-Content -NoNewline "$st\uv\.installed-from-sha256" $uvwant
-            Move-Item "$st\uv" $uvd
-          }
-          & "$uvd\uv.exe" run --no-project --with numpy python validation\field_edge_make_cases.py 200 150
+          # Python + numpy from MSYS2's own packages (pacman verifies their signatures) into the verified
+          # tree ensure-msys2.ps1 manages; no separate download. --needed makes it a no-op once installed.
+          & "$m\usr\bin\bash.exe" -lc 'pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-numpy' 2>&1 | Select-Object -Last 3
+          if ($LASTEXITCODE) { throw "pacman install of python/numpy failed ($LASTEXITCODE)" }  # before any check an older install could satisfy
+          $py = "$m\ucrt64\bin\python.exe"
+          if (-not (Test-Path $py)) { throw "MSYS2 python not installed" }
+          & $py -c "import numpy, sys; print('python', sys.version.split()[0], 'numpy', numpy.__version__)"
+          if ($LASTEXITCODE) { throw "numpy not importable" }
+          & $py validation\field_edge_make_cases.py 200 150
+          if ($LASTEXITCODE) { throw "case generation failed" }
           foreach ($s in 'A','B') {
             $seed = if ($s -eq 'B') { 67890 } else { 12345 }
             @("Num_Threads 3", "Num_Primaries $env:PRIMARIES", "RNG_Seed $seed", "CT_File cube.mhd",
@@ -106,5 +98,5 @@ jobs:
             if ($rc -ne 0 -or -not (Test-Path "out_E200_S150_after_$s\Dose.raw")) { Get-Content "log_$s.txt" -Tail 20; throw "run $s failed" }
           }
           "=== WINDOWS profile"
-          & "$uvd\uv.exe" run --no-project --with numpy python validation\field_edge_profile.py "$PWD" E200_S150 after
+          & $py validation\field_edge_profile.py "$PWD" E200_S150 after
           if ($LASTEXITCODE) { throw "profile failed" }
