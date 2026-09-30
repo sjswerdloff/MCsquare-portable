@@ -18,15 +18,21 @@ not used to stop)?
 - **Source revision:** one commit, recorded. Both builds come from it, at `-O3`, with their compiler versions logged.
 - **Case:** 200 MeV, 15 × 15 cm field, 300 mm water cube with 2 mm voxels, `BDL_default_DN_RangeShifter.txt`, the
   default Scanners conversion files. `Num_Threads 3`, `Num_Primaries 3e7`, `Dose_MHD_Output True`.
-- **Seeds:** wave 1 uses 1001–1016; wave 2, if run, uses 1017–1032. The same seed list runs on both platforms.
-  The analysis treats them as unpaired (see Analysis).
+- **Seeds: distinct streams per platform, so the two samples are independent.**
+  - Windows: wave 1 uses 1001–1016, wave 2 uses 1017–1032.
+  - Linux: wave 1 uses 2001–2016, wave 2 uses 2017–2032.
+  - No seed runs on both platforms.
 
 ## Metrics per seed (fixed voxel locations, computed identically on both platforms)
 
 - **Lateral (8 endpoints).** Dose 5, 10, 20 and 30 mm outside the field edge at 127 mm and 201 mm depth, as % of
   the CAX dose at the same depth. These are exactly the rows of `validation/field_edge_profile.py`.
 - **CAX (3 endpoints).** Absolute dose at 127 mm, at 201 mm, and at voxel index 23 (253 mm, the peak depth in the
-  pilot). Compared as % relative difference.
+  pilot). **Analysed on the log scale:** each seed contributes ln(dose), and the CI is for mean ln W − mean ln L, which
+  is the log of the geometric-mean ratio. A relative margin ±δ% is applied as |ln ratio| ≤ ln(1 + δ/100). Dividing by
+  an observed Linux mean is never used, so there is no uncertain denominator.
+- **Lateral rows need no such step.** Each is a ratio within one seed (lateral dose over that same seed's CAX dose at
+  that depth), so the per-seed value is already on the percentage-point scale that the margin uses.
 - **Distal edge (2 endpoints).** R80 and R20, compared in mm. The crossing rule, fixed now:
   - D(z) is the CAX depth-dose, sampled at voxel-centre depths z, averaged over the same central 10 × 10 voxels as
     the CAX rows.
@@ -69,9 +75,9 @@ Pilot planning numbers, normal approximation, 90% power, one-sided α = 0.025 pe
 ## Analysis (fixed now)
 
 - **Per endpoint:** Welch two-sample comparison of the per-seed values, Windows versus Linux, with a confidence
-  interval for the mean difference W − L. It is **unpaired by pre-specification**: Welch is valid whatever the
-  cross-platform correlation is. Whether pairing by seed would help is **unestablished**; two pilot seeds cannot
-  estimate that correlation, and nothing here tested why it might be absent.
+  interval for the mean difference W − L (on the log scale for CAX). It is **unpaired**. The samples are
+  independent by construction, because each platform uses its own seeds (see Fixed conditions). Whether same-seed
+  pairing would have helped is **unestablished**; two pilot seeds cannot estimate that correlation.
 - **Equivalence:** TOST for each endpoint. It passes if the (1 − 2α) CI for W − L lies inside ±δ.
   - Equivalence of the platforms is claimed only if **all 13 endpoints pass**. That is an intersection-union test,
     so no multiplicity adjustment is needed across endpoints for that joint claim.
