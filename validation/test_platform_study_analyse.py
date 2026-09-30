@@ -96,7 +96,7 @@ def test_complete_wave1_runs_and_writes_verdicts(tmp_path):
     assert state["manifest_sha256"] == A.sha_of(tmp_path / "manifest.json")
     assert state["wave1_fingerprint"] == A.fingerprint(wave(1))
     assert "VERDICT windows vs linux (look 1)" in p.stdout
-    assert "approved binary sha256 per platform: linux bin_l, macos bin_m, windows bin_w" in p.stdout
+    assert "distinct binary sha256 per platform (not source attestation; build time is embedded): linux 1, macos 1, windows 1" in p.stdout
 
 
 def test_look1_refuses_to_overwrite_its_verdicts(tmp_path):
@@ -247,15 +247,16 @@ def test_crlf_materials_on_posix_platform_refuses(tmp_path, plat):
     assert refused(run(tmp_path, recs, 1), "materials.combined_sha256")
 
 
-def test_mixed_binary_hashes_within_a_platform_refuse(tmp_path):
+def test_mixed_binary_hashes_within_a_platform_are_reported_not_refused(tmp_path):
     recs = wave(1)
     next(r for r in recs if r["platform"] == "windows" and r["seed"] == 1012)["sha256"]["binary"] = "other_build"
-    assert refused(run(tmp_path, recs, 1), "windows: records do not share one binary sha256")
+    p = run(tmp_path, recs, 1)
+    assert p.returncode == 0 and "windows 2" in p.stdout
 
 
 def test_different_binaries_across_platforms_are_fine_and_printed(tmp_path):
     p = run(tmp_path, wave(1), 1)
-    assert p.returncode == 0 and "windows bin_w" in p.stdout
+    assert p.returncode == 0 and "distinct binary sha256 per platform" in p.stdout
 
 
 def test_missing_binary_hash_refuses(tmp_path):
@@ -263,7 +264,7 @@ def test_missing_binary_hash_refuses(tmp_path):
     for r in recs:
         if r["platform"] == "macos":
             del r["sha256"]["binary"]
-    assert refused(run(tmp_path, recs, 1), "macos: records do not share one binary sha256")
+    assert refused(run(tmp_path, recs, 1), "record has no binary sha256")
 
 
 def test_manifest_absent_refuses(tmp_path):

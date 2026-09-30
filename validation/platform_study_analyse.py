@@ -15,8 +15,10 @@ by platform_study_manifest.py from the study commit; --manifest overrides the pa
 records a different study commit). Per record: text inputs (plan, cube.mhd, BDL, HU_Density, HU_Material) and the
 Materials tree digest must equal the manifest's LF variant on linux and macos, and its LF or CRLF variant on windows
 (CRLF is allowed on windows only); cube.raw must equal the manifest's value exactly; the config hash must equal the
-manifest's hash for that (platform, seed) exactly. All records of a platform must share one binary sha256, which is
-printed. Anything else refuses, naming the record and field. There is no "differs but content is fixed by commit" path.
+manifest's hash for that (platform, seed) exactly. Every record must carry a well-formed binary sha256; binary hashes
+are REPORTED per platform, not required to agree (amendment 2026-10-01, before any result was read: the Makefile
+embeds `BUILD_TIME := $(shell date)` in VERSION and every seed job rebuilds, so identical source yields distinct
+binaries; source identity rests on the commit check). Anything else refuses, naming the record and field. There is no "differs but content is fixed by commit" path.
 A non-finite endpoint value makes that endpoint unable to pass.
 
 STOP STATE AND BINDING: look 1 writes <look-1 verdicts.json> (refusing to overwrite) holding "verdicts" (per comparison)
@@ -201,12 +203,11 @@ def check_inputs(recs: list[dict], manifest: dict) -> None:
 
 
 def check_binaries(recs: list[dict]) -> None:
-    """One binary sha256 per platform; the approved hashes are printed by main."""
-    for plat in sorted({r["platform"] for r in recs}):
-        hashes = {r.get("sha256", {}).get("binary") for r in recs if r["platform"] == plat}
-        if len(hashes) != 1 or None in hashes:
-            refuse(f"{plat}: records do not share one binary sha256 "
-                   f"({len(hashes)} distinct values: {sorted(map(str, hashes))})")
+    """Every record carries a binary sha256; distinct values per platform are expected (embedded build time)."""
+    for r in recs:
+        h = r.get("sha256", {}).get("binary")
+        if not isinstance(h, str) or not h:
+            refuse(f"({r['platform']}, {r['seed']}): record has no binary sha256")
 
 
 def fingerprint(recs: list[dict]) -> str:
@@ -268,8 +269,8 @@ def main(path: str, look: int, verdict_path: str, manifest_path: Path | str | No
     for r in recs:
         by[r["platform"]].append(r)
     print(f"look {look}; seeds per platform: " + ", ".join(f"{p} {len(v)}" for p, v in sorted(by.items())))
-    print("approved binary sha256 per platform: "
-          + ", ".join(f"{p} {v[0]['sha256']['binary']}" for p, v in sorted(by.items())))
+    print("distinct binary sha256 per platform (not source attestation; build time is embedded): "
+          + ", ".join(f"{p} {len({r['sha256']['binary'] for r in v})}" for p, v in sorted(by.items())))
     print(f"analyzer sha256 {sha_of(__file__)}; manifest sha256 {sha_of(manifest_path)}")
     for p, v in sorted(by.items()):
         hosts = defaultdict(int)

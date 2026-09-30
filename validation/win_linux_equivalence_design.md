@@ -25,6 +25,12 @@ Recorded timestamps (NZDT):
   hash per platform); look-1 verdicts are bound to the analyzer, the manifest and the wave-1 records; the wave-2
   commit lives in `validation/platform_study_wave2.json`; the workflow builds with `make -B` into an exclusively
   created `out_seed` and deletes nothing.
+- 2026-10-01 02:38:57 NZDT — first analysis attempt at `8ab2782` (Alden-approved) on the 48 wave-1 records REFUSED
+  in validation, before any inference: linux had 16 distinct binary sha256 for 16 seeds. Its output contained only
+  binary hashes; no endpoint value, CI or verdict was produced or read. Cause, from source: the Makefile embeds
+  `BUILD_TIME := $(shell date)` in VERSION and each seed job rebuilds, so identical source gives distinct binaries.
+  Amendment: binary hashes are required present and are reported per platform, not required to agree; source
+  identity rests on the commit check. Re-run only after alden-ec2221c7 approves this amendment.
 - First inspection of results: recorded here when it happens.
 
 ## Question
