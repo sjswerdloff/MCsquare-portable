@@ -72,6 +72,18 @@ MCsquare_portable : $(SRC)
 MCsquare_arm64 : $(SRC)
 	clang $(SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O3 $(FULL_VERSION) -o MCsquare_arm64
 
+# Windows x86-64 with MinGW-w64 GCC (MSYS2 UCRT64 shell): make MCsquare_win_portable
+# Uses its own source list: on Windows COMSPEC is set, so $(SRC) above is the Intel `src\*.c` form.
+# MSYS2 ships no static libgomp, so the .exe needs libgomp-1.dll and its companions from ucrt64\bin
+# at run time: run it in the UCRT64 shell, put ucrt64\bin on PATH, or copy those DLLs next to it.
+WIN_SRC = $(wildcard src/*.c)
+MCsquare_win_portable : $(WIN_SRC)
+	gcc $(WIN_SRC) -fopenmp -lm -O3 $(FULL_VERSION) -o MCsquare_win_portable.exe
+
+# Windows regression test for the temporary-folder removal (#12, #28). CI runs it with a fresh root.
+test_remove_tmp_win : tests/test_remove_temporary_folders_win.c $(WIN_SRC)
+	gcc -Isrc tests/test_remove_temporary_folders_win.c $(filter-out src/main.c, $(WIN_SRC)) -fopenmp -lm -O1 -DVERSION='"test"' -o test_remove_temporary_folders_win.exe
+
 # C regression tests (macOS arm64, as CI runs them). UBSan with no recovery, so an out-of-bounds
 # read fails deterministically instead of depending on what is on the stack.
 TEST_SRC = $(filter-out src/main.c, $(SRC))

@@ -18,6 +18,9 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#if defined(_WIN32)
+  #include <direct.h>	// _mkdir
+#endif
 #if defined(_MSC_VER)
   #include "lib/win_dirent.h"
 #else

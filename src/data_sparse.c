@@ -10,7 +10,11 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 */
 
 
-#ifndef _MSC_VER
+#ifdef _WIN32
+  #define WIN32_LEAN_AND_MEAN
+  #define NOMINMAX
+  #include <windows.h>
+#else
   #ifndef _GNU_SOURCE
     #define _GNU_SOURCE	// nftw() in glibc's <ftw.h>
   #endif
@@ -600,7 +604,31 @@ int Merge_Sparse_Files(char *InputPath, char *FileName, int NbrDirectories, char
 }
 
 
-#ifndef _MSC_VER
+#ifdef _WIN32
+// Windows counterpart of the nftw walk below: delete the contents depth-first, then the folder.
+// A reparse point (symbolic link or junction) is removed itself and never followed, as FTW_PHYS does.
+static void remove_tree_win(const char *dir){
+  char pattern[PATH_SIZE + 3], entry[PATH_SIZE];
+  WIN32_FIND_DATAA fd;
+  if(snprintf(pattern, sizeof pattern, "%s\\*", dir) >= (int)sizeof pattern) return;
+  HANDLE h = FindFirstFileA(pattern, &fd);
+  if(h != INVALID_HANDLE_VALUE){
+    do{
+      if(strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
+      if(snprintf(entry, sizeof entry, "%s\\%s", dir, fd.cFileName) >= (int)sizeof entry){
+        printf("\nWarning: temporary file path too long, not removed: %s\\%s \n", dir, fd.cFileName);
+        continue;
+      }
+      if(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY){
+        if(!(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) remove_tree_win(entry);
+        if(!RemoveDirectoryA(entry)) printf("\nWarning: unable to remove temporary folder %s \n", entry);
+      }
+      else if(!DeleteFileA(entry)) printf("\nWarning: unable to remove temporary file %s \n", entry);
+    } while(FindNextFileA(h, &fd));
+    FindClose(h);
+  }
+}
+#else
 // nftw callback: remove each entry after its contents (FTW_DEPTH). Symbolic links are removed
 // themselves, never followed (FTW_PHYS), as with `rm -r`.
 static int remove_tree_entry(const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf){
@@ -611,7 +639,7 @@ static int remove_tree_entry(const char *fpath, const struct stat *sb, int typef
 #endif
 
 // Deletes the per-beamlet temporary folders InputPath1 .. InputPathN. The path comes from the
-// config, so on Linux and macOS it is never passed through a shell (issue #12).
+// config, so it is never passed through a shell (issue #12).
 int Remove_temporary_folders(char *InputPath, int NbrDirectories){
   char path[PATH_SIZE];
   int i;
@@ -621,12 +649,21 @@ int Remove_temporary_folders(char *InputPath, int NbrDirectories){
       printf("\nWarning: temporary folder path too long, not removed: %s%d \n", InputPath, i+1);
       continue;
     }
-#ifdef _MSC_VER
-    // Unchanged Windows behaviour; Makefile.bat builds are not maintained here.
-    char quoted[PATH_SIZE + 2], cmd[PATH_SIZE + 64];
-    sprintf(quoted, "\"%s\"", path);
-    sprintf(cmd, RMDIR_CMD, quoted);
-    system(cmd);
+#ifdef _WIN32
+    DWORD attr = GetFileAttributesA(path);
+    if(attr == INVALID_FILE_ATTRIBUTES){
+      DWORD err = GetLastError();
+      // Only "not there" is silent, as ENOENT is below; any other failure is reported.
+      if(err != ERROR_FILE_NOT_FOUND && err != ERROR_PATH_NOT_FOUND)
+        printf("\nWarning: unable to remove temporary folder %s (error %lu) \n", path, (unsigned long)err);
+      continue;
+    }
+    if(!(attr & FILE_ATTRIBUTE_DIRECTORY)){  // a plain file: removed, as nftw does
+      if(!DeleteFileA(path)) printf("\nWarning: unable to remove temporary file %s \n", path);
+      continue;
+    }
+    if(!(attr & FILE_ATTRIBUTE_REPARSE_POINT)) remove_tree_win(path);
+    if(!RemoveDirectoryA(path)) printf("\nWarning: unable to remove temporary folder %s \n", path);
 #else
     if(nftw(path, remove_tree_entry, 16, FTW_DEPTH | FTW_PHYS) != 0 && errno != ENOENT)
       printf("\nWarning: unable to remove temporary folder %s \n", path);

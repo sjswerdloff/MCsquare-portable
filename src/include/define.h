@@ -112,11 +112,9 @@ typedef pcg32_random_t* RNG_Stream_t;
   #include <BaseTsd.h>
   typedef SSIZE_T ssize_t;
   #define strtok_r strtok_s
-  #define RMDIR_CMD "rd /s /q  %s"
 #else
   #define ALIGNED_(n) __attribute__((aligned(n)))
   #include <math.h>
-  #define RMDIR_CMD "rm -r  %s"
 #endif
 
 #ifndef __INTEL_COMPILER

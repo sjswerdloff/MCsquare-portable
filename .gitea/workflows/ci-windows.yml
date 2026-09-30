@@ -1,0 +1,78 @@
+# Windows x86-64 build of portable MCsquare with MinGW-w64 GCC (MSYS2 UCRT64), on the native Windows
+# runners (label `windows`: the HP and the Lenovo, SYSTEM, capacity 1 each).
+# MSYS2 comes from .gitea/scripts/ensure-msys2.ps1: a pinned, SHA-256-verified release unpacked once per box
+# into the versioned C:\mcsq-win\msys64-20260927. It never deletes an existing tree.
+# The .exe links libgomp dynamically (MSYS2 has no static libgomp); the smoke test runs it from
+# PowerShell with only ucrt64\bin added to PATH.
+
+name: CI Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-smoke:
+    name: Build & smoke test (Windows x86-64, MinGW-w64 GCC)
+    runs-on: windows
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: MSYS2 + UCRT64 GCC (verified, once per box)
+        shell: powershell
+        run: |
+          & .\.gitea\scripts\ensure-msys2.ps1
+
+      - name: Build MCsquare_win_portable.exe
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'  # native stderr is not an error; results are checked explicitly
+          $m = 'C:\mcsq-win\msys64-20260927'
+          $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
+          & "$m\usr\bin\bash.exe" -lc 'gcc --version | head -1; make MCsquare_win_portable' 2>&1 | ForEach-Object { "$_" }
+          if ($LASTEXITCODE) { throw "build failed" }
+          if (-not (Test-Path MCsquare_win_portable.exe)) { throw "no exe" }
+          "DLLs the exe imports:"
+          & "$m\usr\bin\bash.exe" -lc 'objdump -p MCsquare_win_portable.exe | grep "DLL Name"' 2>&1 | ForEach-Object { "$_" }
+
+      - name: Temporary-folder removal on Windows (#12, #28), in a test-created root
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $m = 'C:\mcsq-win\msys64-20260927'
+          $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
+          $build = @(& "$m\usr\bin\bash.exe" -lc 'make test_remove_tmp_win' 2>&1 | ForEach-Object { "$_" })
+          if (-not (Test-Path test_remove_temporary_folders_win.exe)) { $build; throw "test build failed" }  # full output on failure
+          $build | Select-Object -Last 3
+          $env:PATH = "$m\ucrt64\bin;$env:PATH"
+          $root = "$PWD\rmtest_$env:GITHUB_RUN_ID"   # must not exist; the test refuses an existing root
+          $preexisting = Test-Path $root
+          & .\test_remove_temporary_folders_win.exe $root *> rmtest.log
+          $rc = $LASTEXITCODE
+          Get-Content rmtest.log
+          $warned = Select-String -Path rmtest.log -Pattern 'unable to remove temporary folder .*bad<' -Quiet
+          # Clean up only a root this invocation created: absent before the run AND carrying the test's marker.
+          if (-not $preexisting -and (Test-Path "$root\.created-by-test_remove_temporary_folders_win")) { Remove-Item -Recurse -Force $root }
+          elseif (Test-Path $root) { "left $root in place: not provably created by this run" }
+          if ($rc -ne 0) { throw "test failed ($rc)" }
+          if (-not $warned) { throw "no warning for the invalid-name (non-missing) error" }
+
+      - name: Smoke test (1000 primaries), run natively
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'  # native stderr is not an error; results are checked explicitly
+          $env:PATH = "C:\mcsq-win\msys64-20260927\ucrt64\bin;$env:PATH"
+          New-Item -ItemType Directory -Force smoke_test_output | Out-Null
+          & .\MCsquare_win_portable.exe Sample_input_data\smoke_test_config.txt *> smoke.log
+          $rc = $LASTEXITCODE
+          Get-Content smoke.log -Tail 8
+          if ($rc -ne 0) { throw "MCsquare exited $rc" }
+          if (-not (Test-Path smoke_test_output\Dose.mhd)) { throw "no Dose.mhd" }
+          Get-ChildItem smoke_test_output | ForEach-Object { "$($_.Length)`t$($_.Name)" }
+          "Smoke test passed - Dose.mhd created"
