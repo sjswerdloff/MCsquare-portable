@@ -13,11 +13,19 @@ name: TOPAS comparison, MCsquare planning (portable, Studio)
 # Studio every time the shared scripts change, and the Studio is wanted back.
 on:
   workflow_dispatch:
+    inputs:
+      energy:
+        description: Energy (MeV)
+        default: "200"
+      runs:
+        description: Space-separated N:seed pairs (planning seeds 9001xx only)
+        default: "1e7:900101 1e7:900102 1e7:900103 1e7:900104 1e6:900111 1e6:900112 1e6:900113 1e6:900114"
 
 env:
   TARGET: arm64-mcpu-native
   EXTRA_CFLAGS: -mcpu=native
-  ENERGY: "200"
+  ENERGY: ${{ inputs.energy || '200' }}
+  RUNS: ${{ inputs.runs || '1e7:900101 1e7:900102 1e7:900103 1e7:900104 1e6:900111 1e6:900112 1e6:900113 1e6:900114' }}
   THREADS: "24"
 
 jobs:
@@ -43,7 +51,7 @@ jobs:
           cat "$B/build.txt" "$B/sha256.txt"
 
   planning:
-    name: Planning runs (1e7 x 4, 1e6 x 4)
+    name: Planning runs (${{ inputs.energy || '200' }} MeV)
     needs: build
     runs-on: stuart-m3ultra-canary
     timeout-minutes: 120
@@ -57,7 +65,7 @@ jobs:
           B="$HOME/mcsq-builds/$GITHUB_SHA/$TARGET"
           (cd "$B" && shasum -a 256 -c sha256.txt)   # never compile here; the recorded binary or nothing
           cat "$B/build.txt"
-          ROOT="$HOME/topas-study/planning/portable-$TARGET/$GITHUB_SHA"
+          ROOT="$HOME/topas-study/planning/portable-$TARGET/$GITHUB_SHA/E${ENERGY}_run${GITHUB_RUN_NUMBER}"
           FREE_GB=$(df -g "$HOME" | awk 'NR==2 {print $4}')
           [ "$FREE_GB" -ge 20 ] || { echo "only ${FREE_GB} GB free on the home volume: refusing"; exit 1; }
           mkdir -p "$(dirname "$ROOT")"; mkdir "$ROOT"   # a second run at the same commit fails here, never overwrites
@@ -65,7 +73,8 @@ jobs:
           (cd "$CASE" && "$UV" run --no-project --with numpy python "$GITHUB_WORKSPACE/validation/mcsquare_pencil_case.py" \
             "$ENERGY" --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1)
           (cd "$CASE" && shasum -a 256 water.raw water.mhd "bdl_E$ENERGY.txt" "plan_E$ENERGY.txt" > inputs_sha256.txt)
-          for spec in 1e7:900101 1e7:900102 1e7:900103 1e7:900104 1e6:900111 1e6:900112 1e6:900113 1e6:900114; do
+          for spec in $RUNS; do
+            case "$spec" in *:9001[0-9][0-9]) ;; *) echo "planning seeds are 9001xx only: $spec"; exit 1;; esac
             N=${spec%%:*}; SEED=${spec##*:}; D="$ROOT/E${ENERGY}_N${N}_seed${SEED}"
             mkdir "$D" "$D/out"
             printf '%s\n' "Num_Threads $THREADS" "Num_Primaries $N" "RNG_Seed $SEED" "CT_File $CASE/water.mhd" \

@@ -122,7 +122,9 @@ jobs:
           $ROOT = "C:\mcsq-win\topas-study\planning\openmcsquare-fix-$env:TARGET\$env:GITHUB_SHA"
           New-Item -ItemType Directory -Force (Split-Path $ROOT) | Out-Null
           New-Item -ItemType Directory $ROOT | Out-Null   # a second run at this commit fails here
-          $CASE = "$ROOT\case"; New-Item -ItemType Directory $CASE | Out-Null
+          # Upstream 85bf2911 opens the MHD's ElementDataFile relative to the WORKING directory (the portable fork
+          # resolves it beside the .mhd), so the case is written into the run root, which is also the cwd below.
+          $CASE = $ROOT
           # Upstream's own data (Materials, Scanners) from 85bf2911: the arm runs upstream's code on upstream's data.
           git -c core.autocrlf=false archive -o "$ROOT\updata.tar" $env:UPSTREAM Materials Scanners
           tar -xf "$ROOT\updata.tar" -C $ROOT; if ($LASTEXITCODE) { throw "tar failed" }
