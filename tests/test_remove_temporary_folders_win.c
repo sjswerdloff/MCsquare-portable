@@ -16,6 +16,10 @@
 #include "include/data_sparse.h"
 #include <stdio.h>
 #include <string.h>
+// As in data_sparse.c: full windows.h pulls in winioctl.h, whose MEDIA_TYPE enumerator `Unknown`
+// collides with the one in struct.h.
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
 
 static int failures = 0;

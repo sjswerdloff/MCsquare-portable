@@ -47,8 +47,9 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $m = 'C:\mcsq-win\msys64-20260927'
           $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
-          & "$m\usr\bin\bash.exe" -lc 'make test_remove_tmp_win' 2>&1 | Select-Object -Last 3
-          if (-not (Test-Path test_remove_temporary_folders_win.exe)) { throw "test build failed" }
+          $build = @(& "$m\usr\bin\bash.exe" -lc 'make test_remove_tmp_win' 2>&1 | ForEach-Object { "$_" })
+          if (-not (Test-Path test_remove_temporary_folders_win.exe)) { $build; throw "test build failed" }  # full output on failure
+          $build | Select-Object -Last 3
           $env:PATH = "$m\ucrt64\bin;$env:PATH"
           $root = "$PWD\rmtest_$env:GITHUB_RUN_ID"   # must not exist; the test refuses an existing root
           $preexisting = Test-Path $root
