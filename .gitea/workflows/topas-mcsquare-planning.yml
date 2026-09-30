@@ -9,14 +9,10 @@
 
 name: TOPAS comparison, MCsquare planning (portable, Studio)
 
+# Manual only: the planning set ran at ba204d5 (task 10447). A push trigger would re-run eight simulations on the
+# Studio every time the shared scripts change, and the Studio is wanted back.
 on:
   workflow_dispatch:
-  push:
-    branches: ['connor/topas-mcsquare-*']
-    paths:
-      - .gitea/workflows/topas-mcsquare-planning.yml
-      - validation/mcsquare_pencil_case.py
-      - validation/pencil_endpoints.py
 
 env:
   TARGET: arm64-mcpu-native
