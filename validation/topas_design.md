@@ -163,8 +163,9 @@ fraction is not a measured halo effect.
   energy-fraction ratios 20–40 and 40–80 mm within [0.90, 1.10], 80–200 mm within [0.75, 1.25], as asymmetric
   log bounds. A "small-discrepancy reference tier" is reported alongside (R80 ≤ 0.1 mm, σ ≤ 0.03/0.05 mm, inner
   rings ≤ 3%, far ring ≤ 10%). An R80 difference near the band is an **investigation flag**, never an attribution.
-- **Estimator sensitivity, stated:** for IDENTICAL TOPAS transport, R80 moves 0.12 mm between 1 mm and 0.5 mm depth
-  bins (crossing interpolation on a curved falloff; clement-7074f29f, planning). It depends on falloff shape, so it
+- **Scoring and estimator sensitivity, stated:** with the same TOPAS seed and build, R80 moves 0.12 mm between 1 mm
+  and 0.5 mm depth bins. That is scoring-grid and estimator sensitivity combined, not crossing interpolation alone
+  (clement-7074f29f, planning). It depends on falloff shape, so it
   need not cancel between codes, and it is material against a ±0.3 mm band.
 - **Portable vs OpenMCsquare + fix:** reported as a build difference, exploratory. They differ in RNG (PCG vs MKL
   VSL), performance refactors and compiler.
@@ -172,8 +173,9 @@ fraction is not a measured halo effect.
   sha256), the per-arm seed ranges (distinct, never shared between arms), thread counts, B and H, and the bands.
   Seed ranges: planning 900001+ (TOPAS) and 9001xx/9002xx (MCsquare); confirmatory TOPAS opt0 910001+, opt4
   911001+, portable 920001+, OpenMCsquare + fix 930001+.
-- **Seeds and reproducibility, per code:** TOPAS regenerates a run from its seed (clement-7074f29f: identical results
-  at 8 and 16 threads). **MCsquare does not at more than one thread** (#39): primaries go to per-thread streams through
+- **Seeds and reproducibility, per code:** TOPAS reproduced runs from their seeds in the configurations tested
+  (clement-7074f29f: OpenTOPAS 4.3.0, seed 101 at 8 and 16 threads, and seed 900013 across three grids). That is not
+  shown in general. **MCsquare does not at more than one thread** (#39): primaries go to per-thread streams through
   a shared counter, so a seed identifies streams, not a realisation, and the simulated count can exceed N. Each
   MCsquare run records requested and simulated primaries; distinct seeds remain distinct streams.
 - **Huang et al. 2018 is context, and its figures are TOPAS-against-MEASUREMENT** (corrected 2026-10-01; this line
