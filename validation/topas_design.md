@@ -46,7 +46,7 @@ Not claimed: better agreement than Huang et al. 2018 (doi:10.1002/acm2.12420). T
 
 | arm | build | where |
 |---|---|---|
-| **portable** | portable main (includes the fix) | platform decided after #31: if Windows/macOS/Linux are equivalent, the Studio |
+| **portable** | portable main (includes the fix) | Mac Studio (M3 Ultra), full study (sjswerdloff, 2026-10-01, relayed by clement-7074f29f: *"we'll want to run the full study on portable MCsquared on the Ultra as well … (on Ultra is good, on Intel is ok too)"*) |
 | **OpenMCsquare + fix** | 85bf2911 with `fix_secondary_angle_energy.patch`, built with icc 2021.1 (the #17 recipe) | Linux runner (HP) |
 | **TOPAS opt0** | OpenTOPAS 4.3.0 / Geant4 11.3.2, EM option 0: same stopping power as MCsquare to <0.01% above 50 MeV | Mac Studio |
 | TOPAS opt4 | the same with EM option 4 (secondary; its stopping-power table integrates to CSDA ranges +0.08/+0.26/+0.27 mm different at 100/150/200 MeV, an integral difference, not a measured R80 shift) | Mac Studio |
@@ -116,8 +116,8 @@ endpoints, exploratory only.
 
 | endpoint | definition |
 |---|---|
-| R80 | IDD = dose summed over the **whole 400 × 400 mm plane** at each 1 mm depth bin. R80 is the first downward crossing of 0.8 × max(IDD) distal to the maximum, by linear interpolation between the two voxel-centre depths bracketing it (the #31 rule, `platform_study_metrics.distal_level`). No crossing: undefined, the endpoint cannot pass. More than one crossing: first one used, run flagged. |
-| σ at 100 mm, σ at 200 mm | slab = the **six** 1 mm depth bins whose edges span [d − 3, d + 3) mm, i.e. bin centres d − 2.5 … d + 2.5 mm (TOPAS indices k = 349.5 − centre), midpoint exactly d. The same slabs are used for the rings. A synthetic boundary-value test pins the selected indices before any data. Profiles = the slab's dose projected onto x (summed over y) and onto y. Each is fitted over \|x\| ≤ 10 mm with a **voxel-integrated** Gaussian (erf differences over each 1 mm bin), free amplitude, centre and σ, no background term. σ = mean of the x and y fits (confirmatory); σ_x and σ_y are also reported separately as diagnostics, to expose a directional defect. A fit that does not converge, or gives σ outside [1, 20] mm, is failed: the endpoint cannot pass. |
+| R80 | IDD = dose summed over the **whole 400 × 400 mm plane** at each 1 mm depth bin. R80 is the first downward crossing of 0.8 × max(IDD) distal to the maximum, by linear interpolation between the two voxel-centre depths bracketing it (the #31 rule, `platform_study_metrics.distal_level`). No crossing: undefined, reported as such. More than one crossing: first one used, run flagged. |
+| σ at 100 mm, σ at 200 mm | slab = the **six** 1 mm depth bins whose edges span [d − 3, d + 3) mm, i.e. bin centres d − 2.5 … d + 2.5 mm (TOPAS indices k = 349.5 − centre), midpoint exactly d. The same slabs are used for the rings. A synthetic boundary-value test pins the selected indices before any data. Profiles = the slab's dose projected onto x (summed over y) and onto y. Each is fitted over \|x\| ≤ 10 mm with a **voxel-integrated** Gaussian (erf differences over each 1 mm bin), free amplitude, centre and σ, no background term. σ = mean of the x and y fits (confirmatory); σ_x and σ_y are also reported separately as diagnostics, to expose a directional defect. A fit that does not converge, or gives σ outside [1, 20] mm, is a failed fit, reported as such. |
 | halo fraction, 2 rings × 2 depths | same slabs. Energy fraction in a ring = dose in voxels whose centre radius r is in the ring, divided by the dose over the whole scored plane in that slab. In water with equal voxel volumes this is the fraction of **deposited energy** in the slab, not a dose ratio. Confirmatory rings: 20 ≤ r < 40 mm and 40 ≤ r < 80 mm. Exploratory rings: [0,5), [5,10), [10,20), [80,200) mm. |
 
 Everything else is **exploratory**: 100 and 150 MeV, R20, distal 80–20, IDD shape, the other rings, TOPAS opt4, and
@@ -137,27 +137,31 @@ fraction is not a measured halo effect.
   intervals on those per-run values. The planning runs check that per-run values are approximately normal and that
   the estimators have converged at the chosen histories per run. If they are not, the estimand is revisited
   **before** confirmatory acquisition, not after.
-- **Invalid data never passes.** A fraction that is non-positive, non-finite or above 1, an undefined R80, or a failed fit makes that endpoint
-  unable to pass. There are no pseudocounts, and no run or ring is dropped selectively. Histories per run are
+- **Invalid data stays visible.** A fraction that is non-positive, non-finite or above 1, an undefined R80, or a failed fit is
+  reported as invalid for that endpoint, never imputed. There are no pseudocounts, and no run or ring is dropped selectively. Histories per run are
   chosen from the planning runs so that the confirmatory rings are non-zero in every run. An all-zero result says
   nothing about rare events and is reported as such.
 - **Planning runs (separately labelled, excluded from inference):** a few runs per arm at 200 MeV to estimate
   per-run variance, sparse-ring behaviour, and grid and estimator convergence. They also serve as the source and
   geometry check below.
-- **Fixed sample, one look.** After the planning runs, B runs per arm and H histories per run are frozen in this file,
-  so that the **joint** probability that every confirmatory endpoint of an arm passes is at least 0.9 under the
-  assumed true discrepancies (0 and half-margin, both stated). It is estimated by simulation that resamples the
-  planning runs' per-run endpoint vectors, preserving their dependence; per-endpoint power alone is not the target
-  (seven endpoints at 0.9 each give only about 0.48 jointly if independent). One-sided α = 0.05 per TOST, i.e.
-  90% CIs.
-- **REFRAMED 2026-10-01 (sjswerdloff, relayed by clement-7074f29f):** *"I'm willing to look at the results and see
-  where the boundaries are in terms of what we have demonstrated (i.e. let someone else draw the conclusion)."* So
-  the tolerances below are **REFERENCE BANDS for reporting and interpretation, not acceptance margins**, and there is
-  no global pass label. The report gives estimates with pointwise 90% and 95% Welch intervals against each band,
-  per endpoint, per arm; readers draw the boundary. Acquisition does not wait on a margin decision.
-  **The detailed statistics wording of this section, and whether any joint statement survives, is
-  alden-ec2221c7's to write; the older TOST/intersection-union text in this section is superseded where it
-  conflicts, pending his revision.**
+- **Reframed 2026-10-01 (sjswerdloff, relayed by clement-7074f29f):** *"I'm willing to look at the results and see
+  where the boundaries are in terms of what we have demonstrated (i.e. let someone else draw the conclusion)."*
+  Acquisition does not wait on a margin decision. The two items below are alden-ec2221c7's wording.
+- **Primary reporting objective: estimate discrepancies, not declare equivalence.** Each independent run contributes
+  an endpoint. For R80 and widths report the difference of run-level means (MCsquare arm minus TOPAS opt0); for
+  positive ring fractions report the difference of mean logs and its exponentiated geometric-mean ratio, not a ratio
+  of arithmetic means. Show pointwise 90% and 95% Welch intervals beside the reference bands and small-discrepancy
+  tiers. These are not simultaneous profile-wide coverage or a global pass/fail decision. Failed fits, undefined
+  crossings and invalid/sparse fractions stay visible; no pseudocounts or selective run exclusion. If uncertainty
+  assumptions fail, document and validate an alternative before main-study analysis.
+- **Sampling.** Choose and report B and H using explicit desired interval half-widths in physical or log-ratio units,
+  planning variance and sensitivity to small-sample uncertainty. Those precision targets are not acceptance
+  tolerances; no 90% all-endpoints-pass power target survives. Record B/H and the reporting analysis before main
+  acquisition; fixed acquisition and one analysis is the simplest plan. Additional acquisition after viewing main
+  outcomes is disclosed and needs an appropriate uncertainty procedure. Planning runs stay excluded from main
+  estimates. Freeze source/data/analysis commits, stream policy, threads, actual-history accounting and
+  source/geometry/estimator checks. Reference bands retain their rationale and selection history and never establish
+  accuracy or defect attribution by themselves.
 - **Reference bands, 200 MeV, arm − TOPAS opt0** (agreed by clement-7074f29f, alden-ec2221c7 and connor-227743e6
   after a Fable oracle's suggestion, with Alden's amendments): R80 ±0.3 mm; σ@100 ±0.1 mm; σ@200 ±0.15 mm; ring
   energy-fraction ratios 20–40 and 40–80 mm within [0.90, 1.10], 80–200 mm within [0.75, 1.25], as asymmetric
@@ -167,8 +171,10 @@ fraction is not a measured halo effect.
   and 0.5 mm depth bins. That is scoring-grid and estimator sensitivity combined, not crossing interpolation alone
   (clement-7074f29f, planning). It depends on falloff shape, so it
   need not cancel between codes, and it is material against a ±0.3 mm band.
-- **Portable vs OpenMCsquare + fix:** reported as a build difference, exploratory. They differ in RNG (PCG vs MKL
-  VSL), performance refactors and compiler.
+- **Portable (Ultra) vs OpenMCsquare + fix (Intel):** reported as a tested **configuration** difference, exploratory.
+  Build, compiler and RNG (PCG vs MKL VSL, plus performance refactors) are confounded with host and OS, so it is not
+  isolated build attribution. A portable arm on the same Intel host would separate them; it needs its own decision
+  and is not implied here.
 - **Frozen before acquisition:** full source commits (portable main at the freeze commit; 85bf2911 plus the patch's
   sha256), the per-arm seed ranges (distinct, never shared between arms), thread counts, B and H, and the bands.
   Seed ranges: planning 900001+ (TOPAS) and 9001xx/9002xx (MCsquare); confirmatory TOPAS opt0 910001+, opt4
@@ -200,7 +206,7 @@ fraction is not a measured halo effect.
 ## Relation to #31
 
 #31 tests selected endpoints of one 200 MeV field in Schneider_AT_AG_SI4, not pencil-beam halos in water. It can
-inform which platform runs the portable arm, not certify equivalence for this benchmark. The portable configuration
+inform the portable configuration, not certify equivalence for this benchmark. The portable configuration
 used here (platform, compiler, commit, threads) is frozen and reported, and agreement is claimed for it only.
 
 ## Interpretive hypotheses, stated before confirmatory data (not findings)
