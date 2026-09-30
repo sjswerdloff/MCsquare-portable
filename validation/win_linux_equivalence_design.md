@@ -1,4 +1,4 @@
-# Windows vs Linux dose: pre-registered design (DRAFT, margins awaiting sjswerdloff)
+# Windows vs Linux dose: pre-registered design (margins decided by sjswerdloff, 2026-09-30)
 
 Status: **design only. No study data exists.** The analysis below is fixed before any study run. The only data seen
 so far is the two-seed pilot on #28 (comment 27347), which is used here for planning and is **excluded** from the
@@ -13,8 +13,16 @@ not used to stop)?
 
 ## Fixed conditions (identical on both platforms)
 
-- **Machine and runners:** the HP (DESKTOP-5H86O9N, i5-6500T), Windows native and WSL2 Ubuntu. This needs the
-  Windows job pinned to the HP by a per-box runner label.
+- **Machines (sjswerdloff, 2026-09-30):** Linux on the HP (DESKTOP-5H86O9N, i5-6500T, WSL2 Ubuntu), which has the
+  only Linux runner. Windows native on the Lenovo (DESKTOP-SR5GKKA, i5-6400T).
+  - **Why this is sound:** both are Skylake. Both builds target generic x86-64 (no `-march=native`), and both
+    Windows boxes use the same MSYS2 GCC 16.2.0. The same instruction stream should compute identically on either
+    machine.
+  - **Consequence:** the comparison is strictly *Windows-on-Lenovo vs Linux-on-HP*, and the host is recorded for
+    every seed.
+  - **Placement:** each Windows seed must run on the Lenovo, pinned by a per-box runner label. Any Windows seed that
+    runs on another host is excluded **before** analysis, recorded as such, and replaced by the next unused seed in
+    that platform's stream.
 - **Source revision:** one commit, recorded. Both builds come from it, at `-O3`, with their compiler versions logged.
 - **Case:** 200 MeV, 15 × 15 cm field, 300 mm water cube with 2 mm voxels, `BDL_default_DN_RangeShifter.txt`, the
   default Scanners conversion files. `Num_Threads 3`, `Num_Primaries 3e7`, `Dose_MHD_Output True`.
@@ -28,9 +36,14 @@ not used to stop)?
 - **Lateral (8 endpoints).** Dose 5, 10, 20 and 30 mm outside the field edge at 127 mm and 201 mm depth, as % of
   the CAX dose at the same depth. These are exactly the rows of `validation/field_edge_profile.py`.
 - **CAX (3 endpoints).** Absolute dose at 127 mm, at 201 mm, and at voxel index 23 (253 mm, the peak depth in the
-  pilot). **Analysed on the log scale:** each seed contributes ln(dose), and the CI is for mean ln W − mean ln L, which
-  is the log of the geometric-mean ratio. A relative margin ±δ% is applied as |ln ratio| ≤ ln(1 + δ/100). Dividing by
-  an observed Linux mean is never used, so there is no uncertain denominator.
+  pilot).
+  - **Analysed on the log scale:** each seed contributes ln(dose), and the CI is for mean ln W − mean ln L, which is
+    the log of the geometric-mean ratio W/L.
+  - **Margin, asymmetric:** a relative margin of ±δ% means the ratio must lie in [1 − δ/100, 1 + δ/100], applied
+    exactly as ln(1 − δ/100) ≤ CI ≤ ln(1 + δ/100).
+  - **No uncertain denominator:** the analysis never divides by an observed Linux mean.
+  - **Invalid dose:** a CAX dose that is zero, negative or non-finite in any seed **fails** that endpoint for the
+    study. It never enters the log, and the endpoint cannot pass.
 - **Lateral rows need no such step.** Each is a ratio within one seed (lateral dose over that same seed's CAX dose at
   that depth), so the per-seed value is already on the percentage-point scale that the margin uses.
 - **Distal edge (2 endpoints).** R80 and R20, compared in mm. The crossing rule, fixed now:
@@ -51,17 +64,17 @@ not used to stop)?
 
 That makes 13 endpoints.
 
-## Tolerances δ (equivalence margins): **sjswerdloff to decide**
+## Tolerances δ (equivalence margins), **decided by sjswerdloff 2026-09-30**
 
-Candidate statistical thresholds for a research comparison, **not validated clinical tolerances**: neither column
-has a clinical acceptance basis. The margin decides the answer more than the number of seeds does.
+These are research thresholds for whether two builds of the same code agree, not clinical acceptance criteria.
+The options were A (tighter) and B (looser); the decision per endpoint:
 
-| endpoint | option A (tighter) | option B (looser) |
-|---|---|---|
-| lateral, 10/20/30 mm out | ±0.10 percentage points of CAX | ±0.20 pts |
-| lateral, 5 mm out (penumbra, steep gradient) | ±0.10 pts | ±0.50 pts |
-| CAX dose | ±0.5 % relative | ±1.0 % |
-| R80, R20 | ±0.5 mm | ±1.0 mm |
+| endpoint | margin |
+|---|---|
+| lateral, 10/20/30 mm out (6 endpoints) | ±0.20 percentage points of CAX |
+| lateral, 5 mm out, penumbra (2 endpoints) | ±0.50 pts (about a 0.2 mm edge shift at 201 mm, where the fall-off is ~2.6 pts/mm; about 1 mm at 127 mm, ~0.46 pts/mm) |
+| CAX dose (3 endpoints) | ratio W/L in [0.995, 1.005] |
+| R80, R20 (2 endpoints) | ±0.5 mm |
 
 Pilot planning numbers, normal approximation, 90% power, one-sided α = 0.025 per look:
 - **Most endpoints:** 16 seeds per platform suffices for option A if the true difference is near zero.
