@@ -1,6 +1,7 @@
 # What MCsquare scores as dose, and what it drops
 
-Portable MCsquare's physics is **unchanged** from upstream here. This page records where each part of a proton's
+This documentation changes no physics; it describes the current portable implementation (which includes the #16
+angular-sampling correction, so it is not numerically identical to unfixed upstream). This page records where each part of a proton's
 energy ends up, so a comparison with a full-physics code (TOPAS/Geant4, issue #32) can say which differences are
 modelling choices rather than bugs. Read from the source at `3807be0`, with default `config.txt`.
 
@@ -20,8 +21,10 @@ modelling choices rather than bugs. Read from the source at `3807be0`, with defa
 | Whatever else of the primary's energy the four rows above do not account for | Not tracked (I have not traced how the nuclear tables partition it) | **No** | same |
 
 In short, the inelastic branch returns only the energy carried by p, d, α and recoils, and the primary is then
-killed (`v_type = Unknown`). **Energy carried away by neutrons and gammas never reaches the dose grid.** Energy
-below the electron and proton cutoffs is **deposited where it was produced**, not transported.
+killed (`v_type = Unknown`). **Energy carried away by neutrons and gammas never reaches the dose grid.** Electrons are
+not transported: below-`Te_Min` transfers contribute to the condensed-history soft-loss score, while explicitly
+sampled δ-electron transfers are deposited locally at the interaction point. Residual kinetic energy below
+`E_Cut_Pro` is added to the relevant local or step score, without further particle transport (alden-ec2221c7).
 
 ## How much dose neutrons and gammas deposit in TOPAS
 
@@ -47,7 +50,8 @@ What that does **not** tell us:
 
 No physics change to portable MCsquare for now. Stage 1 of #32 already scores TOPAS dose both with and without
 neutron/gamma descendants (`Dose` and `DoseAll`) at 100, 150 and 200 MeV. So `DoseAll − Dose` gives TOPAS's
-neutron/gamma dose **as a 3-D map** at no extra cost. That is what MCsquare would miss **only if** the rest of the
+neutron/gamma dose **as a 3-D map** without an additional transport run, using two scorers in
+the same run (each scorer costs about 0.45 GB per worker thread). That is what MCsquare would miss **only if** the rest of the
 two nuclear models agreed. If that map shows differences that could be clinically significant, that
 is the point to consider modelling neutron/gamma dose, and it is sjswerdloff's decision.
 
