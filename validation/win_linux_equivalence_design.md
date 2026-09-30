@@ -131,6 +131,16 @@ Applied to **each comparison separately**. After **wave 1** (16 seeds per platfo
 4. **After wave 2 and still neither:** report *inconclusive*, with the intervals. Any third wave needs a new,
    separately pre-registered α allocation; the error guarantee above covers only two looks.
 
+## Interrupted seeds (added 2026-09-30 during wave 1, before any result was read)
+
+A seed whose job is interrupted by infrastructure before it writes a record is **re-run with the same seed number
+at the same commit**. It produced no data, so re-running it cannot select on results. A seed that completed and wrote
+a record is never re-run and never replaced.
+
+Wave 1 had two interruptions when runner labels were reset: Windows 1008 (job 14114, Lenovo) and Linux 2003 (job
+14077, HP). Both were killed mid-simulation. Neither printed its `RUN` line, produced a `STUDY_RESULT`, or created a
+retained directory.
+
 ## Provenance (every seed, retained)
 
 - **Kept per seed:**
