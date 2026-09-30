@@ -37,6 +37,10 @@ difference** at all (secondary, reported but not used to stop)?
 - **Source revision:** one commit, recorded. Both builds come from it, at `-O3`, with their compiler versions logged.
 - **Case:** 200 MeV, 15 × 15 cm field, 300 mm water cube with 2 mm voxels, `BDL_default_DN_RangeShifter.txt`, the
   default Scanners conversion files. `Num_Threads 3`, `Num_Primaries 3e7`, `Dose_MHD_Output True`.
+  - **Correction, 2026-10-01, before any study result was read (description only; the input is unchanged):** the
+    "water cube" is 0 HU through `Scanners/default`, which maps HU 0 to `Schneider_AT_AG_SI4` (label 44, density
+    1.000), not to `Water` (label 17). Every arm uses the identical input, so the comparison is unaffected; the medium
+    is a soft-tissue mixture at unit density, not water.
 - **Seeds: distinct streams per platform, so the two samples are independent.**
   - Windows: wave 1 uses 1001–1016, wave 2 uses 1017–1032.
   - Linux: wave 1 uses 2001–2016, wave 2 uses 2017–2032.
