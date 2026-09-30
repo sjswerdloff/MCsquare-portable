@@ -74,8 +74,16 @@ from the input file.
     1e-7, a factor 1000 at 1e-8. At exactly 0 it produces NaN. (clement-7074f29f, clang arm64; the gcc and icc builds
     are checked before acquisition, see "Source and geometry check".)
   - Correlation 1e-3, so the denominator is nonzero by construction.
-  - Nozzle-to-isocentre 0, isocentre at the surface; SMX/SMY nonzero. (Review's citation `compute_beam_model.c:583-586`: otherwise an air energy-loss polynomial is applied that TOPAS does not model. Not re-read.)
-  - The deliberate differences from TOPAS, recorded as such: divergence 1e-6 rad and correlation 1e-3.
+  - **Nozzle-to-isocentre 1 mm, isocentre on the entrance surface** (amended 2026-10-01; was 0). With 0, a proton
+    starts ON the face, `Transport_to_CT` treats it as inside (inclusive bounds), it sits at voxel index NY (one past
+    the grid) and every dose lands in the first depth bin, with exit 0. 1 mm matches the TOPAS source 1 mm upstream;
+    MCsquare's air polynomial then removes 0.47–0.77 keV (200–100 MeV), about 0.001 mm of water range.
+    SMX/SMY nonzero. `validation/mcsquare_pencil_case.py` refuses a source plane on or inside the CT, checked on the
+    values as written to the files.
+  - The BDL's first line must be exactly `--UPenn beam model (double gaussian)--`: any other header selects a legacy
+    parser silently (`data_beam_model.c:35`) and every primary misses the phantom, exit 0.
+  - The deliberate differences from TOPAS, recorded as such: divergence 1e-6 rad, correlation 1e-3, and 1 mm of air
+    (0.47–0.77 keV) in place of 1 mm of vacuum.
 
 ### Phantom and scoring
 
@@ -142,20 +150,37 @@ fraction is not a measured halo effect.
   planning runs' per-run endpoint vectors, preserving their dependence; per-endpoint power alone is not the target
   (seven endpoints at 0.9 each give only about 0.48 jointly if independent). One-sided α = 0.05 per TOST, i.e.
   90% CIs.
-- **Margins come first and stand on their own:** sjswerdloff sets them on a physical basis (what discrepancy would
-  matter), independent of the planning data. Planning variance only decides feasibility and B/H; a margin is never
-  chosen so that observed pilot disagreement passes. This draft stays **not frozen** until the margin rationale, B,
-  H, seeds, builds and analysis code are all committed.
-- **Per-arm equivalence claim:** every confirmatory endpoint passes. That is an intersection-union test, so no
-  multiplicity adjustment is needed. Each MCsquare arm's claim is made separately. Any individual endpoint
-  advertised as a finding outside that joint claim is exploratory. Insufficient precision is reported as
-  **inconclusive**, never as agreement.
+- **REFRAMED 2026-10-01 (sjswerdloff, relayed by clement-7074f29f):** *"I'm willing to look at the results and see
+  where the boundaries are in terms of what we have demonstrated (i.e. let someone else draw the conclusion)."* So
+  the tolerances below are **REFERENCE BANDS for reporting and interpretation, not acceptance margins**, and there is
+  no global pass label. The report gives estimates with pointwise 90% and 95% Welch intervals against each band,
+  per endpoint, per arm; readers draw the boundary. Acquisition does not wait on a margin decision.
+  **The detailed statistics wording of this section, and whether any joint statement survives, is
+  alden-ec2221c7's to write; the older TOST/intersection-union text in this section is superseded where it
+  conflicts, pending his revision.**
+- **Reference bands, 200 MeV, arm − TOPAS opt0** (agreed by clement-7074f29f, alden-ec2221c7 and connor-227743e6
+  after a Fable oracle's suggestion, with Alden's amendments): R80 ±0.3 mm; σ@100 ±0.1 mm; σ@200 ±0.15 mm; ring
+  energy-fraction ratios 20–40 and 40–80 mm within [0.90, 1.10], 80–200 mm within [0.75, 1.25], as asymmetric
+  log bounds. A "small-discrepancy reference tier" is reported alongside (R80 ≤ 0.1 mm, σ ≤ 0.03/0.05 mm, inner
+  rings ≤ 3%, far ring ≤ 10%). An R80 difference near the band is an **investigation flag**, never an attribution.
+- **Estimator sensitivity, stated:** for IDENTICAL TOPAS transport, R80 moves 0.12 mm between 1 mm and 0.5 mm depth
+  bins (crossing interpolation on a curved falloff; clement-7074f29f, planning). It depends on falloff shape, so it
+  need not cancel between codes, and it is material against a ±0.3 mm band.
 - **Portable vs OpenMCsquare + fix:** reported as a build difference, exploratory. They differ in RNG (PCG vs MKL
   VSL), performance refactors and compiler.
 - **Frozen before acquisition:** full source commits (portable main at the freeze commit; 85bf2911 plus the patch's
-  sha256), the per-arm seed ranges (distinct, never shared between arms), thread counts, B and H, and the margins.
-- **Margins:** sjswerdloff's decision, made after the planning runs show the variance. Huang's published agreement
-  (R80 0.1–0.6 mm, penumbra 0.5 mm, spot σ 0.1 ± 0.1 mm) is context, not a margin.
+  sha256), the per-arm seed ranges (distinct, never shared between arms), thread counts, B and H, and the bands.
+  Seed ranges: planning 900001+ (TOPAS) and 9001xx/9002xx (MCsquare); confirmatory TOPAS opt0 910001+, opt4
+  911001+, portable 920001+, OpenMCsquare + fix 930001+.
+- **Seeds and reproducibility, per code:** TOPAS regenerates a run from its seed (clement-7074f29f: identical results
+  at 8 and 16 threads). **MCsquare does not at more than one thread** (#39): primaries go to per-thread streams through
+  a shared counter, so a seed identifies streams, not a realisation, and the simulated count can exceed N. Each
+  MCsquare run records requested and simulated primaries; distinct seeds remain distinct streams.
+- **Huang et al. 2018 is context, and its figures are TOPAS-against-MEASUREMENT** (corrected 2026-10-01; this line
+  read as if they were MCsquare comparisons): R80 differences generally under 0.1 mm on average (§3.A.2), range
+  within 0.6 mm (§3.D), spot size 0.1 ± 0.1 mm (§3.B). MCsquare appears only against TOPAS on patient plans (§3.F:
+  99.2% of lung iCTV voxels within 3%). None of it is a band here. (Read through an agent's page summary; the two
+  quoted sentences should be checked against the PDF before the report cites them.)
 
 ### Source and geometry check (before confirmatory acquisition)
 
@@ -176,6 +201,20 @@ fraction is not a measured halo effect.
 inform which platform runs the portable arm, not certify equivalence for this benchmark. The portable configuration
 used here (platform, compiler, commit, threads) is frozen and reported, and agreement is claimed for it only.
 
+## Interpretive hypotheses, stated before confirmatory data (not findings)
+
+- **Upper-node energy mass** (clement-7074f29f): the nuclear sampler puts each secondary-energy interval's mass at its
+  UPPER node. If the ICRU 63 table rows are point values, mean secondary-proton energy is about 5 in 100 low, which
+  predicts a narrower, shallower halo in MCsquare. If rows are interval averages, the sampler is exact. The table
+  convention is UNRESOLVED; a trapezoid diagnostic build would be a separately authorised what-if (sjswerdloff),
+  never an arm, and neither of its outcomes settles the convention.
+- **δ-electrons deposited locally** in MCsquare (TOPAS transports them): a small, one-directional sharpening of the
+  core, unbounded.
+- **σ fit window leakage:** |x| ≤ 10 mm is about 2σ at 200 mm with no background term, so halo differences can leak
+  into σ, in the direction under test. A diagnostic fit with a fixed halo term is reported alongside.
+- Solid-angle weighting of the ICRU tables is applied at load (`data_nuclear.c`, `read_Nuclear_ICRU`) and was
+  checked end to end on the real loader and sampler (clement-7074f29f): it is NOT a candidate.
+
 ## Unit-level check (cheap, before stage 1)
 
 Histogram the fixed sampler's emission angles against the ICRU 63 input tables (extending
@@ -190,4 +229,10 @@ Histogram the fixed sampler's emission angles against the ICRU 63 input tables (
   Outputs go to `/Volumes/T7 Shield/MonteCarlo_runs/` on the Studio (sjswerdloff's call; the home volume is 94%
   full). `run_topas.sh` refuses to start below 100 GB free (office `9577c82`). Full 3-D is kept for every arm,
   ~0.86 GB per run (two double-precision scorers), about 51 GB for 10 seeds × 3 energies × 2 TOPAS arms.
-- **MCsquare arms:** as in #31: per-run record.json with sha256s, compiler, commit and host.
+- **MCsquare arms:** `.gitea/workflows/topas-mcsquare-planning.yml` (Studio) and `topas-openmcsquare-planning.yml`
+  (Lenovo) from #40. Build and run are separate jobs: builds are write-once with a recorded sha256, and runs verify it
+  and never compile. Each run root snapshots the generator, endpoint script, scanner tables, materials (copied or
+  hashed) and build record; each run writes `run.json` (seed, requested and simulated primaries, overshoot, threads,
+  energy, binary sha256, UTC start/end, `transport_status`) and `endpoints.json`. Studio outputs go to the T7, not
+  the system disk. MCsquare's `Dose.mhd` is already per simulated primary; TOPAS's Sum is not divided by N, so raw
+  absolute values are not compared across codes until a validated normalisation exists.
