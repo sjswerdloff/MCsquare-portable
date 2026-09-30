@@ -1,0 +1,75 @@
+# Stage 1 (MCsquare-portable #32): idealised proton pencil beam in water, TOPAS arm.
+# Shared by every run. Per-run values (energy, physics, seed, histories, threads, output) come from the
+# generated run file that includes this one; see make_runs.sh. Every default this depends on is set
+# explicitly here rather than inherited, so a TOPAS version change cannot move it silently.
+# Syntax checked against OpenTOPAS 4.3.0 source (TsDefaultParameters.cc, TsGeneratorBeam.cc,
+# TsModularPhysicsList.cc) and its examples/ tree, 2026-10-01.
+
+# --- World: vacuum, so nothing upstream of the phantom scatters or slows the beam
+s:Ge/World/Material = "Vacuum"
+d:Ge/World/HLX = 30 cm
+d:Ge/World/HLY = 30 cm
+d:Ge/World/HLZ = 30 cm
+
+# --- Phantom: water 400 x 400 mm laterally x 350 mm deep, surface at z = +175 mm, beam travels -z
+s:Ge/Phantom/Type = "TsBox"
+s:Ge/Phantom/Parent = "World"
+s:Ge/Phantom/Material = "G4_WATER"
+d:Ge/Phantom/HLX = 20 cm
+d:Ge/Phantom/HLY = 20 cm
+d:Ge/Phantom/HLZ = 17.5 cm
+# Scoring grid: 1 mm lateral x 1 mm depth (400 x 400 x 350), agreed 2026-10-01. Voxel k (0-based) has
+# centre z = -175 + (k+0.5) mm; the beam enters at z = +175 mm, so depth = 175 - z = 349.5 - k mm
+# (k = 349 is the entrance voxel, depth 0.5 mm). Verify on the first run's IDD before any analysis.
+i:Ge/Phantom/XBins = 400
+i:Ge/Phantom/YBins = 400
+i:Ge/Phantom/ZBins = 350
+
+# --- Source: 1 mm upstream of the surface in vacuum (equivalent to "at the surface" with no divergence;
+# avoids starting primaries exactly on a volume boundary).
+d:Ge/BeamPosition/TransZ = 176. mm
+d:Ge/BeamPosition/RotX = 180. deg
+s:So/Beam/Type = "Beam"
+s:So/Beam/Component = "BeamPosition"
+s:So/Beam/BeamParticle = "proton"
+u:So/Beam/BeamEnergySpread = 0.
+s:So/Beam/BeamPositionDistribution = "Gaussian"
+s:So/Beam/BeamPositionCutoffShape = "Rectangle"
+d:So/Beam/BeamPositionSpreadX = 3. mm
+d:So/Beam/BeamPositionSpreadY = 3. mm
+# Gaussian needs a cutoff in TOPAS (rejection sampling); MCsquare's is untruncated. 10 sigma per axis
+# makes the truncated mass ~1e-23, i.e. none.
+d:So/Beam/BeamPositionCutoffX = 30. mm
+d:So/Beam/BeamPositionCutoffY = 30. mm
+s:So/Beam/BeamAngularDistribution = "None"
+
+# --- Physics: the five non-EM modules and ranges are TOPAS 4.3.0's defaults, restated. The EM module is
+# chosen per run (option 0 primary, option 4 secondary) in the run file.
+s:Ph/Default/Type = "Geant4_Modular"
+d:Ph/Default/EMRangeMin = 100. eV
+d:Ph/Default/EMRangeMax = 600. MeV
+d:Ph/Default/CutForAllParticles = 0.05 mm
+
+# --- Scoring: dose to medium; in pure water this is dose to water. Binary: a CSV of 56M voxels is ~2 GB.
+# PRIMARY "Dose": excludes any step by a neutron or gamma OR by any descendant of one, because MCsquare
+# transports neither (compute_nuclear_interaction.c: inelastic events emit only p, d, alpha; recoils
+# deposit locally; prompt gammas are score-only). Design revision 1, connor-227743e6, 2026-10-01.
+s:Sc/Dose/Quantity = "DoseToMedium"
+s:Sc/Dose/Component = "Phantom"
+s:Sc/Dose/OutputType = "binary"
+sv:Sc/Dose/Report = 1 "Sum"
+sv:Sc/Dose/OnlyIncludeIfParticleOrAncestorNotNamed = 2 "neutron" "gamma"
+# SECONDARY "DoseAll": full physics, unfiltered.
+s:Sc/DoseAll/Quantity = "DoseToMedium"
+s:Sc/DoseAll/Component = "Phantom"
+s:Sc/DoseAll/OutputType = "binary"
+sv:Sc/DoseAll/Report = 1 "Sum"
+# IfOutputFileAlreadyExists deliberately UNSET: TOPAS then refuses to overwrite (TsVFile.cc), so a
+# pre-registered result can never be clobbered by a rerun.
+
+# Ph/Verbosity > 0 makes TOPAS dump G4EmParameters at init (TsPhysicsManager.cc). run_topas.sh copies the
+# "Use ICRU90 data" line into provenance: 0 for option 0, 1 for option 4, so every output file records
+# which EM physics actually ran rather than which one was requested.
+i:Ph/Verbosity = 1
+b:Ts/PauseBeforeQuit = "False"
+i:Ts/ShowHistoryCountAtInterval = 100000
