@@ -11,10 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pencil_endpoints import (
     _integrated_gaussian,
     canonical_from_mcsquare,
+    canonical_from_topas,
     endpoints,
     lateral_centres,
     r80,
     read_mhd,
+    read_topas_bin,
     slab_indices,
 )
 
@@ -127,3 +129,40 @@ def test_nonfinite_dose_is_refused():
     d[5, 5, 5] = np.nan
     with pytest.raises(ValueError):
         endpoints(d)
+
+
+def _write_topas(tmp_path, v, header_bins=None, sum_report=True):
+    """Write v[ix, iy, kz] as TOPAS does: doubles, x fastest, plus a .binheader."""
+    nx, ny, nz = header_bins or v.shape
+    (tmp_path / "dose.bin").write_bytes(np.asfortranarray(v, dtype="<f8").tobytes(order="F"))
+    (tmp_path / "dose.binheader").write_text(
+        "# TOPAS Version: 4.3\n# Results for scorer: Dose\n"
+        f"# X in {nx} bins of 0.1 cm\n# Y in {ny} bins of 0.1 cm\n# Z in {nz} bins of 0.1 cm\n"
+        + ("# DoseToMedium ( Gy ) : Sum   \n" if sum_report else "# DoseToMedium ( Gy ) : Mean   \n")
+        + "# Binary file: dose.bin\n"
+    )
+    return tmp_path / "dose.bin"
+
+
+def test_topas_layout_on_asymmetric_phantom(tmp_path):
+    """A marked voxel at TOPAS (ix, iy, kz) lands at canonical (depth from the z = +HLZ face, ix, iy)."""
+    nx, ny, nz = 4, 6, 10
+    v = np.zeros((nx, ny, nz))
+    v[1, 4, nz - 1] = 1.0  # entrance face (the beam comes in at +z)
+    v[3, 0, 0] = 2.0  # far face
+    arr, dims, spacing = read_topas_bin(_write_topas(tmp_path, v))
+    assert dims == [nx, ny, nz] and spacing == pytest.approx([1.0, 1.0, 1.0])
+    assert np.array_equal(arr, v)  # x-fastest byte order read back exactly
+    d = canonical_from_topas(arr)
+    assert d.shape == (nz, nx, ny)
+    assert d[0, 1, 4] == 1.0  # entrance voxel is depth bin 0
+    assert d[nz - 1, 3, 0] == 2.0  # far face is the last depth bin
+    assert d.sum() == 3.0
+
+
+def test_topas_reader_rejects_size_mismatch_and_non_sum(tmp_path):
+    v = np.zeros((2, 2, 2))
+    with pytest.raises(ValueError):
+        read_topas_bin(_write_topas(tmp_path, v, header_bins=(2, 2, 3)))
+    with pytest.raises(ValueError):
+        read_topas_bin(_write_topas(tmp_path, v, sum_report=False))
