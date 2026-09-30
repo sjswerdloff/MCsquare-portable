@@ -17,9 +17,17 @@ from pathlib import Path
 
 import numpy as np
 
+# MetaImage headers print %f (6 decimals); an edge within this of the entrance face counts as ON it, not past it.
+EDGE_TOL_MM = 1e-4
+
 
 def read_depth_idd(path: Path, entrance_mm: float) -> tuple[np.ndarray, np.ndarray, float]:
-    """Return (depth_mm of bin centres, ascending; IDD in the same order; bin width in mm)."""
+    """Return (depth_mm of bin centres, ascending; IDD in the same order; bin width in mm).
+
+    Raises ValueError on anything that is not a valid depth-only grid lying wholly downstream of the entrance face,
+    and on any non-finite or negative dose: invalid input is never reported as a result."""
+    if not np.isfinite(entrance_mm):
+        raise ValueError(f"entrance {entrance_mm} mm is not finite")
     header = {}
     for line in path.read_text().splitlines():
         if "=" in line:
@@ -28,6 +36,10 @@ def read_depth_idd(path: Path, entrance_mm: float) -> tuple[np.ndarray, np.ndarr
     dims = [int(x) for x in header["DimSize"].split()]
     spacing = [float(x) for x in header["ElementSpacing"].split()]
     offset = [float(x) for x in header.get("Offset", "0 0 0").split()]
+    if len(dims) != 3 or len(spacing) != 3 or len(offset) != 3:
+        raise ValueError(f"{path}: expected 3 values each for DimSize/ElementSpacing/Offset, got {dims} {spacing} {offset}")
+    if dims[1] < 2 or not all(np.isfinite(v) and v > 0 for v in spacing) or not all(np.isfinite(v) for v in offset):
+        raise ValueError(f"{path}: invalid geometry: dims {dims}, spacing {spacing}, offset {offset}")
     if header.get("ElementType") != "MET_FLOAT" or header.get("ElementByteOrderMSB", "False") != "False":
         raise ValueError(f"{path}: expected little-endian MET_FLOAT")
     if dims[0] != 1 or dims[2] != 1:
@@ -36,10 +48,18 @@ def read_depth_idd(path: Path, entrance_mm: float) -> tuple[np.ndarray, np.ndarr
     if raw.stat().st_size != 4 * dims[1]:
         raise ValueError(f"{raw}: {raw.stat().st_size} bytes, header says {dims}")
     idd = np.fromfile(raw, dtype="<f4").astype(np.float64)
+    if not np.all(np.isfinite(idd)) or np.any(idd < 0):
+        raise ValueError(f"{raw}: dose contains non-finite or negative values")
+    upper_edge = offset[1] + dims[1] * spacing[1]  # the grid's upstream edge, in the CT's y (mm)
+    if upper_edge > entrance_mm + EDGE_TOL_MM:
+        raise ValueError(f"scoring grid extends upstream of the entrance face (upper edge {upper_edge} mm > {entrance_mm} mm)")
     y_centre = offset[1] + (np.arange(dims[1]) + 0.5) * spacing[1]
     depth = entrance_mm - y_centre
     order = np.argsort(depth)
-    return depth[order], idd[order], spacing[1]
+    depth, idd = depth[order], idd[order]
+    if not np.all(np.diff(depth) > 0):
+        raise ValueError(f"{path}: depth centres are not strictly ascending")
+    return depth, idd, spacing[1]
 
 
 def r80(depth: np.ndarray, idd: np.ndarray) -> tuple[float | None, bool]:
@@ -63,9 +83,12 @@ def main() -> int:
     p.add_argument("--entrance-mm", type=float, required=True)
     p.add_argument("--label", default="")
     a = p.parse_args()
-    depth, idd, width = read_depth_idd(a.mhd, a.entrance_mm)
-    if depth[0] < 0:
-        raise SystemExit(f"scoring grid extends upstream of the entrance face (min depth {depth[0]} mm)")
+    try:
+        depth, idd, width = read_depth_idd(a.mhd, a.entrance_mm)
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
+    if not idd.max() > 0:
+        raise SystemExit(f"{a.mhd}: dose is zero everywhere")
     value, multiple = r80(depth, idd)
     imax = int(np.argmax(idd))
     record = {
@@ -78,7 +101,7 @@ def main() -> int:
         "R80_multiple_crossings": multiple,
         "idd_sum_raw": float(idd.sum()),
     }
-    print("IDD_R80 " + json.dumps(record, sort_keys=True))
+    print("IDD_R80 " + json.dumps(record, sort_keys=True, allow_nan=False))
     return 0
 
 

@@ -88,3 +88,45 @@ def test_no_distal_crossing_reports_none(tmp_path):
 def test_grid_upstream_of_the_entrance_is_refused(tmp_path):
     r = _run(_write(tmp_path, np.ones(70), 1.0, 290.0))  # ends at y = 360 > 350
     assert r.returncode != 0 and "upstream" in r.stderr
+
+
+# alden-ec2221c7's three reproduced failures on #43: each exited 0 with a record before the fix.
+
+
+def _four_bin_control() -> np.ndarray:
+    return np.array([0.2, 0.5, 1.0, 0.4])  # stored +y order: deepest first
+
+
+def test_valid_four_bin_control_passes(tmp_path):
+    rec = _record(_run(_write(tmp_path, _four_bin_control(), 1.0, 346.0)))
+    assert rec["R80"] is not None
+
+
+@pytest.mark.parametrize("spacing", [0.0, -1.0])
+def test_nonpositive_depth_spacing_is_refused(tmp_path, spacing):
+    r = _run(_write(tmp_path, _four_bin_control(), spacing, 346.0))
+    assert r.returncode != 0 and "geometry" in r.stderr
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -0.1])
+def test_nonfinite_or_negative_dose_is_refused_not_reported(tmp_path, bad):
+    v = _four_bin_control()
+    v[1] = bad
+    r = _run(_write(tmp_path, v, 1.0, 346.0))
+    assert r.returncode != 0 and "non-finite or negative" in r.stderr and r.stdout == ""
+
+
+def test_all_zero_dose_is_refused(tmp_path):
+    r = _run(_write(tmp_path, np.zeros(4), 1.0, 346.0))
+    assert r.returncode != 0 and "zero everywhere" in r.stderr
+
+
+def test_partial_bin_past_the_face_is_refused(tmp_path):
+    # upper edge 346.25 + 4 = 350.25 mm > 350: every CENTRE is downstream, the grid still is not
+    r = _run(_write(tmp_path, _four_bin_control(), 1.0, 346.25))
+    assert r.returncode != 0 and "upstream" in r.stderr
+
+
+def test_edge_exactly_on_the_face_is_accepted(tmp_path):
+    rec = _record(_run(_write(tmp_path, _four_bin_control(), 1.0, 346.0)))  # upper edge exactly 350
+    assert rec["depth_range_mm"] == [0.5, 3.5]
