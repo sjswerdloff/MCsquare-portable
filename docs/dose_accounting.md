@@ -23,7 +23,7 @@ In short, the inelastic branch returns only the energy carried by p, d, α and r
 killed (`v_type = Unknown`). **Energy carried away by neutrons and gammas never reaches the dose grid.** Energy
 below the electron and proton cutoffs is **deposited where it was produced**, not transported.
 
-## How big is what is dropped
+## How much dose neutrons and gammas deposit in TOPAS
 
 **Measured once, and only this:** in TOPAS (OpenTOPAS 4.3.0 / Geant4 11.3.2, EM option 0 plus the default
 hadronic modules), for a 150 MeV Gaussian pencil beam (σ 3 mm) in a 400 × 400 × 350 mm water box, dose from
@@ -32,7 +32,11 @@ neutrons, gammas and **all their descendants** is **0.8% of the integral dose** 
 TOPAS provenance.
 
 What that does **not** tell us:
-- **Where** the dropped dose lies. An integral fraction says nothing about whether it is spread thinly out of
+- How much energy MCsquare's inelastic model discards. That is a different quantity: energy leaving the
+  interaction, not dose deposited, and partitioned by a different nuclear model. MCsquare's p/d/α/recoil yields
+  are not Geant4's, so part of what TOPAS gives to neutrons may appear in MCsquare as charged-secondary dose,
+  or the other way round (connor-227743e6).
+- **Where** this neutron/gamma dose lies. An integral fraction says nothing about whether it is spread thinly out of
   field or concentrated somewhere.
 - Its size at other energies, or in anything other than a large water box. Out-of-box neutron dose is not in the
   box at all.
@@ -42,8 +46,9 @@ What that does **not** tell us:
 ## When to revisit (sjswerdloff, 2026-10-01)
 
 No physics change to portable MCsquare for now. Stage 1 of #32 already scores TOPAS dose both with and without
-neutron/gamma descendants (`Dose` and `DoseAll`) at 100, 150 and 200 MeV. So `DoseAll − Dose` gives the dropped
-dose **as a 3-D map** at no extra cost. If that map shows differences that could be clinically significant, that
+neutron/gamma descendants (`Dose` and `DoseAll`) at 100, 150 and 200 MeV. So `DoseAll − Dose` gives TOPAS's
+neutron/gamma dose **as a 3-D map** at no extra cost. That is what MCsquare would miss **only if** the rest of the
+two nuclear models agreed. If that map shows differences that could be clinically significant, that
 is the point to consider modelling neutron/gamma dose, and it is sjswerdloff's decision.
 
 Not established here, and not claimed: any judgement of clinical significance. This page records only what is
