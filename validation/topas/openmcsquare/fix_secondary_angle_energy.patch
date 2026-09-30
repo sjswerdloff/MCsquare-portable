@@ -29,7 +29,7 @@
  								material->Nuclear_Inelastic[index].D_Energy_list[secondary_index+1]);
    free(diff_cross_section);
  
-+  VAR_COMPUTE T_table = secondary_hadron[*Nbr_secondaries].T;	// MeV, on the P_Energy_list grid of this incident energy
++  VAR_COMPUTE T_table = secondary_hadron[*Nbr_secondaries].T;	// MeV, on the D_Energy_list grid of this incident energy
    // scaling de l'énergie
    secondary_hadron[*Nbr_secondaries].T = ((hadron->v_T[hadron_index]/UMeV) / material->Inelastic_Energy_List[index]) * UMeV * secondary_hadron[*Nbr_secondaries].T;
    if(secondary_hadron[*Nbr_secondaries].T < config->Ecut_Pro * UMeV) return secondary_hadron[*Nbr_secondaries].M * secondary_hadron[*Nbr_secondaries].T / hadron->v_M[hadron_index];
@@ -54,7 +54,7 @@
  								material->Nuclear_Inelastic[index].A_Energy_list[secondary_index+1]);
    free(diff_cross_section);
  
-+  VAR_COMPUTE T_table = secondary_hadron[*Nbr_secondaries].T;	// MeV, on the P_Energy_list grid of this incident energy
++  VAR_COMPUTE T_table = secondary_hadron[*Nbr_secondaries].T;	// MeV, on the A_Energy_list grid of this incident energy
    // scaling de l'énergie
    secondary_hadron[*Nbr_secondaries].T = ((hadron->v_T[hadron_index]/UMeV) / material->Inelastic_Energy_List[index]) * UMeV * secondary_hadron[*Nbr_secondaries].T;
    if(secondary_hadron[*Nbr_secondaries].T < config->Ecut_Pro * UMeV) return secondary_hadron[*Nbr_secondaries].M * secondary_hadron[*Nbr_secondaries].T / hadron->v_M[hadron_index];

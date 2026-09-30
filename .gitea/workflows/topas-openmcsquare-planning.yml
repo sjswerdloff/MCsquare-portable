@@ -23,7 +23,7 @@ on:
 env:
   UPSTREAM: 85bf2911ddadbb40bd41b1a18b4b247536bb33ab
   PATCH: validation/topas/openmcsquare/fix_secondary_angle_energy.patch
-  PATCH_SHA256: 57bdbf01ac0c194bfd78645c221f93aee89868a2118b2fa3844bb9fef9673d48
+  PATCH_SHA256: e22990c96942286304f538b844ed2697a917c4e8b235f970731824b90ae8e347
   TARGET: icl-avx2
   ENERGY: "200"
   THREADS: "4"
