@@ -119,9 +119,13 @@ jobs:
           if ($LASTEXITCODE) { throw "numpy/scipy not importable" }
           $free = [int]((Get-PSDrive C).Free / 1GB)
           if ($free -lt 20) { throw "only $free GB free on C: refusing" }
-          $ROOT = "C:\mcsq-win\topas-study\planning\openmcsquare-fix-$env:TARGET\$env:GITHUB_SHA"
+          # SHORT paths on purpose: 85bf2911 has the fixed-size path buffers the fork widened (#5, #11). Task 10453 finished
+          # transport and then died with 0xC0000409 (a /GS stack-buffer abort) writing ~110-character output paths.
+          # Hypothesis, not yet shown; the long form is recorded in run_root.txt.
+          $ROOT = "C:\mcsq-win\ts\$($env:GITHUB_SHA.Substring(0,12))"
           New-Item -ItemType Directory -Force (Split-Path $ROOT) | Out-Null
           New-Item -ItemType Directory $ROOT | Out-Null   # a second run at this commit fails here
+          "openmcsquare-fix-$env:TARGET planning, commit $env:GITHUB_SHA" | Set-Content -Encoding Ascii "$ROOT\run_root.txt"
           # Upstream 85bf2911 opens the MHD's ElementDataFile relative to the WORKING directory (the portable fork
           # resolves it beside the .mhd), so the case is written into the run root, which is also the cwd below.
           $CASE = $ROOT
@@ -139,7 +143,7 @@ jobs:
           $env:MCsquare_Materials_Dir = $null
           Push-Location $ROOT   # MCsquare reads Materials\ relative to the working directory
           foreach ($spec in '1e7:900201','1e7:900202','1e7:900203','1e7:900204','1e6:900211','1e6:900212','1e6:900213','1e6:900214') {
-            $N, $SEED = $spec.Split(':'); $D = "$ROOT\E$($env:ENERGY)_N$($N)_seed$SEED"
+            $N, $SEED = $spec.Split(':'); $D = "$ROOT\s$SEED"
             New-Item -ItemType Directory $D, "$D\out" | Out-Null
             @("Num_Threads $env:THREADS", "Num_Primaries $N", "RNG_Seed $SEED", "CT_File $CASE\water.mhd",
               "HU_Density_Conversion_File $ROOT\Scanners\Water_Phantom\HU_Density_Conversion.txt",
