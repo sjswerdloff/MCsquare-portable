@@ -47,7 +47,7 @@ Not claimed: better agreement than Huang et al. 2018 (doi:10.1002/acm2.12420). T
 | arm | build | where |
 |---|---|---|
 | **portable** | portable main (includes the fix) | Mac Studio (M3 Ultra), full study (sjswerdloff, 2026-10-01, relayed by clement-7074f29f: *"we'll want to run the full study on portable MCsquared on the Ultra as well … (on Ultra is good, on Intel is ok too)"*) |
-| **OpenMCsquare + fix** | 85bf2911 with `fix_secondary_angle_energy.patch`, built with icc 2021.1 (the #17 recipe) | Linux runner (HP) |
+| **OpenMCsquare + fix** | 85bf2911 with `fix_secondary_angle_energy.patch`, built with icl 2021.1 on Windows (`topas-openmcsquare-planning.yml`, #40) | Lenovo (Intel, Windows) |
 | **TOPAS opt0** | OpenTOPAS 4.3.0 / Geant4 11.3.2, EM option 0: same stopping power as MCsquare to <0.01% above 50 MeV | Mac Studio |
 | TOPAS opt4 | the same with EM option 4 (secondary; its stopping-power table integrates to CSDA ranges +0.08/+0.26/+0.27 mm different at 100/150/200 MeV, an integral difference, not a measured R80 shift) | Mac Studio |
 
