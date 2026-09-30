@@ -9,23 +9,27 @@
 
 name: TOPAS comparison, MCsquare planning (portable, Studio)
 
-# Manual only: the planning set ran at ba204d5 (task 10447). A push trigger would re-run eight simulations on the
-# Studio every time the shared scripts change, and the Studio is wanted back.
+# THIS FILE IS THE REQUEST. It runs on a push that changes this file (never the shared scripts, which would re-run
+# the Studio on every script edit), with the energy and run list below; dispatch works too for anyone with write
+# access to the API. History: 200 MeV 1e7x4 + 1e6x4 at ba204d5 (task 10447); 100 MeV pair for the R80 check next.
 on:
+  push:
+    branches: ['connor/topas-mcsquare-*']
+    paths: [.gitea/workflows/topas-mcsquare-planning.yml]
   workflow_dispatch:
     inputs:
       energy:
         description: Energy (MeV)
-        default: "200"
+        default: "100"
       runs:
         description: Space-separated N:seed pairs (planning seeds 9001xx only)
-        default: "1e7:900101 1e7:900102 1e7:900103 1e7:900104 1e6:900111 1e6:900112 1e6:900113 1e6:900114"
+        default: "1e6:900121 1e6:900122"
 
 env:
   TARGET: arm64-mcpu-native
   EXTRA_CFLAGS: -mcpu=native
-  ENERGY: ${{ inputs.energy || '200' }}
-  RUNS: ${{ inputs.runs || '1e7:900101 1e7:900102 1e7:900103 1e7:900104 1e6:900111 1e6:900112 1e6:900113 1e6:900114' }}
+  ENERGY: ${{ inputs.energy || '100' }}
+  RUNS: ${{ inputs.runs || '1e6:900121 1e6:900122' }}
   THREADS: "24"
 
 jobs:
@@ -51,7 +55,7 @@ jobs:
           cat "$B/build.txt" "$B/sha256.txt"
 
   planning:
-    name: Planning runs (${{ inputs.energy || '200' }} MeV)
+    name: Planning runs (${{ inputs.energy || '100' }} MeV)
     needs: build
     runs-on: stuart-m3ultra-canary
     timeout-minutes: 120
