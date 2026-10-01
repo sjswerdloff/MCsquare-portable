@@ -115,15 +115,32 @@ for both codes (TOPAS `dose.bin`, the neutron/gamma-excluded scorer that matches
 Bands for the rings are [0.90, 1.10] for 20–40 and 40–80 and [0.75, 1.25] for 80–200: the 200 mm 40–80 ring is outside.
 
 **The R80 gap is open.** Depth shape at 200 MeV (#32 c27679): peak −0.46, R90 −0.46, R80 −0.51, R50 −0.56,
-R20 −0.57 mm; 80–20 width −0.06 mm, so close to a shift but not rigid. At 100 MeV R80 is −0.43 mm (2 × 1e6).
+R20 −0.57 mm; 80–20 width −0.06 mm, so close to a shift but not rigid. At 100 MeV R80 is −0.43 mm (2 × 1e6,
+PLANNING; #32 c27679).
 Static inputs have been ruled out: TOPAS geometry, water material and density, BDL energy and spread, and the stopping
-table (MCsquare uses `SP_GEANT4`, equal to Geant4 option 0 within 0.006% above 50 MeV). Two independently written raw
+table. MCsquare uses `SP_GEANT4`; its water table equals Geant4 option 0 in stopping power to a ratio of
+1.00000–1.00006 over 50–400 MeV (TD stage 0). The integrated CSDA ranges agree within 0.008%, about 0.01 mm
+(clement-7074f29f's stage 0 record, as stated in his review of this draft). Two independently written raw
 readers agree.
 
 **Nuclear-off diagnostic** (DIAGNOSTIC, #32 c27720; 4 × 1e6 per cell, nuclear processes off in both codes): the
 gap persists, −0.52 mm with nuclear on and −0.56 mm off. The contrast is C = −0.041 ± 0.005 mm, a small non-zero
 sensitivity, with no attribution. A 70 MeV point is grid-limited at 1 mm for both codes, and MCsquare's fine-grid
 control failed its pre-stated criterion, so there is **no 70 MeV comparison** (#43).
+
+**Secondary-energy what-if** (a throwaway sensitivity build authorised by sjswerdloff, never an arm; #32 c27733,
+c27734, c27757). It treats the nuclear secondary-energy table rows as point values (piecewise-linear density)
+instead of upper-node masses. That raises mean secondary energies by exactly half an energy bin: at 200 MeV, about
++5.7% for protons and +27% for alphas. 200 MeV, 4 × 1e7, against portable main:
+- R80 unchanged: −0.0007 mm (SE 0.0028).
+- Total deposited energy ×1.0062.
+- At 200 mm depth the outer rings rise: 20–40 / 40–80 / 80–200 mm ×1.0126 / ×1.0215 / ×1.0535. That's roughly a fifth
+  of the 40–80 mm deficit against TOPAS (ratio 0.9078 against 0.8887 for main).
+- At 100 mm depth the 20–40 and 40–80 mm rings **fall** (×0.9934, ×0.9837), contrary to the frozen direction-only
+  expectation.
+
+The pattern is mixed and depth-dependent. It doesn't explain the R80 gap, and it doesn't say which table convention
+is correct (#32 c27757).
 
 Stated hypotheses, not findings (TD): upper-node energy mass in the secondary-energy tables (convention unresolved),
 local deposition of δ-electrons, and σ-window leakage. Solid-angle weighting is ruled out (applied at load).
