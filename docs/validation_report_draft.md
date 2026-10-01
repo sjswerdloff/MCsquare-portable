@@ -111,10 +111,15 @@ hardware.
   one-sided test (TOST) against pre-stated margins: R80 ±0.05 mm, σ ±0.02 mm, annuli out to 80 mm ×[0.98, 1.02],
   the 80–200 mm annulus ×[0.95, 1.05]. A joint claim per contrast is made by intersection–union, with Holm adjustment
   across each contrast's endpoints (AP; analysis reviewed in #48).
-- **Random numbers:** Portable MCsquare uses PCG. Each thread `t` starts from state `RNG_Seed + 1e4·t + 1e5·Num_call`
-  on stream `t`, with `Num_call` = 1 here. No two runs share a seed, so no two runs share a generator. Neither code is
-  bitwise reproducible at more than one thread, so every comparison uses statistics over independent runs, not
-  same-seed identity (#39).
+- **Random numbers:** Portable MCsquare uses PCG. Each thread `t` starts from state `RNG_Seed + 1e4·t + 1e5·c` on
+  stream `t`, where `c` counts calls to the simulation loop in the process. With the default statistical-uncertainty
+  batching, that loop is called once per batch, so `c` runs from 1 up to at least 10 (MIN_NUM_BATCH) in every run here,
+  not just 1. Two runs start an identical generator only if, on the same thread, their seeds differ by a multiple of 1e5
+  that some pair of their batch counts can absorb. Within the confirmatory acquisition (§4), the seed assignments have
+  been screened for calls 1–10 at the threads used and share no start (#48). That holds for that population only:
+  earlier comparisons reused seeds across platforms (12345 and 67890 in the preliminary field-edge runs of §5.2). No
+  screen establishes statistical independence. Neither code is bitwise reproducible at more than one thread, so every
+  comparison uses statistics over independent runs, not same-seed identity (#39).
 
 ## 4. Confirmatory acquisition (in progress)
 

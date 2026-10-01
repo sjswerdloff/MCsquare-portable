@@ -1,6 +1,9 @@
 # Same-host comparison programme (PLAN, for sjswerdloff's approval)
 
-**Status: proposed 2026-10-01. Nothing here has run, and nothing here authorises a run.** Written to execute
+**Status, 2026-10-01 ~23:30 NZDT: parts A and B are RUNNING at `2f9dab40` (full mode), authorised by sjswerdloff in
+session ("yes, go ahead with all of those runs", including the jobs over 2 h; B-picc explicitly, quoted verbatim on
+#48 comment 27891). Their collection and analysis code was approved on #48 (review 6942) before any endpoint was read.
+The text below is the plan as proposed; parts C and D are not yet authorised.** Written to execute
 unattended while sjswerdloff travels (week of 5 October 2026), if he approves it. Once a part is approved, its run
 list, seeds, histories, analysis script and margins are committed **before** its first run, and nothing is changed
 after results are read. Results feed [`validation_report_draft.md`](validation_report_draft.md).
@@ -143,7 +146,7 @@ against these estimates. Part C per the frozen design; TOPAS is the long pole, s
 
 ## Seeds
 
-Seeds are **non-duplicated assignments**, not disjoint random streams. Portable seeds thread `t` with PCG stream `t` and initial state `RNG_Seed + 1e4·t + 1e5·Num_call` (report §7), so for single-call runs two runs share a generator only if they share a seed. Rule: **every seed in the programme is unique, and none repeats an earlier portable seed.** Blocks: A upstream 960001+, A portable 961001+, B 962001+ / 963001+ / 964001+, C per TD. `validation/apples_seeds_check.py` enforces it over the committed run lists.
+Seeds are **non-duplicated assignments**, not disjoint random streams. Portable seeds thread `t` with PCG stream `t` and initial state `RNG_Seed + 1e4·t + 1e5·c`, where `c` counts simulation-loop calls. With the default statistical-uncertainty batching, `c` runs from 1 up to at least 10 in every run (alden-ec2221c7, #48 comment 27900), so two runs can share a start on the same thread if their seeds differ by a multiple of 1e5. The frozen A/B assignments were screened for calls 1–10 and share none; that is a screen of this population, not a proof of independence. Rule: **every seed in the programme is unique, and none repeats an earlier portable seed.** Blocks: A upstream 960001+, A portable 961001+, B 962001+ / 963001+ / 964001+, C per TD. `validation/apples_seeds_check.py` enforces it over the committed run lists.
 
 ## How it runs unattended
 
@@ -161,11 +164,11 @@ Seeds are **non-duplicated assignments**, not disjoint random streams. Portable 
 
 ## Decisions needed from sjswerdloff before he leaves
 
-1. Approve parts A, C and D, or name the parts to drop.
+1. ~~Part A~~ and part B: approved and running. Approve parts C and D, or name the parts to drop.
 2. The margins above, every row (80–200 ring settled at ±5%; the others proposed).
 3. ~~Merge #31~~: merged.
 4. ~~Hosts~~: settled. A on the Lenovo, B on the HP.
-5. Go-ahead for the four jobs estimated at over 2 h (timing table).
+5. ~~Go-ahead for the four jobs estimated at over 2 h~~: given ("yes, go ahead with all of those runs").
 
 ## Out of scope
 
