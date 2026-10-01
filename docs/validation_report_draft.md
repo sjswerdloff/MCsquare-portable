@@ -124,7 +124,7 @@ table. MCsquare uses `SP_GEANT4`; its water table equals Geant4 option 0 in stop
 readers agree.
 
 **Nuclear-off diagnostic** (DIAGNOSTIC, #32 c27720; 4 × 1e6 per cell, nuclear processes off in both codes): the
-gap persists, −0.52 mm with nuclear on and −0.56 mm off. The contrast is C = −0.041 ± 0.005 mm, a small non-zero
+gap persists, −0.52 mm with nuclear on and −0.56 mm off. The contrast is C = −0.041 mm (Welch SE 0.005 mm), a small non-zero
 sensitivity, with no attribution. A 70 MeV point is grid-limited at 1 mm for both codes, and MCsquare's fine-grid
 control failed its pre-stated criterion, so there is **no 70 MeV comparison** (#43).
 
@@ -149,7 +149,9 @@ local deposition of δ-electrons, and σ-window leakage. Solid-angle weighting i
 
 Portable is seed-reproducible at 1 thread and **not** at more than one: primaries are handed out through a shared
 counter, and the simulated count can exceed N (#39). Upstream + fix on the Lenovo, with the same binary, seed and
-4 threads, is not reproducible either (#39 c27678). All comparisons here therefore use distinct seed streams per arm
+4 threads, is not reproducible either (#39 c27678). TOPAS reproduced runs from their seeds in the configurations
+tested (OpenTOPAS 4.3.0, seed 101 at 8 and 16 threads, seed 900013 across three grids; TD), which is not shown in
+general. All comparisons here therefore use distinct seed streams per arm
 and statistics over runs, not same-seed identity.
 
 ## 8. Limitations of what is reported here
