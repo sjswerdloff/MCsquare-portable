@@ -4,9 +4,13 @@
 #
 # Peak memory is set by the grids, the physics tables and the per-thread buffers, not by the number of primaries, so a
 # short run (N = 1e5) is enough. Two cases bracket the size range:
-#   pencil      400 x 350 x 400 voxels at 1 mm (56.0 M voxels), one spot, 200 MeV  (mcsquare_pencil_case.py)
-#   fieldedge   150^3 voxels at 2 mm (3.4 M voxels), 15 x 15 cm field, 200 MeV    (field_edge_make_cases.py)
-# Measured with macOS /usr/bin/time -l: "maximum resident set size" and "peak memory footprint" (bytes).
+#   pencil      400 x 350 x 400 voxels at 1 mm (56.0 M voxels), water (Scanners/Water_Phantom), one spot, 200 MeV
+#   fieldedge   150^3 voxels at 2 mm (3.4 M voxels), HU 0 in Scanners/default = Schneider_AT_AG_SI4 (NOT water),
+#               15 x 15 cm field, 200 MeV  (field_edge_make_cases.py)
+# Measured with macOS /usr/bin/time -l: "maximum resident set size" and "peak memory footprint" (bytes), recorded by
+# validation/memory_record.py, which refuses malformed readings and incomplete runs. One short run on macOS: not a
+# general peak for longer runs or other modes, and not a measurement of Linux or a Raspberry Pi.
+# Every output is kept: nothing in this workflow deletes run artifacts.
 #
 # BUILD and RUN are separate jobs (sjswerdloff), as in topas-mcsquare-planning.yml.
 
@@ -89,21 +93,20 @@ jobs:
             "BDL_Machine_Parameter_File $W/BDL/BDL_default_DN_RangeShifter.txt" "BDL_Plan_File E200_S150.txt" \
             "Output_Directory out" "Dose_MHD_Output True" > "$C/config.txt"
 
+          cp validation/memory_record.py "$ROOT/memory_record.py"
+          OS="macOS $(sw_vers -productVersion) $(uname -m)"
           for name in pencil fieldedge; do
             C="$ROOT/$name"
+            case "$name" in pencil) CT=water.mhd; MAT="water (Scanners/Water_Phantom)";;
+                            fieldedge) CT=cube.mhd; MAT="HU 0 -> Schneider_AT_AG_SI4 (Scanners/default)";; esac
             # The checkout path has no spaces, so absolute paths are safe for the config parser here.
             (cd "$C" && MCsquare_Materials_Dir="$W/Materials/" /usr/bin/time -l "$B/MCsquare" config.txt) \
               > "$C/log.txt" 2> "$C/time.txt" || { tail -20 "$C/log.txt" "$C/time.txt"; echo "$name: MCsquare failed"; exit 1; }
-            if grep -q 'Unknown tag' "$C/log.txt"; then grep 'Unknown tag' "$C/log.txt"; echo "$name: config tag not recognised"; exit 1; fi
             test -s "$C/out/Dose.raw" || { echo "$name: no dose written"; exit 1; }
-            RSS=$(awk '/maximum resident set size/ {print $1}' "$C/time.txt")
-            PEAK=$(awk '/peak memory footprint/ {print $1}' "$C/time.txt")
-            [ -n "$RSS" ] || { cat "$C/time.txt"; echo "$name: no RSS line from /usr/bin/time -l"; exit 1; }
-            DIMS=$(awk -F' = ' '/^DimSize/ {print $2}' "$C"/*.mhd | head -1)
-            SIM=$(grep -o 'Nbr primaries simulated: [0-9]*' "$C/log.txt" | awk '{print $4}' || true)
-            printf '{"case": "%s", "threads": %s, "requested": "%s", "simulated": "%s", "ct_dims": "%s", "max_rss_bytes": %s, "peak_footprint_bytes": "%s", "binary_sha256": "%s"}\n' \
-              "$name" "$THREADS" "$N" "$SIM" "$DIMS" "$RSS" "$PEAK" "$(awk '{print $1}' "$B/sha256.txt")" | tee "$C/memory.json"
-            cat "$C/time.txt"
-            rm -f "$C/out/Dose.raw"   # not needed for this measurement
+            (cd "$C" && shasum -a 256 config.txt *.mhd *.raw *.txt > inputs_sha256.txt)
+            "$UV" run --no-project python "$ROOT/memory_record.py" --case "$name" --time "$C/time.txt" --log "$C/log.txt" \
+              --ct "$C/$CT" --requested "$N" --threads "$THREADS" --binary-sha256 "$(awk '{print $1}' "$B/sha256.txt")" \
+              --material "$MAT" --os "$OS" > "$C/memory.json" || { cat "$C/time.txt"; echo "$name: measurement refused"; exit 1; }
+            cat "$C/memory.json"
           done
           echo "outputs: $ROOT"
