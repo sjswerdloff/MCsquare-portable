@@ -24,6 +24,11 @@ Claims, kept separate: (1) the JOINT claim of a confirmatory contrast holds only
 unadjusted alpha (intersection-union); (2) INDIVIDUAL claims use Holm on p_TOST over the whole family (39 P + 13 F = 52),
 with not_established endpoints kept in the family as p = 1 (never rejected). Holm is never applied to the joint claim.
 
+Identity. Arm, case, mode and commit come from run.json and the directory layout <root>/<arm>/<case>/s<seed> only; the
+"study" field of record.json is never read, and the report header says so. Design completeness: the plan has 8 runs per
+arm, case and energy (case F: 8 at 200 MeV). A contrast whose arm or reference has a cell with a different number of
+runs present is reported PARTIAL with the counts, and its joint claim cannot be TRUE.
+
 Exit status: 0 when the analysis ran, whatever the outcomes; 2 when the inputs are unusable (reason on stderr).
 """
 
@@ -58,6 +63,11 @@ SIGMA_MARGIN = 0.02
 RING_RATIO = (0.98, 1.02)
 WIDE_RING_RATIO = (0.95, 1.05)  # ring 80-200 only
 TRANSPORT_OK = "ok"
+RUNS_PER_CELL = 8  # per arm x case x energy (case F: one cell, at 200 MeV)
+IDENTITY_SOURCE = (
+    "Run identity (arm, case, mode, commit) is taken from run.json and the directory layout "
+    "<root>/<arm>/<case>/s<seed>; the `study` field of record.json is not read."
+)
 
 # (name, arm, reference, confirmatory?)
 CONTRASTS_BY_PART = {
@@ -98,6 +108,8 @@ class Run:
     energy: int | None
     usable: bool
     problems: list[str] = field(default_factory=list)
+    mode: str | None = None  # run.json "mode", None if absent
+    commit: str | None = None  # run.json "commit", None if absent
     raw: dict[str, float | None] = field(default_factory=dict)  # eid -> value, None = invalid for that endpoint
 
 
@@ -270,7 +282,12 @@ def load_run(arm: str, case: str, run_dir: Path, seed: int) -> Run:
             raw = _p_values(rec, energy)
     elif rec is not None:
         raw = _f_values(rec)
-    return Run(label, seed, energy, usable=not problems, problems=problems, raw=raw)
+    mode = run_json.get("mode") if run_json is not None else None
+    commit = run_json.get("commit") if run_json is not None else None
+    return Run(
+        label, seed, energy, usable=not problems, problems=problems,
+        mode=mode if isinstance(mode, str) else None, commit=commit if isinstance(commit, str) else None, raw=raw,
+    )
 
 
 def load_arm_case(root: Path, arm: str, case: str) -> list[Run]:
@@ -399,6 +416,7 @@ def evaluate(spec: Spec, arm: list[Run], ref: list[Run], *, descriptive: bool) -
 def analyse_contrast(
     data: dict[tuple[str, str], list[Run]], arm: str, ref: str, specs: list[Spec], *, confirmatory: bool
 ) -> dict[str, object]:
+    partial = partial_cells(data, (arm, ref))
     results = [evaluate(s, data[(arm, s.case)], data[(ref, s.case)], descriptive=not confirmatory) for s in specs]
     claims: dict[str, object] = {}
     if confirmatory:
@@ -410,12 +428,36 @@ def analyse_contrast(
             else:
                 r.holm_decision = "equivalent" if hp is not None and hp < ALPHA else "not shown"
         claims = {
-            "joint_claim_equivalent_on_all_endpoints": all(r.outcome == "equivalent" for r in results),
+            "joint_claim_equivalent_on_all_endpoints": not partial and all(r.outcome == "equivalent" for r in results),
             "n_equivalent_unadjusted": sum(r.outcome == "equivalent" for r in results),
             "n_equivalent_holm": sum(r.holm_decision == "equivalent" for r in results),
             "n_not_established": sum(r.outcome == "not_established" for r in results),
         }
-    return {"results": results, "claims": claims}
+    return {"results": results, "claims": claims, "partial_cells": partial}
+
+
+# ------------------------------------------------------------------------------------------ design completeness
+
+
+def cell_counts(runs: list[Run], case: str) -> dict[str, int]:
+    """Runs PRESENT (usable or not) per energy cell: 100/150/200 for case P, one "200" cell for case F."""
+    keys = [str(e) for e in SLAB_DEPTHS] if case == "P" else ["200"]
+    counts = dict.fromkeys(keys, 0)
+    for r in runs:
+        key = str(r.energy) if case == "P" else "200"
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def partial_cells(data: dict[tuple[str, str], list[Run]], arms: tuple[str, ...]) -> list[str]:
+    """Cells of the given arms (both cases) whose run count differs from RUNS_PER_CELL, as "arm case MeV: n of 8"."""
+    out = []
+    for arm in arms:
+        for case in CASES:
+            for energy, n in cell_counts(data[(arm, case)], case).items():
+                if n != RUNS_PER_CELL:
+                    out.append(f"{arm} {case} {energy} MeV: {n} of {RUNS_PER_CELL}")
+    return out
 
 
 # ----------------------------------------------------------------------------------------------- reporting
@@ -465,11 +507,15 @@ def result_json(r: Result) -> dict[str, object]:
 def markdown_table(name: str, confirmatory: bool, analysed: dict[str, object]) -> list[str]:
     results: list[Result] = analysed["results"]  # type: ignore[assignment]
     claims: dict[str, object] = analysed["claims"]  # type: ignore[assignment]
+    partial: list[str] = analysed["partial_cells"]  # type: ignore[assignment]
     lines = [f"### {name}", ""]
+    if partial:
+        lines += [f"**PARTIAL** ({RUNS_PER_CELL} runs per arm, case and energy planned): " + "; ".join(partial) + ".", ""]
     if confirmatory:
         lines += [
             (f"Joint claim (equivalent on all {len(results)} endpoints, unadjusted alpha {ALPHA}): "
-            f"**{'TRUE' if claims['joint_claim_equivalent_on_all_endpoints'] else 'FALSE'}**; "
+            f"**{'TRUE' if claims['joint_claim_equivalent_on_all_endpoints'] else 'FALSE'}**"
+            f"{' (cannot be TRUE: PARTIAL)' if partial else ''}; "
             f"equivalent unadjusted {claims['n_equivalent_unadjusted']}, "
             f"equivalent after Holm {claims['n_equivalent_holm']}, not established {claims['n_not_established']}."),
             "",
@@ -506,15 +552,22 @@ def run_analysis(root: Path, parts: tuple[str, ...]) -> tuple[list[str], dict[st
     """Return (markdown lines, JSON-able document). Raises InputError when the inputs are unusable."""
     data = load_root(root, parts)
     specs = all_specs()
-    md = ["# Same-host comparison: parts " + ", ".join(parts), ""]
-    doc: dict[str, object] = {"parts": list(parts), "alpha": ALPHA, "family_size": FAMILY_SIZE, "contrasts": []}
+    md = ["# Same-host comparison: parts " + ", ".join(parts), "", IDENTITY_SOURCE, ""]
+    doc: dict[str, object] = {"parts": list(parts), "alpha": ALPHA, "family_size": FAMILY_SIZE,
+                           "identity_source": IDENTITY_SOURCE, "runs_per_cell": RUNS_PER_CELL, "contrasts": []}
     md.append("Runs per arm and case (unusable runs stay in the population):")
     md.append("")
     runs_doc: dict[str, object] = {}
     for (arm, case), runs in sorted(data.items()):
         bad = [f"{r.label}: {'; '.join(r.problems)}" for r in runs if not r.usable]
-        runs_doc[f"{arm}/{case}"] = {"n": len(runs), "unusable": bad}
-        md.append(f"- {arm}/{case}: {len(runs)} runs, {len(bad)} unusable" + "".join(f"\n  - {b}" for b in bad))
+        modes = sorted({r.mode or "unknown" for r in runs})
+        commits = sorted({r.commit or "unknown" for r in runs})
+        counts = cell_counts(runs, case)
+        runs_doc[f"{arm}/{case}"] = {"n": len(runs), "unusable": bad, "modes": modes, "commits": commits, "per_energy": counts}
+        md.append(
+            f"- {arm}/{case}: {len(runs)} runs ({', '.join(f'{e} MeV: {n}' for e, n in counts.items())}), {len(bad)} unusable; "
+            f"mode {'/'.join(modes)}, commit {'/'.join(c[:12] for c in commits)}" + "".join(f"\n  - {b}" for b in bad)
+        )
     md.append("")
     doc["runs"] = runs_doc
     contrasts_doc: list[object] = []
@@ -530,6 +583,8 @@ def run_analysis(root: Path, parts: tuple[str, ...]) -> tuple[list[str], dict[st
                     "reference": ref,
                     "kind": "confirmatory" if confirmatory else "descriptive",
                     "claims": analysed["claims"],
+                    "partial": bool(analysed["partial_cells"]),
+                    "partial_cells": analysed["partial_cells"],
                     "endpoints": [result_json(r) for r in results],
                 }
             )

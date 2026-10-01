@@ -21,7 +21,7 @@ import apples_analyse as aa
 Mutate = Callable[[str, str, int | None, int, dict], None]
 RunMutate = Callable[[str, str, int | None, int, dict], None]
 
-N_RUNS = 6
+N_RUNS = 8
 R80_BASE = {100: 77.5, 150: 158.0, 200: 259.0}
 RING_FRAC = {(5, 10): 0.02, (10, 20): 0.05, (20, 40): 0.20, (40, 80): 0.40, (80, 200): 0.20}
 ALL_ARMS = ("A-up", "A-port", "B-up", "B-pgcc", "B-picc")
@@ -308,12 +308,13 @@ def test_joint_claim_is_not_touched_by_holm(tmp_path: Path) -> None:
         for s in aa.all_specs():
             if s.case != case or s.energy != energy:
                 continue
-            half = min(-s.lo, s.hi) / math.sqrt(3.0)  # sample sd = 2 half / sqrt 3 -> se = margin / 3
+            half = min(-s.lo, s.hi) / 2.5 * math.sqrt(N_RUNS - 1)  # alternating +-half: se = half / sqrt(n-1) = margin / 2.5
             sgn = -1.0 if i % 2 == 0 else 1.0
             rec[s.key] = rec[s.key] * math.exp(sgn * half) if s.log else rec[s.key] + sgn * half
 
-    doc = analyse(build(tmp_path, ("A-up", "A-port"), n=4, identical=True, mutate=spread))
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, mutate=spread))
     c = contrast(doc, A_CONTRAST)
+    assert not c["partial"]
     assert all(0.01 < e["p_tost"] < 0.05 for e in c["endpoints"])
     assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is True
     assert c["claims"]["n_equivalent_unadjusted"] == 52
@@ -626,3 +627,95 @@ def test_exit_2_on_bad_parts(tmp_path: Path, parts: str) -> None:
 
 def test_exit_2_when_root_is_not_a_directory(tmp_path: Path) -> None:
     assert aa.main([str(tmp_path / "nope")]) == 2
+
+
+# ------------------------------------------------------------------ identity source and design completeness
+
+
+def test_report_header_says_where_identity_comes_from(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    assert aa.main([str(root), "--parts", "A"]) == 0
+    out = capsys.readouterr().out
+    assert "taken from run.json and the directory layout" in out and "`study` field of record.json is not read" in out
+
+
+@pytest.mark.parametrize("study", ["pe1", "apples-a", "garbage", None])
+def test_record_study_field_has_no_effect(tmp_path: Path, study: object) -> None:
+    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    for rec in root.glob("*/F/s*/record.json"):
+        body = json.loads(rec.read_text())
+        body.pop("study", None)
+        if study is not None:
+            body["study"] = study
+        rec.write_text(json.dumps(body))
+    c = contrast(analyse(root), A_CONTRAST)
+    assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is True and not c["partial"]
+
+
+def test_mode_and_commit_come_from_run_json(tmp_path: Path) -> None:
+    def tag(arm: str, case: str, energy: int | None, i: int, run: dict) -> None:
+        run["commit"] = "abcdef0123456789"
+
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, run_mutate=tag))
+    assert doc["runs"]["A-port/P"]["modes"] == ["full"]
+    assert doc["runs"]["A-port/P"]["commits"] == ["abcdef0123456789"]
+    assert doc["runs"]["A-up/F"]["per_energy"] == {"200": N_RUNS}
+
+
+def test_complete_design_is_not_partial_and_expected_count_is_8() -> None:
+    assert aa.RUNS_PER_CELL == 8 == N_RUNS
+
+
+def test_missing_run_in_one_energy_cell_makes_the_contrast_partial_and_the_joint_claim_not_true(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    victim = sorted((root / "A-port" / "P").iterdir())[N_RUNS]  # one 150 MeV run
+    for f in victim.iterdir():
+        f.unlink()
+    victim.rmdir()
+    doc = analyse(root)
+    c = contrast(doc, A_CONTRAST)
+    assert c["partial"] is True and c["partial_cells"] == ["A-port P 150 MeV: 7 of 8"]
+    assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is False
+    assert c["claims"]["n_equivalent_unadjusted"] == 52  # every endpoint is still equivalent: only the claim is withheld
+    assert aa.main([str(root), "--parts", "A"]) == 0
+    out = capsys.readouterr().out
+    assert "**PARTIAL**" in out and "A-port P 150 MeV: 7 of 8" in out and "cannot be TRUE: PARTIAL" in out
+    assert "TRUE**" not in out
+
+
+def test_missing_f_run_makes_the_contrast_partial(tmp_path: Path) -> None:
+    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    victim = min((root / "A-up" / "F").iterdir())
+    for f in victim.iterdir():
+        f.unlink()
+    victim.rmdir()
+    c = contrast(analyse(root), A_CONTRAST)
+    assert c["partial_cells"] == ["A-up F 200 MeV: 7 of 8"]
+    assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is False
+
+
+def test_partial_arm_marks_only_the_contrasts_that_use_it(tmp_path: Path) -> None:
+    root = build(tmp_path, ALL_ARMS, identical=True)
+    victim = min((root / "B-picc" / "P").iterdir())
+    for f in victim.iterdir():
+        f.unlink()
+    victim.rmdir()
+    doc = analyse(root, ("A", "B"))
+    assert contrast(doc, A_CONTRAST)["partial"] is False
+    assert contrast(doc, "B-pgcc vs B-up")["partial"] is False
+    assert contrast(doc, "B-picc vs B-up")["partial"] is True
+    assert contrast(doc, "B-pgcc vs B-picc (descriptive)")["partial"] is True
+
+
+def test_extra_run_in_a_cell_is_also_not_the_planned_design(tmp_path: Path) -> None:
+    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    src = min((root / "A-port" / "P").iterdir())
+    dup = src.parent / "s999999"
+    dup.mkdir()
+    for f in src.iterdir():
+        (dup / f.name).write_text(f.read_text().replace(src.name[1:], "999999"))
+    c = contrast(analyse(root), A_CONTRAST)
+    assert c["partial_cells"] == ["A-port P 100 MeV: 9 of 8"]
+    assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is False
