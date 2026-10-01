@@ -1,9 +1,10 @@
 # Portable MCsquare: depth-dose and off-axis comparison with upstream OpenMCsquare and TOPAS
 
-**DRAFT, 2026-10-01, restructured to the form of the published MCsquare validations (Souris et al. 2016; Huang et al.
-2018). Not a publication.** Results marked PRELIMINARY come from planning runs made before the confirmatory designs
-were frozen; they are not confirmatory and must not be quoted as final. The confirmatory same-host acquisition
-(commit `2f9dab40`, §4) is running and its results are not yet in this draft.
+**DRAFT, 2026-10-02, in the form of the published MCsquare validations (Souris et al. 2016; Huang et al. 2018). Not
+a publication.** The confirmatory same-host acquisition (commit `2f9dab40`, §4) is complete and its endpoint results
+are in §5.0–§5.2. Figures and gamma tables are still to be generated from the dose files. Results marked PRELIMINARY
+(§5.4) come from planning runs made before the confirmatory designs were frozen; they are not confirmatory and must
+not be quoted as final.
 
 Sources are cited compactly: `#N` = an issue or PR on MCsquare-portable; `UR` = the upstream report,
 [OpenMCsquare work item 42](https://gitlab.com/openmcsquare/MCsquare/-/work_items/42); `TD` = `validation/topas_design.md`;
@@ -109,8 +110,11 @@ hardware.
   Every gamma table states its criteria and threshold.
 - **Equivalence statistics:** beneath each comparison, the difference of means with Welch intervals and a two
   one-sided test (TOST) against pre-stated margins: R80 ±0.05 mm, σ ±0.02 mm, annuli out to 80 mm ×[0.98, 1.02],
-  the 80–200 mm annulus ×[0.95, 1.05]. A joint claim per contrast is made by intersection–union, with Holm adjustment
-  across each contrast's endpoints (AP; analysis reviewed in #48).
+  the 80–200 mm annulus ×[0.95, 1.05]; for the broad field, dose outside the field edge ±0.5 points at 5 mm and ±0.2
+  points at 10–30 mm, central-axis dose ×[0.995, 1.005], R80 and R20 ±0.5 mm (#31). An endpoint is equivalent when
+  its 90% interval lies wholly inside the margin, not equivalent when wholly outside, and inconclusive otherwise. A
+  joint claim per contrast is made by intersection–union over all 52 endpoints (39 pencil-beam, 13 broad-field), with
+  Holm adjustment for the individual claims (AP; analysis reviewed in #48).
 - **Random numbers:** Portable MCsquare uses PCG. Each thread `t` starts from state `RNG_Seed + 1e4·t + 1e5·c` on
   stream `t`, where `c` counts calls to the simulation loop in the process. With the default statistical-uncertainty
   batching, that loop is called once per batch, so `c` runs from 1 to exactly 10 (MIN_NUM_BATCH; no uncertainty target is set) in every run
@@ -121,44 +125,133 @@ hardware.
   screen establishes statistical independence. Neither code is bitwise reproducible at more than one thread, so every
   comparison uses statistics over independent runs, not same-seed identity (#39).
 
-## 4. Confirmatory acquisition (in progress)
+## 4. Confirmatory acquisition
 
-The same-host comparison of §3.3 is running at commit `2f9dab40`: 8 runs per energy per arm for case P and 8 runs per
-arm for case F, on the Lenovo (part A) and the HP (part B). The collection and analysis code was reviewed and approved
-before any result was read (#48). Its results will fill §5.1 and §5.2.
+The same-host comparison of §3.3 ran at commit `2f9dab404cea02f5072352f7ae5773dca27eb2a1`: 8 runs per energy per arm
+for case P and 8 runs per arm for case F, on the Lenovo (part A: A-up, A-port) and the HP (part B: B-up, B-pgcc,
+B-picc). That is 160 runs (120 case P, 40 case F). All 160 completed and were collected; none failed and none is
+missing.
+
+- **Collection and analysis.** `validation/apples_collect.py` verified the run trees against their recorded hashes
+  and copied the endpoint records; `validation/apples_analyse.py` produced every confirmatory number in §5.1 and
+  §5.2. Both ran at commit `bad1419be597a8286379a5d0d8473acfd68edc0f`. The analysis document is committed as
+  `validation/report_data/apples_analysis_2f9dab40.json`; its dataset fingerprint is sha256 `0d5be975…33ba` over 321
+  input files.
+- **What was fixed in the tools after the runs.** The collector could not read part A's logs, which Windows
+  PowerShell wrote as UTF-16; it refused all of part A and wrote nothing. It was corrected at `bad1419` before any
+  collection succeeded, so, as far as connor-227743e6 knows, before any full-run endpoint was read. After the results
+  were read, a second review found two checks missing from the analysis (a contrast whose two arms carry one binary;
+  a run that is not usable); they were added in #53 and change no result (AP, chronology).
+- **Independent checks** (silas-397300f6; #48 comments 28187 and 28192). All 208 endpoint rows (4 contrasts × 52)
+  were recomputed from the plan text with separate code; they agree with the analysis document to a relative
+  difference of at most 3.6e-10. The endpoint scripts of each arm's snapshot were re-run on the Dose files of all 160
+  runs: the case-F values and the case-P R80 and annulus values are identical to the recorded ones, and the case-P σ
+  values agree within 7.4e-6 mm (margin 0.02 mm). The collector itself does not tie endpoint values to the Dose files
+  (#52); for this collection that recomputation does.
 
 ## 5. Results
 
-Placeholders: `·` = value pending the confirmatory acquisition (§4); `[Fig n]` = figure to be generated from the
-collected dose files. Every pending cell is filled by the analysis code reviewed in #48 or by the figure and gamma
-scripts listed in §8, never by hand.
+**Contrasts (same host, both code lines with the upstream fix):** A = Portable (A-port) against upstream (A-up),
+Lenovo, Windows; B1 = Portable gcc (B-pgcc) against upstream (B-up), HP, Linux; B2 = Portable icc (B-picc) against
+upstream (B-up), HP, Linux. **Differences are Portable − upstream; ratios are Portable / upstream.** Each cell is the
+point estimate with its 95% interval and the outcome of the equivalence test: **E** equivalent, **I** inconclusive,
+**NE** not equivalent (§3.4). The test uses the 90% interval, so a printed 95% interval can extend past a margin in
+a cell marked E. **†** marks an endpoint equivalent unadjusted but not after Holm adjustment.
 
-**Contrasts (same host, both code lines with the upstream fix):** A = upstream (A-up) against Portable (A-port),
-Lenovo, Windows; B1 = upstream (B-up) against Portable gcc (B-pgcc), HP, Linux; B2 = upstream (B-up) against Portable
-icc (B-picc), HP, Linux. Differences are upstream − Portable; ratios are upstream / Portable. Each cell is the point
-estimate with its 95% interval; **E** marks a TOST equivalence result within the margin (§3.4), **NE** not
-equivalent, **I** inconclusive.
+The tables in §5.0–§5.2 and Appendix A are written by `validation/report_confirmatory_tables.py` from the analysis
+document, and a test fails if the report and the document disagree. `[Fig n]` marks a figure, and `·` a descriptive
+value, still to be generated from the collected dose files (§7, item 1).
+
+### 5.0 Summary of the confirmatory comparison
+
+<!-- BEGIN GENERATED: confirmatory-summary -->
+| contrast | joint claim (all 52 equivalent) | equivalent, unadjusted / Holm | inconclusive | not established | not equivalent |
+|---|---|---|---|---|---|
+| A | not established | 46 / 46 | 4 | 2 | 0 |
+| B1 | not established | 46 / 46 | 4 | 2 | 0 |
+| B2 | not established | 46 / 45 | 4 | 2 | 0 |
+<!-- END GENERATED: confirmatory-summary -->
+
+In each of the three contrasts, 46 of the 52 pre-specified endpoints are equivalent, 4 are inconclusive, 2 are not
+established, and none is not equivalent. The joint claim, equivalence on all 52 endpoints, is therefore **not
+established in any contrast**.
+
+The endpoints that fall short are the same six each time. All six are energy fractions in the pencil beam's far halo
+(40 mm or more from the axis) at 100 and 150 MeV:
+
+<!-- BEGIN GENERATED: confirmatory-not-equivalent -->
+| endpoint | A | B1 | B2 |
+|---|---|---|---|
+| P100/ring_40_40_80 | 1.0157 [0.9873, 1.0449] I | 1.0350 [1.0040, 1.0670] I | 0.9958 [0.9595, 1.0335] I |
+| P100/ring_40_80_200 | not established | not established | not established |
+| P100/ring_60_40_80 | 0.9833 [0.9377, 1.0311] I | 0.9749 [0.9232, 1.0296] I | 0.9784 [0.9216, 1.0388] I |
+| P100/ring_60_80_200 | not established | not established | not established |
+| P150/ring_80_40_80 | 1.0000 [0.9883, 1.0118] E | 1.0028 [0.9926, 1.0131] E | 1.0089 [0.9963, 1.0218] E† |
+| P150/ring_80_80_200 | 0.9427 [0.8695, 1.0221] I | 1.0054 [0.9423, 1.0728] I | 1.0056 [0.9465, 1.0684] I |
+| P150/ring_125_80_200 | 0.9696 [0.8877, 1.0590] I | 0.9814 [0.9073, 1.0616] I | 0.9541 [0.8754, 1.0398] I |
+<!-- END GENERATED: confirmatory-not-equivalent -->
+
+(The 150 MeV, 80 mm, 40–80 mm row is equivalent in all three contrasts; it is listed because in B2 it does not
+survive Holm adjustment.)
+
+How these are to be read:
+
+- **The two endpoints that are not established** are the 80–200 mm annulus at 100 MeV, at both depths. The energy
+  fraction there is exactly zero in all 8 runs of all 5 arms (80 values). The endpoint is a ratio analysed on the log
+  scale, so the estimator is undefined in these observations. That is a statement about this estimator at 1e7
+  histories per run. It does not show that no dose reaches that annulus, and it does not show a difference between
+  the configurations.
+- **All six endpoints stay in the pre-specified family of 52.** The joint claim is reported as not established. It is
+  not recomputed over a smaller family chosen after the results were seen.
+- **Inconclusive is a result, not a difference.** It means the 90% interval is neither wholly inside the margin nor
+  wholly outside it. Whether an interval excludes 1 (or 0) is a separate question from the equivalence class. In B1,
+  the 100 MeV, 40 mm, 40–80 mm annulus is 1.035 with a 95% interval that excludes 1, and it is inconclusive. In A,
+  the dose 30 mm outside the field edge at 127 mm differs by +0.025 points with a 95% interval that excludes 0, and
+  it is equivalent, because the whole interval lies far inside the ±0.2 margin (Table 4).
+- **Why the far halo is inconclusive.** The number of histories was sized from 200 MeV planning data. At 200 MeV
+  every annulus is equivalent in every contrast. At 100 and 150 MeV the outer annuli hold less energy, and their run-to-run
+  spread is too large for the margins at 1e7 histories. From the observed standard errors, and assuming the true
+  difference is zero, 80% power to show equivalence at the stated margins would need roughly 3 to 14 times the
+  histories for the 40–80 mm annulus at 100 MeV and 2 to 5 times for the 80–200 mm annulus at 150 MeV, **in both
+  arms**; adding histories to one arm alone reduces the standard error by at most a factor of 1.4. The 80–200 mm
+  annulus at 100 MeV would need far more, since no run scored any energy there. That is design information for a
+  separate, pre-specified acquisition. These results are not to be rescued by adding runs to this one (AP).
+- **One row to watch.** Six of the 150 confirmatory 95% intervals exclude the null value, which is about what chance
+  gives at that level (7.5 expected). Five of the six are equivalent. The sixth is the B1 row above (1.035). Portable
+  built with gcc is also above Portable built with icc on the same host at this endpoint (Appendix A), and A (gcc
+  against icl) points the same way without excluding 1. At the other 100 MeV depth the same annulus points the other
+  way in all three contrasts. This is recorded as an observation, not as a compiler effect. A follow-up acquisition
+  should name it in advance.
 
 ### 5.1 Depth dose
 
 [Fig 1] Integrated depth dose at 100, 150 and 200 MeV: mean over 8 runs per arm, the two arms of each contrast
 overlaid, normalised to the upstream maximum, with the difference curve beneath (% of maximum).
 
-**Table 1. Range and fall-off differences (mm).**
+**Table 1. Pencil beam: R80 difference (mm). Margin ±0.05 mm.**
 
-| energy | contrast | R90 | R80 | R20 | fall-off (R80 − R20) |
-|---|---|---|---|---|---|
-| 100 MeV | A | · | · | · | · |
-| | B1 | · | · | · | · |
-| | B2 | · | · | · | · |
-| 150 MeV | A | · | · | · | · |
-| | B1 | · | · | · | · |
-| | B2 | · | · | · | · |
-| 200 MeV | A | · | · | · | · |
-| | B1 | · | · | · | · |
-| | B2 | · | · | · | · |
+<!-- BEGIN GENERATED: table-1-r80 -->
+| energy | contrast | R80 difference (mm) |
+|---|---|---|
+| 100 MeV | A | 0.0000 [−0.0015, +0.0014] E |
+|  | B1 | +0.0004 [−0.0010, +0.0017] E |
+|  | B2 | −0.0002 [−0.0012, +0.0008] E |
+| 150 MeV | A | −0.0004 [−0.0016, +0.0008] E |
+|  | B1 | −0.0006 [−0.0021, +0.0009] E |
+|  | B2 | −0.0005 [−0.0023, +0.0013] E |
+| 200 MeV | A | +0.0020 [−0.0013, +0.0053] E |
+|  | B1 | +0.0013 [−0.0019, +0.0045] E |
+|  | B2 | +0.0032 [−0.0004, +0.0068] E |
+<!-- END GENERATED: table-1-r80 -->
 
-**Table 2. Gamma pass rates, integrated depth dose and 3D dose (% of points passing).**
+R80 is equivalent at every energy in every contrast. The largest estimate is 0.003 mm (B2, 200 MeV), and every 95%
+interval lies within ±0.007 mm, against a margin of ±0.05 mm. There is no sign of an energy dependence. The
+broad-field R80 and R20 (Table 4) agree within ±0.022 mm at the 95% level.
+
+R90, R20 and the distal fall-off of the pencil beam were not pre-specified endpoints. They will be added as
+descriptive values from the dose files, with Table 2.
+
+**Table 2. Gamma pass rates, integrated depth dose and 3D dose (% of points passing). Descriptive; pending.**
 
 | energy | contrast | 2%/2 mm, 10% | 1%/1 mm, 10% |
 |---|---|---|---|
@@ -166,38 +259,75 @@ overlaid, normalised to the upstream maximum, with the difference curve beneath 
 | 150 MeV | A / B1 / B2 | · / · / · | · / · / · |
 | 200 MeV | A / B1 / B2 | · / · / · | · / · / · |
 
-Text to be written from the tables: the largest range difference, whether every R80 lies within ±0.05 mm, and any
-energy dependence.
-
 ### 5.2 Off-axis dose
 
 **Pencil beam.** [Fig 2] Lateral profiles in x and y through the axis at each energy's two depths (100 MeV: 40 and
 60 mm; 150 MeV: 80 and 125 mm; 200 MeV: 100 and 200 mm), log dose axis so that the halo is visible, arms overlaid.
 
-**Table 3. Spot σ difference (mm) and annulus energy-fraction ratios.**
+**Table 3. Pencil beam: spot σ difference (mm; margin ±0.02 mm) and annulus energy-fraction ratios (margin
+×[0.98, 1.02] out to 80 mm, ×[0.95, 1.05] for 80–200 mm).**
 
-| energy, depth | contrast | σ | 5–10 mm | 10–20 | 20–40 | 40–80 | 80–200 |
+<!-- BEGIN GENERATED: table-3-pencil -->
+| energy, depth | contrast | σ difference (mm) | 5–10 mm | 10–20 mm | 20–40 mm | 40–80 mm | 80–200 mm |
 |---|---|---|---|---|---|---|---|
-| 100 MeV, 40 mm | A / B1 / B2 | · | · | · | · | · | · |
-| 100 MeV, 60 mm | A / B1 / B2 | · | · | · | · | · | · |
-| 150 MeV, 80 mm | A / B1 / B2 | · | · | · | · | · | · |
-| 150 MeV, 125 mm | A / B1 / B2 | · | · | · | · | · | · |
-| 200 MeV, 100 mm | A / B1 / B2 | · | · | · | · | · | · |
-| 200 MeV, 200 mm | A / B1 / B2 | · | · | · | · | · | · |
+| 100 MeV, 40 mm | A | −0.0001 [−0.0008, +0.0005] E | 0.9999 [0.9993, 1.0006] E | 1.0010 [0.9982, 1.0037] E | 1.0059 [0.9981, 1.0138] E | 1.0157 [0.9873, 1.0449] I | not established |
+|  | B1 | +0.0003 [−0.0007, +0.0013] E | 0.9999 [0.9991, 1.0008] E | 0.9990 [0.9964, 1.0017] E | 0.9984 [0.9894, 1.0076] E | 1.0350 [1.0040, 1.0670] I | not established |
+|  | B2 | +0.0002 [−0.0004, +0.0009] E | 1.0001 [0.9995, 1.0007] E | 0.9995 [0.9958, 1.0032] E | 1.0013 [0.9932, 1.0095] E | 0.9958 [0.9595, 1.0335] I | not established |
+| 100 MeV, 60 mm | A | −0.0003 [−0.0011, +0.0005] E | 1.0000 [0.9998, 1.0003] E | 0.9993 [0.9975, 1.0010] E | 1.0022 [0.9962, 1.0081] E | 0.9833 [0.9377, 1.0311] I | not established |
+|  | B1 | 0.0000 [−0.0013, +0.0013] E | 0.9997 [0.9989, 1.0005] E | 0.9992 [0.9973, 1.0011] E | 1.0031 [0.9985, 1.0078] E | 0.9749 [0.9232, 1.0296] I | not established |
+|  | B2 | 0.0000 [−0.0011, +0.0010] E | 0.9999 [0.9993, 1.0006] E | 0.9988 [0.9968, 1.0008] E | 1.0041 [0.9992, 1.0090] E | 0.9784 [0.9216, 1.0388] I | not established |
+| 150 MeV, 80 mm | A | −0.0007 [−0.0020, +0.0007] E | 0.9995 [0.9989, 1.0002] E | 0.9990 [0.9966, 1.0014] E | 0.9999 [0.9964, 1.0034] E | 1.0000 [0.9883, 1.0118] E | 0.9427 [0.8695, 1.0221] I |
+|  | B1 | +0.0001 [−0.0011, +0.0012] E | 1.0002 [0.9996, 1.0008] E | 0.9995 [0.9969, 1.0020] E | 1.0012 [0.9986, 1.0039] E | 1.0028 [0.9926, 1.0131] E | 1.0054 [0.9423, 1.0728] I |
+|  | B2 | +0.0006 [−0.0008, +0.0021] E | 1.0001 [0.9994, 1.0008] E | 1.0013 [0.9992, 1.0034] E | 1.0004 [0.9962, 1.0046] E | 1.0089 [0.9963, 1.0218] E† | 1.0056 [0.9465, 1.0684] I |
+| 150 MeV, 125 mm | A | −0.0005 [−0.0017, +0.0007] E | 0.9999 [0.9993, 1.0005] E | 0.9999 [0.9987, 1.0011] E | 0.9995 [0.9968, 1.0023] E | 1.0042 [0.9940, 1.0145] E | 0.9696 [0.8877, 1.0590] I |
+|  | B1 | −0.0004 [−0.0018, +0.0010] E | 1.0001 [0.9995, 1.0007] E | 0.9996 [0.9977, 1.0015] E | 1.0007 [0.9979, 1.0035] E | 0.9928 [0.9852, 1.0004] E | 0.9814 [0.9073, 1.0616] I |
+|  | B2 | +0.0001 [−0.0015, +0.0016] E | 1.0003 [0.9996, 1.0009] E | 0.9991 [0.9976, 1.0005] E | 0.9994 [0.9961, 1.0027] E | 0.9931 [0.9862, 1.0000] E | 0.9541 [0.8754, 1.0398] I |
+| 200 MeV, 100 mm | A | +0.0001 [−0.0011, +0.0012] E | 1.0001 [0.9993, 1.0009] E | 1.0001 [0.9976, 1.0025] E | 1.0009 [0.9979, 1.0040] E | 0.9983 [0.9942, 1.0024] E | 1.0160 [0.9953, 1.0372] E |
+|  | B1 | −0.0003 [−0.0015, +0.0010] E | 0.9998 [0.9991, 1.0005] E | 0.9994 [0.9963, 1.0025] E | 1.0012 [0.9978, 1.0047] E | 0.9970 [0.9935, 1.0005] E | 0.9822 [0.9630, 1.0017] E |
+|  | B2 | +0.0003 [−0.0010, +0.0015] E | 0.9998 [0.9992, 1.0004] E | 1.0015 [0.9994, 1.0036] E | 1.0013 [0.9980, 1.0045] E | 0.9963 [0.9902, 1.0025] E | 0.9874 [0.9663, 1.0091] E |
+| 200 MeV, 200 mm | A | +0.0006 [−0.0015, +0.0028] E | 1.0002 [0.9995, 1.0008] E | 1.0005 [0.9988, 1.0023] E | 1.0001 [0.9972, 1.0030] E | 0.9995 [0.9946, 1.0044] E | 1.0034 [0.9860, 1.0211] E |
+|  | B1 | +0.0003 [−0.0016, +0.0021] E | 0.9998 [0.9993, 1.0002] E | 0.9999 [0.9989, 1.0009] E | 1.0011 [0.9987, 1.0035] E | 1.0009 [0.9956, 1.0062] E | 1.0066 [0.9855, 1.0280] E |
+|  | B2 | −0.0011 [−0.0030, +0.0008] E | 0.9998 [0.9994, 1.0003] E | 0.9988 [0.9977, 0.9998] E | 1.0006 [0.9993, 1.0019] E | 1.0029 [0.9972, 1.0087] E | 1.0060 [0.9853, 1.0271] E |
+<!-- END GENERATED: table-3-pencil -->
+
+- **Spot size.** σ is equivalent in all 18 cells. The largest estimate is 0.001 mm and every 95% interval lies within
+  ±0.003 mm.
+- **Core and near halo (out to 40 mm).** Every annulus is equivalent at every energy and depth in every contrast.
+  The 95% intervals lie within 0.11% of 1 for 5–10 mm, 0.42% for 10–20 mm and 1.4% for 20–40 mm.
+- **Far halo (40 mm and beyond).** At 200 MeV both outer annuli are equivalent at both depths in every contrast. At
+  150 MeV the 40–80 mm annulus is equivalent and the 80–200 mm annulus is inconclusive. At 100 MeV the 40–80 mm
+  annulus is inconclusive and the 80–200 mm annulus is not established (§5.0).
 
 **Broad field.** [Fig 3] Lateral profiles across the field edge at mid-range depth (127 mm), arms overlaid, log dose
 axis; inset: dose 0–30 mm outside the edge. [Fig 4] Gamma maps (1%/1 mm and low-dose) on the plane at 127 mm.
 
-**Table 4. Broad field: dose outside the field edge (percentage points of central-axis dose), central-axis dose,
-range.**
+**Table 4. Broad field, 200 MeV: dose outside the field edge (difference in percentage points of the central-axis
+dose at that depth; margin ±0.5 at 5 mm, ±0.2 at 10–30 mm), central-axis dose (ratio; margin ×[0.995, 1.005]) and
+range (difference in mm; margin ±0.5 mm).**
 
-| contrast | 5 mm outside | 10 mm | 20 mm | 30 mm | central axis (%) | R80 (mm) | R20 (mm) |
-|---|---|---|---|---|---|---|---|
-| A | · | · | · | · | · | · | · |
-| B1 | · | · | · | · | · | · | · |
-| B2 | · | · | · | · | · | · | · |
+<!-- BEGIN GENERATED: table-4-field -->
+| endpoint | scale | A | B1 | B2 |
+|---|---|---|---|---|
+| 127 mm depth, 5 mm outside the edge | points | −0.031 [−0.089, +0.027] E | +0.009 [−0.027, +0.046] E | −0.024 [−0.068, +0.021] E |
+| 127 mm depth, 10 mm outside | points | +0.017 [−0.030, +0.065] E | +0.006 [−0.032, +0.044] E | −0.008 [−0.049, +0.033] E |
+| 127 mm depth, 20 mm outside | points | −0.004 [−0.044, +0.036] E | +0.019 [−0.009, +0.047] E | +0.017 [−0.016, +0.050] E |
+| 127 mm depth, 30 mm outside | points | +0.025 [+0.008, +0.043] E | −0.004 [−0.027, +0.019] E | −0.008 [−0.033, +0.017] E |
+| 201 mm depth, 5 mm outside the edge | points | −0.054 [−0.123, +0.015] E | −0.031 [−0.095, +0.033] E | −0.043 [−0.116, +0.030] E |
+| 201 mm depth, 10 mm outside | points | +0.070 [+0.023, +0.117] E | +0.007 [−0.039, +0.053] E | +0.016 [−0.036, +0.069] E |
+| 201 mm depth, 20 mm outside | points | +0.031 [+0.005, +0.057] E | −0.014 [−0.048, +0.020] E | −0.016 [−0.061, +0.028] E |
+| 201 mm depth, 30 mm outside | points | −0.028 [−0.049, −0.007] E | −0.009 [−0.042, +0.023] E | −0.010 [−0.043, +0.023] E |
+| central-axis dose at 127 mm | ratio | 1.0006 [0.9990, 1.0023] E | 0.9992 [0.9972, 1.0013] E | 0.9997 [0.9970, 1.0024] E |
+| central-axis dose at 201 mm | ratio | 1.0010 [0.9986, 1.0034] E | 0.9999 [0.9975, 1.0023] E | 0.9999 [0.9981, 1.0016] E |
+| central-axis dose at 253 mm | ratio | 1.0002 [0.9976, 1.0029] E | 1.0001 [0.9984, 1.0018] E | 1.0009 [0.9994, 1.0024] E |
+| R80 | mm | +0.005 [−0.011, +0.021] E | −0.001 [−0.017, +0.015] E | −0.001 [−0.017, +0.014] E |
+| R20 | mm | 0.000 [−0.012, +0.013] E | −0.008 [−0.020, +0.005] E | −0.007 [−0.021, +0.007] E |
+<!-- END GENERATED: table-4-field -->
 
-**Table 5. Gamma pass rates on the broad-field planes (% passing).**
+All 13 broad-field endpoints are equivalent in all three contrasts. Outside the field edge, where upstream as
+distributed computes less dose (§2), the largest estimate is 0.07 points and every 95% interval lies within ±0.12
+points of central-axis dose. Central-axis dose agrees within 0.10% (95% intervals within 0.34%).
+
+**Table 5. Gamma pass rates on the broad-field planes (% passing). Descriptive; pending.**
 
 | contrast | 2%/2 mm, 10% | 1%/1 mm, 10% | low-dose (2%/2 mm, ~1% threshold) | local 2%/2 mm, ~1% threshold |
 |---|---|---|---|---|
@@ -205,37 +335,9 @@ range.**
 | B1 | · | · | · | · |
 | B2 | · | · | · | · |
 
-Text to be written from the tables: agreement in the halo region next to the field edge, where upstream as
-distributed underdoses (§2), and whether the 10%-threshold and low-dose gammas tell different stories.
-
-### 5.1–5.2 preliminary data (superseded when §4 completes)
-
-**PRELIMINARY (different hosts):** at 200 MeV, upstream + fix (icl, Lenovo, 4 threads) against Portable (Mac Studio,
-24 threads), 4 × 1e7 each, R80 differs by +0.0008 mm (SE 0.0038; 95% [−0.0084, +0.0101]).
-
-**PRELIMINARY, broad field, both code lines with the fix** (mean of 2 runs × 3e7, 3 threads; dose in % of central
-axis at 127 mm depth):
-
-| code, compiler | host, OS | 5 mm outside | 10 mm | 20 mm | 30 mm |
-|---|---|---|---|---|---|
-| upstream + fix, icc 2021.1.2 | HP, Linux (WSL2) | 6.97 | 4.64 | 2.33 | 1.23 |
-| upstream + fix, icl 2021.1 | Lenovo, Windows 10 | 7.00 | 4.64 | 2.25 | 1.21 |
-| Portable, MSYS2 gcc 16.2.0 | HP, Windows 10 | 6.98 | 4.69 | 2.33 | 1.23 |
-| Portable, gcc 13 | HP, Linux (WSL2) | 6.99 | 4.69 | 2.30 | 1.21 |
-
-Three rows agree within about 0.05 points in every column; the Lenovo 20 mm cell is about 0.08 lower, more than its
-own two-run difference (0.04). With n = 2 this is descriptive only (#16, #28).
-
-**PRELIMINARY, pencil beam, 200 MeV, different hosts** (the configuration above; difference upstream − Portable, ratio
-upstream/Portable; 95% intervals):
-
-| depth | σ difference | annulus 20–40 mm | 40–80 mm | 80–200 mm |
-|---|---|---|---|---|
-| 100 mm | +0.0000 mm [−0.0018, +0.0018] | 0.9980 [0.9944, 1.0015] | 0.9978 [0.9917, 1.0040] | 1.0018 [0.9556, 1.0503] |
-| 200 mm | −0.0017 mm [−0.0058, +0.0024] | 0.9994 [0.9965, 1.0023] | **1.0070 [1.0019, 1.0121]** | 1.0064 [0.9935, 1.0195] |
-
-The 200 mm, 40–80 mm annulus differs by about 0.7%, with an interval that excludes 1. Here host, compiler,
-random-number generator and thread count all differ, which is why §4 compares on the same host.
+**Compiler (descriptive).** Portable built with gcc against Portable built with icc on the HP has no margin and
+makes no claim (AP). Its 52 rows are in Appendix A. Fifty have estimates. Two 95% intervals exclude the null value:
+the 100 MeV, 40 mm, 40–80 mm annulus discussed in §5.0, and the 200 MeV, 200 mm, 10–20 mm annulus, at 1.0011.
 
 ### 5.3 Portable MCsquare across platforms (study pe1)
 
@@ -273,39 +375,142 @@ MCsquare matches Geant4's option 0 table to within 0.006% over 50–400 MeV, and
 about 0.01 mm (TD stage 0), so the gap is **not yet explained**. It persists with nuclear interactions off in both
 codes (−0.56 mm; #32). Annuli far from the axis carry 10–20% less energy in Portable at 200 mm depth.
 
+At 200 MeV, upstream with the fix and Portable are equivalent in every annulus, including the two outer ones
+(Table 3). So the far-halo deficit against TOPAS was not introduced by the port; by inference it is common to both
+MCsquare code lines. Its cause is not established. The TOPAS ratios above are point estimates from 4 runs per code,
+without intervals, at 200 MeV only.
+
 ## 6. Discussion
 
-To be completed from §5. Planned structure:
-
-1. **Agreement between the code lines.** Whether upstream and Portable MCsquare, both with the fix, agree within the
-   stated margins on the same host, per contrast (A, B1, B2), and whether the compiler matters (B1 against B2).
-2. **The upstream defect in clinical terms.** The size of upstream's field-edge underdose as distributed (§2) against
-   the agreement found in §5, and why it matters next to organs at risk.
-3. **Portability.** Portable MCsquare gives equivalent results on Linux, Windows and macOS (§5.3), so treatment-planning
-   research need not depend on Intel compilers.
-4. **The TOPAS differences.** The open 0.5 mm range offset and the halo deficit (§5.4) and what the next stage tests.
-5. **Speed.** Run time per 1e7 histories by arm and host (from the run records), stated as resource information, not
-   as a performance claim.
+1. **Agreement between the code lines.** On the same host, and with the same fix in both, upstream OpenMCsquare and
+   Portable MCsquare agree within the pre-stated margins on range, spot size, the core and near halo of the pencil
+   beam at all three energies, the far halo at 200 MeV, and every broad-field endpoint. In the far halo at 100 and
+   150 MeV the comparison is inconclusive or not established: there is no evidence of a difference, and not enough
+   precision to show equivalence. The joint claim over all 52 endpoints is therefore not established (§5.0). The
+   picture is the same in all three contrasts (icl against MSYS2 gcc on Windows; icc against gcc, and icc against icc,
+   on Linux), and the descriptive comparison of the two Portable builds shows no compiler effect.
+2. **The upstream defect in clinical terms.** As distributed, upstream computes 13–18% less dose than the corrected
+   code between 5 and 30 mm outside the edge of the 200 MeV field (§2), up to 0.95 percentage points of central-axis
+   dose. For a field that delivers 60 Gy on the axis, that is about 0.6 Gy at 5 mm outside the edge, in the region
+   where organs at risk sit. With the fix in both code lines, the two differ there by at most 0.12 points at the 95%
+   level (Table 4), about 0.07 Gy on the same scale. The defect is roughly ten times larger than any difference
+   between the corrected code lines. Whether the corrected dose is closer to physical dose has not been shown (§5.4).
+3. **Portability.** Portable MCsquare gives equivalent results on Linux, Windows and macOS (§5.3) and, with free
+   compilers, matches the Intel-built upstream within the margins above. Treatment-planning research with MCsquare
+   need not depend on Intel compilers.
+4. **The TOPAS differences.** The 0.5 mm range offset and the far-halo deficit (§5.4) are open. Both belong to
+   MCsquare's physics models as shared by the two code lines, not to the port. The next stage is a pre-specified
+   comparison with intervals at 100, 150 and 200 MeV; it has not been designed yet.
+5. **Speed.** Run time per 1e7 histories by arm and host is in the run records and will be tabulated as resource
+   information, not as a performance claim.
 
 ## 7. Limitations
 
-1. §5.1 and §5.2 currently hold preliminary data only; the confirmatory results (§4) are pending.
-2. The TOPAS comparison is preliminary and covers the pencil beam only; there is no comparison with measurement.
-3. **Neither confirmatory case has a beam-line device in the beam.** The upstream defect was found with a range
+1. **Figures and gamma tables are pending.** Figures 1–4, Tables 2 and 5, and the pencil beam's R90, R20 and distal
+   fall-off need the dose files, not the endpoint records. They are descriptive and were not pre-specified endpoints.
+2. **The joint equivalence claim is not established** in any contrast, because the far halo at 100 and 150 MeV lacks
+   precision at 1e7 histories per run (§5.0).
+3. **Homogeneous phantoms only.** Neither case has a density interface. Differences in lateral scattering and in the
+   nuclear halo matter most clinically behind low-density tissue and at bone–air interfaces, and none of that is
+   tested here. Planned as future work: a lung-density slab; a sinus-like cavity of air in bone; and the same cavity
+   filled in steps, as in congestion.
+4. **Neither confirmatory case has a beam-line device in the beam.** The upstream defect was found with a range
    shifter in, where nuclear secondaries from the shifter reach the phantom, so a range-shifter-in case would test it
-   most directly.
-4. The broad-field phantom is Schneider_AT_AG_SI4 rather than water (§3.2).
-5. Published agreement figures (Huang 2018) are to be checked against the paper itself before any comparison with
+   most directly. No aperture is modelled.
+5. **Energies and fields.** Pencil beams at 100, 150 and 200 MeV and one 200 MeV, 15 × 15 cm field. Nothing outside
+   that range is tested.
+6. The TOPAS comparison is preliminary and covers the pencil beam at 200 MeV only; there is no comparison with
+   measurement.
+7. The broad-field phantom is Schneider_AT_AG_SI4 rather than water (§3.2).
+8. **Provenance.** The collector verifies the Dose files against their recorded hashes but does not tie the endpoint
+   values to them; for this collection a reviewer's recomputation on all 160 runs does (§4; #52). Each run's binary
+   hash is checked against the snapshot of its own job, and the five arms carry five distinct binaries; nothing in
+   the collection ties a hash to the build record.
+9. Published agreement figures (Huang 2018) are to be checked against the paper itself before any comparison with
    them.
 
 ## 8. Reproducibility and data
 
 Sources, case generators, the workflows that produced every result, and the collection and analysis tools are in the
-Portable MCsquare repository. A step-by-step reproduction guide and the dose files (with a committed sha256 manifest
-and a read-only link) will be added with the confirmatory results.
+Portable MCsquare repository.
+
+- **Run trees** (inputs, logs, records and Dose files, about 30 GB): two archives, part A sha256
+  `ba6b8a3cdb06b6a0bc76d4ff514d3c750bdef917d05781e21ad145d9f8a74c7f` and part B sha256
+  `33d042bb664277a15fcc14973ca71853b2e7202c2c02337c8a0dda3974e0560b`.
+- **Collected endpoint records** (865 files with the collection manifest): archive sha256
+  `e71859561b820bff7f887e8987c5c190542f45151ebc2f86cb9c77fecb8a7570`.
+- **Analysis document:** `validation/report_data/apples_analysis_2f9dab40.json`, written by
+  `validation/apples_analyse.py <collected> --parts A,B --json <file>` at commit `bad1419`.
+- **Tables:** `python validation/report_confirmatory_tables.py --check` confirms that the tables in this report are
+  what the analysis document renders.
+
+The archives are held on the project's storage. A read-only link and a step-by-step reproduction guide will be added
+before any wider circulation.
 
 ## 9. Contributors
 
 sjswerdloff (direction, margins, decisions); connor-227743e6 (Portable MCsquare, MCsquare arms, upstream report);
 clement-7074f29f (TOPAS installation, arm and diagnostics); alden-ec2221c7 (statistics and review); cora-2f1e43dc and
 others (reviews). Authorship of any submission is sjswerdloff's decision, with each contributor's consent.
+
+## Appendix A. Portable gcc against Portable icc (HP, Linux), descriptive
+
+**Table A1.** B-pgcc against B-picc: estimate and 95% interval for each of the 52 endpoints. No margin and no claim
+(AP). Differences are gcc − icc; ratios are gcc / icc.
+
+<!-- BEGIN GENERATED: table-a1-compiler -->
+| endpoint | Portable gcc − Portable icc, or ratio gcc / icc |
+|---|---|
+| P100/R80 | +0.0005 [−0.0007, +0.0018] |
+| P100/sigma_40 | 0.0000 [−0.0009, +0.0010] |
+| P100/sigma_60 | 0.0000 [−0.0012, +0.0013] |
+| P100/ring_40_5_10 | 0.9999 [0.9991, 1.0007] |
+| P100/ring_40_10_20 | 0.9996 [0.9960, 1.0031] |
+| P100/ring_40_20_40 | 0.9972 [0.9870, 1.0074] |
+| P100/ring_40_40_80 | 1.0394 [1.0030, 1.0772] |
+| P100/ring_40_80_200 | not established |
+| P100/ring_60_5_10 | 0.9997 [0.9990, 1.0005] |
+| P100/ring_60_10_20 | 1.0004 [0.9983, 1.0026] |
+| P100/ring_60_20_40 | 0.9991 [0.9952, 1.0029] |
+| P100/ring_60_40_80 | 0.9964 [0.9470, 1.0484] |
+| P100/ring_60_80_200 | not established |
+| P150/R80 | −0.0001 [−0.0021, +0.0019] |
+| P150/sigma_80 | −0.0006 [−0.0017, +0.0006] |
+| P150/sigma_125 | −0.0005 [−0.0018, +0.0008] |
+| P150/ring_80_5_10 | 1.0001 [0.9994, 1.0007] |
+| P150/ring_80_10_20 | 0.9982 [0.9955, 1.0008] |
+| P150/ring_80_20_40 | 1.0008 [0.9966, 1.0051] |
+| P150/ring_80_40_80 | 0.9939 [0.9817, 1.0062] |
+| P150/ring_80_80_200 | 0.9998 [0.9530, 1.0490] |
+| P150/ring_125_5_10 | 0.9998 [0.9992, 1.0004] |
+| P150/ring_125_10_20 | 1.0006 [0.9989, 1.0022] |
+| P150/ring_125_20_40 | 1.0013 [0.9984, 1.0042] |
+| P150/ring_125_40_80 | 0.9997 [0.9936, 1.0059] |
+| P150/ring_125_80_200 | 1.0287 [0.9376, 1.1287] |
+| P200/R80 | −0.0019 [−0.0056, +0.0019] |
+| P200/sigma_100 | −0.0005 [−0.0019, +0.0009] |
+| P200/sigma_200 | +0.0013 [−0.0006, +0.0033] |
+| P200/ring_100_5_10 | 1.0000 [0.9993, 1.0007] |
+| P200/ring_100_10_20 | 0.9979 [0.9950, 1.0009] |
+| P200/ring_100_20_40 | 1.0000 [0.9975, 1.0024] |
+| P200/ring_100_40_80 | 1.0007 [0.9944, 1.0071] |
+| P200/ring_100_80_200 | 0.9947 [0.9727, 1.0171] |
+| P200/ring_200_5_10 | 0.9999 [0.9995, 1.0003] |
+| P200/ring_200_10_20 | 1.0011 [1.0001, 1.0021] |
+| P200/ring_200_20_40 | 1.0005 [0.9981, 1.0030] |
+| P200/ring_200_40_80 | 0.9980 [0.9937, 1.0023] |
+| P200/ring_200_80_200 | 1.0006 [0.9831, 1.0183] |
+| F/lateral_127_5 | +0.033 [−0.004, +0.071] |
+| F/lateral_127_10 | +0.014 [−0.022, +0.050] |
+| F/lateral_127_20 | +0.001 [−0.026, +0.028] |
+| F/lateral_127_30 | +0.003 [−0.025, +0.032] |
+| F/lateral_201_5 | +0.012 [−0.059, +0.084] |
+| F/lateral_201_10 | −0.009 [−0.059, +0.041] |
+| F/lateral_201_20 | +0.002 [−0.046, +0.051] |
+| F/lateral_201_30 | +0.001 [−0.026, +0.028] |
+| F/cax_127 | 0.9995 [0.9973, 1.0018] |
+| F/cax_201 | 1.0000 [0.9974, 1.0025] |
+| F/cax_i23 | 0.9992 [0.9974, 1.0010] |
+| F/r80_mm | 0.000 [−0.017, +0.018] |
+| F/r20_mm | −0.001 [−0.015, +0.013] |
+<!-- END GENERATED: table-a1-compiler -->

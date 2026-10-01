@@ -1,8 +1,10 @@
 # Same-host comparison programme (PLAN, for sjswerdloff's approval)
 
-**Status, 2026-10-01 ~23:30 NZDT: parts A and B are RUNNING at `2f9dab40` (full mode), authorised by sjswerdloff in
+**Status, 2026-10-02: parts A and B are COMPLETE at `2f9dab40` (full mode, 160 of 160 runs), collected and analysed;
+the results are in the report (§4, §5.0–§5.2). They were authorised by sjswerdloff in
 session ("yes, go ahead with all of those runs", including the jobs over 2 h; B-picc explicitly, quoted verbatim on
-#48 comment 27891). Their collection and analysis code was approved on #48 (review 6942) before any endpoint was read.
+#48 comment 27891). Their collection and analysis code was approved on #48 (review 6942) before any endpoint was read;
+the two later changes are in the chronology below.
 The text below is the plan as proposed; parts C and D are not yet authorised.** Written to execute
 unattended while sjswerdloff travels (week of 5 October 2026), if he approves it. Once a part is approved, its run
 list, seeds, histories, analysis script and margins are committed **before** its first run, and nothing is changed
@@ -109,6 +111,16 @@ as not established instead of refusing the collection, so any contrast touching 
 schema the 2f9dab40 writer actually produced, and confirmatory claims require a validated collection manifest). Later
 amendments are added here with their commits.
 
+After the runs finished: `bad1419b` (the collector reads a log that starts with a UTF-16 byte-order mark; Windows
+PowerShell wrote part A's logs that way, and the first collection refused all of part A and wrote nothing). As far as
+connor-227743e6 knows, no full-run endpoint had been read by then. The collection and the analysis that the report
+uses ran at `bad1419b`.
+
+**After the results were read:** #53 (second review, #48 comment 28187; #51, #52): a contrast whose two arms carry
+one binary, and a contrast with a collected run that is not usable, become PARTIAL; the output states that case-P
+endpoint values are taken as written. On this collection the analysis document is unchanged apart from that added
+statement. Its merge commit is to be recorded here.
+
 ## Sizing (from planning variance, separate from timing)
 
 Planning data exist only at 200 MeV (§5 of the report: 4 runs per arm, 1e7 histories). With B runs per arm the SE
@@ -169,6 +181,25 @@ Seeds are **non-duplicated assignments**, not disjoint random streams. Portable 
 3. ~~Merge #31~~: merged.
 4. ~~Hosts~~: settled. A on the Lenovo, B on the HP.
 5. ~~Go-ahead for the four jobs estimated at over 2 h~~: given ("yes, go ahead with all of those runs").
+
+## Result, and what a follow-up would need (added 2026-10-02, after the results)
+
+In each confirmatory contrast 46 of 52 endpoints are equivalent, 4 inconclusive, 2 not established, 0 not equivalent;
+the joint claim is not established in any (report §5.0). Nothing below changes that result or adds runs to it.
+
+- **Far halo at 100 and 150 MeV.** These rows had no planning variance (Sizing, above). From the observed standard
+  errors, and for 80% power at a true difference of zero, the 40–80 mm annulus at 100 MeV needs about 3 to 14 times
+  the histories and the 80–200 mm annulus at 150 MeV about 2 to 5 times, in both arms. The 80–200 mm annulus at
+  100 MeV scored exactly zero in all 80 runs; a log-ratio endpoint is undefined there, so a follow-up needs either
+  far more histories or a different, pre-stated estimator for that annulus.
+- **B-pgcc at 100 MeV, 40 mm, 40–80 mm** (1.035 against B-up, 95% [1.004, 1.067]) is to be named in advance in any
+  follow-up.
+- **Heterogeneity** is untested: a lung-density slab, a sinus-like air cavity in bone, and the same cavity filled in
+  steps are candidate cases.
+- **Before the next collection:** the collector should recompute the endpoints from the hash-verified Dose files
+  itself (#52).
+
+Any of these is a new acquisition with its own frozen plan, and needs sjswerdloff's approval.
 
 ## Out of scope
 
