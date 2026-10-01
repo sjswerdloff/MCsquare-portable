@@ -4,7 +4,7 @@
 Usage:
     uv run --no-project --with numpy --with scipy python validation/apples_analyse.py <root> [--json PATH] [--parts A,B]
 
-Input layout, <root>/<arm>/<case>/s<seed>/ with arms A-up, A-port (part A) and B-up, B-pgcc, B-picc (part B), cases P
+Input layout, <root>/<arm>/<case>/s<seed>/ (built from the workflows' native trees by apples_collect.py) with arms A-up, A-port (part A) and B-up, B-pgcc, B-picc (part B), cases P
 and F. Each seed directory holds run.json plus endpoints.json (case P: one line "ENDPOINTS " + JSON, as
 pencil_endpoints.py prints it) or record.json (case F: as written by platform_study_record.py; the 13 endpoints are
 its "metrics" object).
@@ -24,10 +24,35 @@ Claims, kept separate: (1) the JOINT claim of a confirmatory contrast holds only
 unadjusted alpha (intersection-union); (2) INDIVIDUAL claims use Holm on p_TOST over the whole family (39 P + 13 F = 52),
 with not_established endpoints kept in the family as p = 1 (never rejected). Holm is never applied to the joint claim.
 
-Identity. Arm, case, mode and commit come from run.json and the directory layout <root>/<arm>/<case>/s<seed> only; the
-"study" field of record.json is never read, and the report header says so. Design completeness: the plan has 8 runs per
-arm, case and energy (case F: 8 at 200 MeV). A contrast whose arm or reference has a cell with a different number of
-runs present is reported PARTIAL with the counts, and its joint claim cannot be TRUE.
+Frozen population and identity (amended 2026-10-01 after review 6933, before any full-run endpoint was read by the
+analysis). The expected runs are the `full` seeds of the workflow files at the ACQUISITION COMMIT (default
+2f9dab404cea02f5072352f7ae5773dca27eb2a1, read with `git show <commit>:<path>` and parsed by apples_seeds_check.py), per
+arm, case and energy. A seed directory is accepted only if it is exactly `s<seed>` for an expected seed of that arm and
+case. Unexpected seeds, directories whose numeric identity repeats (`s960050` and `s0960050`; BOTH are rejected), and
+non-canonical names are rejected and listed, never read; expected seeds with no accepted directory are listed as
+missing. A run whose run.json/record does not carry the full-run provenance below is kept in the population as
+unusable and recorded as a provenance failure. ANY of these makes the contrast PARTIAL, and a PARTIAL contrast emits NO
+confirmatory claim: no joint claim, no Holm decision and no TOST classification, only labelled descriptive estimates.
+
+Provenance required of every run (else the run is unusable and the contrast PARTIAL): run.json has arm, case and seed
+equal to the directory (a contradiction is fatal), mode "full", commit equal to the acquisition commit, requested 1e7
+(P) or 3e7 (F), simulated >= requested, threads 4 (A arms) or 3 (B arms), energy_mev equal to the energy of that seed in
+the workflow (F: 200), transport_status "ok" and a sha256 binary_sha256 that is the same across the whole arm. The
+endpoint record is reconciled with run.json: case P needs layout "mcsquare", the label
+`<arm>_P_E<energy>_N1e7_seed<seed>` and slab_depths_mm exactly the energy's frozen depths (100: 40,60; 150: 80,125;
+200: 100,200); case F needs platform = arm, seed, commit, sha256.binary = run.json binary_sha256, endpoint_status "ok",
+metrics_sha256 equal to the digest of metrics, cfg_sha256 equal to sha256.config, and a study id that is bound by an
+explicit LegacyBinding (only "pe1", only at the acquisition commit, whose records were written before STUDY_ID was set).
+Domain bounds on case P: sigma_d in [1, 20] mm (the fit contract in pencil_endpoints.py) and ring fractions in (0, 1]
+(0 is inside the energy-fraction domain but has no logarithm); otherwise that endpoint is not_established.
+
+Every file read (run.json and the endpoint record of each accepted seed directory, and collection_manifest.json when
+present) enters the DATASET FINGERPRINT, the sha256 of the sorted "<sha256>  <path relative to the root>" lines, written
+to the report and the JSON. collection_manifest.json, written by apples_collect.py, is verified when present (every
+file it lists must hash as recorded; every file read must be listed); without it the report says the copy is unattested.
+
+Design completeness: the plan has 8 runs per arm, case and energy (case F: 8 at 200 MeV); the frozen population
+carries exactly that.
 
 Exit status: 0 when the analysis ran, whatever the outcomes; 2 when the inputs are unusable (reason on stderr).
 """
@@ -35,20 +60,25 @@ Exit status: 0 when the analysis ran, whatever the outcomes; 2 when the inputs a
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
 import statistics as st
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from scipy.stats import t as student_t
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import apples_seeds_check as sc
+from pencil_endpoints import SIGMA_VALID_MM
 from platform_study_analyse import CAX as F_CAX
 from platform_study_analyse import ENDPOINTS as F_ENDPOINTS
 from platform_study_analyse import margin as f_margin
-from scipy.stats import t as student_t
 
 ALPHA = 0.05  # one-sided TOST alpha, and the Holm alpha
 FAMILY_SIZE = 52  # 39 (P) + 13 (F)
@@ -64,9 +94,50 @@ RING_RATIO = (0.98, 1.02)
 WIDE_RING_RATIO = (0.95, 1.05)  # ring 80-200 only
 TRANSPORT_OK = "ok"
 RUNS_PER_CELL = 8  # per arm x case x energy (case F: one cell, at 200 MeV)
+
+# Domain bounds on case-P endpoint values. sigma: the producer's fit contract (pencil_endpoints.SIGMA_VALID_MM, a fit
+# outside it is recorded as failed). Ring fractions are energy fractions: 0 < f <= 1 (0 is a valid fraction but has no
+# logarithm, so it is unusable on the analysis scale).
+SIGMA_BOUNDS_MM = SIGMA_VALID_MM
+RING_MAX = 1.0
+
+# The acquisition: the full runs were requested at this commit; the frozen run lists are the workflow files there.
+ACQUISITION_COMMIT = "2f9dab404cea02f5072352f7ae5773dca27eb2a1"
+REPO = Path(__file__).resolve().parents[1]
+WORKFLOW_PATHS = (".gitea/workflows/apples-a-windows.yml", ".gitea/workflows/apples-b-linux.yml")
+FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+ARM_THREADS = {"A-up": 4, "A-port": 4, "B-up": 3, "B-pgcc": 3, "B-picc": 3}
+REQUESTED = {"P": 10_000_000, "F": 30_000_000}
+P_LABEL = "{arm}_P_E{energy}_N1e7_seed{seed}"  # the --label the workflows pass to pencil_endpoints.py
+MANIFEST_NAME = "collection_manifest.json"
+PROVENANCE_DIR = ".provenance"  # apples_collect.py puts run_root.txt and the *_sha256.txt files here; skipped (hidden)
+
 IDENTITY_SOURCE = (
-    "Run identity (arm, case, mode, commit) is taken from run.json and the directory layout "
-    "<root>/<arm>/<case>/s<seed>; the `study` field of record.json is not read."
+    "Run identity comes from the frozen workflow run lists at the acquisition commit and is validated against "
+    "run.json and the endpoint record (arm, case, seed, mode, commit, requested/simulated, threads, energy, binary "
+    "hash, slab depths, record hashes). The `study` field of record.json is accepted only through a named legacy "
+    "binding (pe1 at the acquisition commit); a record that is not that is an unusable run."
+)
+
+
+@dataclass(frozen=True)
+class LegacyBinding:
+    """An explicit, named exception: a record `study` value accepted only for one commit (no other provenance relaxed)."""
+
+    name: str
+    study: str
+    commit: str
+    reason: str
+
+
+LEGACY_F_BINDINGS = (
+    LegacyBinding(
+        "pe1-at-acquisition-2f9dab40",
+        "pe1",
+        ACQUISITION_COMMIT,
+        "case-F records written by platform_study_record.py before STUDY_ID was set carry its default, pe1",
+    ),
 )
 
 # (name, arm, reference, confirmatory?)
@@ -108,8 +179,12 @@ class Run:
     energy: int | None
     usable: bool
     problems: list[str] = field(default_factory=list)
+    provenance: list[str] = field(default_factory=list)  # the subset of problems that are identity/provenance failures
     mode: str | None = None  # run.json "mode", None if absent
     commit: str | None = None  # run.json "commit", None if absent
+    binary: str | None = None  # run.json "binary_sha256" when it is a well-formed sha256
+    host: str | None = None
+    legacy: str | None = None  # name of the LegacyBinding that admitted this run's record, if any
     raw: dict[str, float | None] = field(default_factory=dict)  # eid -> value, None = invalid for that endpoint
 
 
@@ -129,6 +204,14 @@ class Result:
     p_tost: float | None = None
     holm_p: float | None = None
     holm_decision: str = ""
+
+
+@dataclass
+class Frozen:
+    """The frozen population: (arm, case) -> {seed: energy}, from the full run lists at `commit`."""
+
+    commit: str
+    seeds: dict[tuple[str, str], dict[int, int]]
 
 
 # ----------------------------------------------------------------------------------------------- specification
@@ -176,21 +259,93 @@ def _num(v: object) -> float | None:
     return float(v) if math.isfinite(v) else None
 
 
-def _read_json(path: Path) -> object:
-    return json.loads(path.read_text())
+def _int(v: object) -> int | None:
+    """An integer (not a bool), else None. A float is not an integer here: 1e7 must be written 10000000."""
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+class Ledger:
+    """Every input file the analysis reads, with the sha256 of the bytes it read (the dataset fingerprint)."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.files: dict[str, str] = {}
+
+    def read_text(self, path: Path) -> str:
+        data = path.read_bytes()
+        self.files[path.relative_to(self.root).as_posix()] = hashlib.sha256(data).hexdigest()
+        return data.decode("utf-8")
+
+    def fingerprint(self) -> dict[str, object]:
+        lines = [f"{h}  {p}\n" for p, h in sorted(self.files.items())]
+        return {
+            "sha256": hashlib.sha256("".join(lines).encode()).hexdigest(),
+            "n_files": len(lines),
+            "definition": "sha256 of the sorted '<sha256>  <path relative to root>' lines of every file read",
+        }
+
+
+def _read_json(path: Path, ledger: Ledger) -> object:
+    return json.loads(ledger.read_text(path))
+
+
+def expected_population(
+    commit: str = ACQUISITION_COMMIT, repo: Path = REPO, sources: dict[str, str] | None = None
+) -> Frozen:
+    """The frozen full run lists. `sources` (workflow name -> text) replaces `git show <commit>:<path>` (tests only).
+
+    Refuses an abbreviated or malformed commit, an unreadable workflow, any apples_seeds_check violation, and a list
+    that is not 5 arms x 2 cases with the planned counts per energy.
+    """
+    if not FULL_SHA.match(commit):
+        msg = f"acquisition commit must be a full 40-hex sha, got {commit!r}"
+        raise InputError(msg)
+    if sources is None:
+        sources = {}
+        for path in WORKFLOW_PATHS:
+            proc = subprocess.run(
+                ["git", "-C", str(repo), "show", f"{commit}:{path}"], capture_output=True, text=True, check=False
+            )
+            if proc.returncode != 0:
+                msg = f"cannot read {path} at {commit}: {proc.stderr.strip()}"
+                raise InputError(msg)
+            sources[Path(path).name] = proc.stdout
+    errors, runs, *_ = sc._check(sources, sc.ALL_ARMS)
+    if errors:
+        msg = f"the workflow run lists at {commit} fail apples_seeds_check: " + "; ".join(errors[:5])
+        raise InputError(msg)
+    seeds: dict[tuple[str, str], dict[int, int]] = {}
+    for arm, case, mode, energy, seed, _where in runs:
+        if mode == "full":
+            seeds.setdefault((arm, case), {})[seed] = energy
+    for arm in sc.ALL_ARMS:
+        for case in CASES:
+            per_energy = sorted(
+                {e: sum(1 for v in seeds.get((arm, case), {}).values() if v == e) for e in set(seeds.get((arm, case), {}).values())}.items()
+            )
+            want = [(200, RUNS_PER_CELL)] if case == "F" else [(e, RUNS_PER_CELL) for e in sorted(SLAB_DEPTHS)]
+            if per_energy != want:
+                msg = f"{arm} {case}: frozen full list is {per_energy}, expected {want}"
+                raise InputError(msg)
+    return Frozen(commit, seeds)
 
 
 def _p_values(rec: dict[str, object], energy: int) -> dict[str, float | None]:
-    """Case-P endpoint values of one run for one energy; None where that endpoint is invalid for this run."""
+    """Case-P endpoint values of one run for one energy; None where that endpoint is invalid for this run.
+
+    Domain: sigma in SIGMA_BOUNDS_MM inclusive; ring fractions in (0, 1].
+    """
     out: dict[str, float | None] = {}
     r80 = _num(rec.get("R80"))
     # fail closed: the multiple-crossing flag must be present and exactly False
     out[f"P{energy}/R80"] = r80 if rec.get("R80_multiple_crossings") is False else None
     for d in SLAB_DEPTHS[energy]:
-        out[f"P{energy}/sigma_{d}"] = _num(rec.get(f"sigma_{d}"))
+        sigma = _num(rec.get(f"sigma_{d}"))
+        in_bounds = sigma is not None and SIGMA_BOUNDS_MM[0] <= sigma <= SIGMA_BOUNDS_MM[1]
+        out[f"P{energy}/sigma_{d}"] = sigma if in_bounds else None
         for lo, hi in RINGS:
             v = _num(rec.get(f"ring_{d}_{lo}_{hi}"))
-            out[f"P{energy}/ring_{d}_{lo}_{hi}"] = v if v is not None and v > 0 else None
+            out[f"P{energy}/ring_{d}_{lo}_{hi}"] = v if v is not None and 0 < v <= RING_MAX else None
     return out
 
 
@@ -209,93 +364,173 @@ def _f_values(metrics: dict[str, object]) -> dict[str, float | None]:
     return out
 
 
-def _energy_of(run_json: dict[str, object] | None, rec: dict[str, object] | None) -> int | None:
-    """Energy from run.json (energy_mev); failing that, the one energy whose slab depths the endpoint record lists."""
-    if run_json is not None:
-        e = run_json.get("energy_mev")
-        if isinstance(e, int) and not isinstance(e, bool):
-            return e
-    if rec is not None:
-        depths = rec.get("slab_depths_mm")
-        if isinstance(depths, list):
-            fits = [e for e, pair in SLAB_DEPTHS.items() if all(d in depths for d in pair)]
-            if len(fits) == 1:
-                return fits[0]
-    return None
-
-
-def _endpoint_record(path: Path, case: str) -> dict[str, object]:
-    """The endpoint record of a run: case P's ENDPOINTS line, or case F's record["metrics"]."""
+def _endpoint_document(path: Path, case: str, ledger: Ledger) -> dict[str, object]:
+    """The whole endpoint document of a run: case P's ENDPOINTS line, or case F's record.json (top level kept)."""
+    text = ledger.read_text(path)
     if case == "P":
-        lines = [ln for ln in path.read_text().splitlines() if ln.startswith("ENDPOINTS ")]
+        lines = [ln for ln in text.splitlines() if ln.startswith("ENDPOINTS ")]
         if len(lines) != 1:
             msg = f"{len(lines)} ENDPOINTS lines, expected exactly 1"
             raise ValueError(msg)
-        rec = json.loads(lines[0][len("ENDPOINTS ") :])
+        doc = json.loads(lines[0][len("ENDPOINTS ") :])
     else:
-        rec = _read_json(path)
-        if isinstance(rec, dict):
-            rec = rec.get("metrics")
-    if not isinstance(rec, dict):
+        doc = json.loads(text)
+    if not isinstance(doc, dict):
         msg = "endpoint record is not a JSON object"
         raise TypeError(msg)
-    return rec
+    return doc
 
 
-def load_run(arm: str, case: str, run_dir: Path, seed: int) -> Run:
-    """Load one seed directory. A damaged run stays in the population as unusable; only a mislabelled one is fatal."""
+def metrics_digest(metrics: object) -> str:
+    """The digest platform_study_record.metrics_digest writes into record.json."""
+    return hashlib.sha256(json.dumps(metrics, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _check_run_json(
+    run_json: dict[str, object], arm: str, case: str, seed: int, energy: int, commit: str
+) -> list[str]:
+    """Provenance problems of run.json against the frozen expectation for this seed (full-run metadata)."""
+    bad: list[str] = []
+
+    def need(key: str, want: object) -> None:
+        got = run_json.get(key)
+        if got is None:
+            bad.append(f"run.json has no {key}")
+        elif got != want or type(got) is not type(want):
+            bad.append(f"run.json {key} {got!r}, expected {want!r}")
+
+    need("mode", "full")
+    need("commit", commit)
+    need("energy_mev", energy)
+    need("threads", ARM_THREADS[arm])
+    need("requested", REQUESTED[case])
+    requested, simulated = _int(run_json.get("requested")), _int(run_json.get("simulated"))
+    if simulated is None:
+        bad.append(f"run.json simulated {run_json.get('simulated')!r} is not an integer")
+    elif requested is not None and simulated < requested:
+        bad.append(f"run.json simulated {simulated} < requested {requested}")
+    binary = run_json.get("binary_sha256")
+    if not isinstance(binary, str) or not SHA256_HEX.match(binary):
+        bad.append(f"run.json binary_sha256 {binary!r} is not a lowercase sha256")
+    for key in ("arm", "case", "seed"):
+        if run_json.get(key) is None:
+            bad.append(f"run.json has no {key}")
+    return bad
+
+
+def _reconcile_p(doc: dict[str, object], arm: str, seed: int, energy: int) -> list[str]:
+    bad: list[str] = []
+    if doc.get("layout") != "mcsquare":
+        bad.append(f"endpoints layout {doc.get('layout')!r}, expected 'mcsquare'")
+    want_label = P_LABEL.format(arm=arm, energy=energy, seed=seed)
+    if doc.get("label") != want_label:
+        bad.append(f"endpoints label {doc.get('label')!r}, expected {want_label!r}")
+    if doc.get("slab_depths_mm") != list(SLAB_DEPTHS[energy]):
+        bad.append(f"endpoints slab_depths_mm {doc.get('slab_depths_mm')!r}, expected {list(SLAB_DEPTHS[energy])}")
+    return bad
+
+
+def _reconcile_f(
+    doc: dict[str, object], run_json: dict[str, object] | None, arm: str, seed: int, commit: str
+) -> tuple[list[str], str | None]:
+    """Case-F record.json top level against run.json and the frozen expectation; returns (problems, legacy binding)."""
+    bad: list[str] = []
+    study = doc.get("study")
+    binding = next((b for b in LEGACY_F_BINDINGS if b.study == study and b.commit == commit), None)
+    if binding is None:
+        bad.append(f"record study {study!r} is not bound for commit {commit[:12]} (no LegacyBinding)")
+    for key, want in (("platform", arm), ("seed", seed), ("commit", commit)):
+        if doc.get(key) != want or isinstance(doc.get(key), bool):
+            bad.append(f"record {key} {doc.get(key)!r}, expected {want!r}")
+    if doc.get("endpoint_status") != "ok":
+        bad.append(f"record endpoint_status {doc.get('endpoint_status')!r}, expected 'ok'")
+    if not isinstance(doc.get("metrics"), dict):
+        bad.append("record metrics is not an object")
+    elif doc.get("metrics_sha256") != metrics_digest(doc["metrics"]):
+        bad.append("record metrics_sha256 does not match its metrics")
+    hashes = doc.get("sha256")
+    hashes = hashes if isinstance(hashes, dict) else {}
+    if doc.get("cfg_sha256") is None or doc.get("cfg_sha256") != hashes.get("config"):
+        bad.append("record cfg_sha256 does not equal sha256.config")
+    binary = hashes.get("binary")
+    if not isinstance(binary, str) or not SHA256_HEX.match(binary):
+        bad.append(f"record sha256.binary {binary!r} is not a lowercase sha256")
+    elif run_json is not None and run_json.get("binary_sha256") != binary:
+        bad.append("record sha256.binary differs from run.json binary_sha256")
+    return bad, binding.name if binding is not None else None
+
+
+def load_run(
+    arm: str, case: str, run_dir: Path, seed: int, energy: int, commit: str, ledger: Ledger
+) -> Run:
+    """Load one accepted seed directory. A damaged or unprovenanced run stays in the population as unusable;
+    only a run.json that contradicts its own directory is fatal."""
     label = f"{arm}/{case}/s{seed}"
     problems: list[str] = []
+    provenance: list[str] = []
     run_json: dict[str, object] | None = None
     try:
-        parsed = _read_json(run_dir / "run.json")
+        parsed = _read_json(run_dir / "run.json", ledger)
         if not isinstance(parsed, dict):
             msg = "run.json is not a JSON object"
             raise TypeError(msg)
         run_json = parsed
     except (OSError, ValueError, TypeError) as e:
-        problems.append(f"run.json unreadable ({type(e).__name__})")
+        provenance.append(f"run.json unreadable ({type(e).__name__})")
     if run_json is not None:
-        for key, want in (("arm", arm), ("case", case)):
+        for key, want in (("arm", arm), ("case", case), ("seed", seed)):
             if run_json.get(key) is not None and run_json.get(key) != want:
                 msg = f"{label}: run.json says {key} {run_json.get(key)!r}, directory says {want!r}"
                 raise InputError(msg)
-        if run_json.get("seed") is not None and run_json.get("seed") != seed:
-            msg = f"{label}: run.json says seed {run_json.get('seed')!r}, directory says {seed}"
-            raise InputError(msg)
+        provenance += _check_run_json(run_json, arm, case, seed, energy, commit)
         status = run_json.get("transport_status")
         if status != TRANSPORT_OK:
             problems.append(f"transport_status {status!r}")
     rec: dict[str, object] | None = None
+    legacy: str | None = None
     try:
-        rec = _endpoint_record(run_dir / ("endpoints.json" if case == "P" else "record.json"), case)
+        doc = _endpoint_document(run_dir / ("endpoints.json" if case == "P" else "record.json"), case, ledger)
+        if case == "P":
+            provenance += _reconcile_p(doc, arm, seed, energy)
+            rec = doc
+        else:
+            bad, legacy = _reconcile_f(doc, run_json, arm, seed, commit)
+            provenance += bad
+            metrics = doc.get("metrics")
+            rec = metrics if isinstance(metrics, dict) else None
     except (OSError, ValueError, TypeError) as e:
         problems.append(f"endpoint record unusable ({type(e).__name__}: {e})")
-    energy: int | None = None
     raw: dict[str, float | None] = {}
-    if case == "P":
-        energy = _energy_of(run_json, rec)
-        if energy not in SLAB_DEPTHS:
-            msg = f"{label}: cannot place the run at 100, 150 or 200 MeV (energy {energy!r})"
-            raise InputError(msg)
-        if rec is not None:
-            raw = _p_values(rec, energy)
-    elif rec is not None:
-        raw = _f_values(rec)
+    if rec is not None:
+        raw = _p_values(rec, energy) if case == "P" else _f_values(rec)
     mode = run_json.get("mode") if run_json is not None else None
-    commit = run_json.get("commit") if run_json is not None else None
+    run_commit = run_json.get("commit") if run_json is not None else None
+    binary = run_json.get("binary_sha256") if run_json is not None else None
+    host = run_json.get("host") if run_json is not None else None
+    problems = [*provenance, *problems]
     return Run(
-        label, seed, energy, usable=not problems, problems=problems,
-        mode=mode if isinstance(mode, str) else None, commit=commit if isinstance(commit, str) else None, raw=raw,
+        label, seed, energy, usable=not problems, problems=problems, provenance=provenance,
+        mode=mode if isinstance(mode, str) else None, commit=run_commit if isinstance(run_commit, str) else None,
+        binary=binary if isinstance(binary, str) and SHA256_HEX.match(binary) else None,
+        host=host if isinstance(host, str) else None, legacy=legacy, raw=raw,
     )
 
 
-def load_arm_case(root: Path, arm: str, case: str) -> list[Run]:
+def load_arm_case(
+    root: Path, arm: str, case: str, frozen: Frozen, ledger: Ledger
+) -> tuple[list[Run], list[str]]:
+    """Accepted runs of one arm and case, and the population issues (missing, rejected, provenance failures).
+
+    Only `s<seed>` directories whose seed is expected for this arm and case, written exactly as the workflow writes it
+    and not repeated by numeric identity, are opened. Everything else that looks like a seed directory is rejected
+    and listed; anything that does not look like one is fatal.
+    """
     case_dir = root / arm / case
     if not case_dir.is_dir():
         msg = f"missing {case_dir}"
         raise InputError(msg)
-    runs: list[Run] = []
+    expected = frozen.seeds[(arm, case)]
+    by_identity: dict[int, list[str]] = {}
     for entry in sorted(case_dir.iterdir()):
         if entry.name.startswith("."):
             continue
@@ -303,26 +538,96 @@ def load_arm_case(root: Path, arm: str, case: str) -> list[Run]:
         if m is None or not entry.is_dir():
             msg = f"unexpected entry {entry} (expected s<seed> directories)"
             raise InputError(msg)
-        runs.append(load_run(arm, case, entry, int(m.group(1))))
-    if not runs:
+        by_identity.setdefault(int(m.group(1)), []).append(entry.name)
+    if not by_identity:
         msg = f"no s<seed> directories under {case_dir}"
         raise InputError(msg)
-    return runs
+    runs: list[Run] = []
+    issues: list[str] = []
+    rejected: list[str] = []
+    for ident, names in sorted(by_identity.items()):
+        if len(names) > 1:
+            rejected.append(f"{', '.join(names)} (numeric identity {ident} repeated)")
+        elif ident not in expected:
+            rejected.append(f"{names[0]} (seed not in the frozen list)")
+        elif names[0] != f"s{ident}":
+            rejected.append(f"{names[0]} (not written as s{ident})")
+        else:
+            runs.append(load_run(arm, case, case_dir / names[0], ident, expected[ident], frozen.commit, ledger))
+    accepted = {r.seed for r in runs}
+    missing = sorted(set(expected) - accepted)
+    if missing:
+        issues.append(f"{arm} {case}: {len(missing)} expected seed(s) missing: {', '.join(map(str, missing))}")
+    if rejected:
+        issues.append(f"{arm} {case}: rejected, not read: " + "; ".join(rejected))
+    for r in runs:
+        if r.provenance:
+            issues.append(f"{r.label}: provenance failure: " + "; ".join(r.provenance))
+    return runs, issues
 
 
-def load_root(root: Path, parts: tuple[str, ...]) -> dict[tuple[str, str], list[Run]]:
+def check_arm_binary(data: dict[tuple[str, str], list[Run]], issues: dict[tuple[str, str], list[str]]) -> None:
+    """One binary per arm: every run of an arm (both cases) must carry the same run.json binary_sha256.
+
+    When they differ no run can be called the right one, so every run of that arm becomes a provenance failure.
+    """
+    for arm in {a for a, _c in data}:
+        hashes = {r.binary for c in CASES for r in data.get((arm, c), []) if r.binary is not None}
+        if len(hashes) > 1:
+            note = f"binary_sha256 differs within arm {arm} ({len(hashes)} distinct values)"
+            for c in CASES:
+                for r in data.get((arm, c), []):
+                    r.provenance.append(note)
+                    r.problems.append(note)
+                    r.usable = False
+                issues[(arm, c)].append(f"{arm} {c}: {note}")
+
+
+def load_root(
+    root: Path, parts: tuple[str, ...], frozen: Frozen, ledger: Ledger
+) -> tuple[dict[tuple[str, str], list[Run]], dict[tuple[str, str], list[str]]]:
     if not root.is_dir():
         msg = f"{root} is not a directory"
         raise InputError(msg)
     data: dict[tuple[str, str], list[Run]] = {}
+    issues: dict[tuple[str, str], list[str]] = {}
     for part in parts:
         for arm in PART_ARMS[part]:
             if not (root / arm).is_dir():
                 msg = f"missing arm directory {root / arm}"
                 raise InputError(msg)
             for case in CASES:
-                data[(arm, case)] = load_arm_case(root, arm, case)
-    return data
+                data[(arm, case)], issues[(arm, case)] = load_arm_case(root, arm, case, frozen, ledger)
+    check_arm_binary(data, issues)
+    return data, issues
+
+
+def verify_manifest(root: Path, ledger: Ledger) -> dict[str, object]:
+    """Check collection_manifest.json (written by apples_collect.py) against the tree, when present.
+
+    Every file it lists must exist and hash as recorded, and every file the analysis read must be listed. Returns the
+    report entry; raises InputError on a mismatch.
+    """
+    path = root / MANIFEST_NAME
+    if not path.is_file():
+        return {"present": False, "note": "no collection manifest: the provenance of this copy is not attested"}
+    try:
+        manifest = json.loads(ledger.read_text(path))
+        listed = {e["path"]: e["sha256"] for e in manifest["files"]}
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        msg = f"{path} is unusable: {type(e).__name__}: {e}"
+        raise InputError(msg) from e
+    for rel, want in sorted(listed.items()):
+        target = root / rel
+        got = hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else None
+        if got != want:
+            msg = f"collection manifest: {rel} is {'missing' if got is None else 'changed'} since collection"
+            raise InputError(msg)
+    unlisted = sorted(set(ledger.files) - set(listed) - {MANIFEST_NAME})
+    if unlisted:
+        msg = "collection manifest does not list file(s) the analysis read: " + ", ".join(unlisted[:3])
+        raise InputError(msg)
+    return {"present": True, "files_verified": len(listed), "acquisition_commit": manifest.get("acquisition_commit")}
 
 
 # ----------------------------------------------------------------------------------------------- statistics
@@ -414,12 +719,22 @@ def evaluate(spec: Spec, arm: list[Run], ref: list[Run], *, descriptive: bool) -
 
 
 def analyse_contrast(
-    data: dict[tuple[str, str], list[Run]], arm: str, ref: str, specs: list[Spec], *, confirmatory: bool
+    data: dict[tuple[str, str], list[Run]],
+    arm: str,
+    ref: str,
+    specs: list[Spec],
+    *,
+    confirmatory: bool,
+    issues: dict[tuple[str, str], list[str]],
 ) -> dict[str, object]:
-    partial = partial_cells(data, (arm, ref))
-    results = [evaluate(s, data[(arm, s.case)], data[(ref, s.case)], descriptive=not confirmatory) for s in specs]
+    """One contrast. A confirmatory contrast whose population is not exactly the frozen one is PARTIAL: it is analysed
+    descriptively (estimates and intervals, nothing classified) and emits no joint claim and no Holm decision."""
+    partial = partial_reasons(issues, (arm, ref))
+    withheld = confirmatory and bool(partial)
+    descriptive = not confirmatory or withheld
+    results = [evaluate(s, data[(arm, s.case)], data[(ref, s.case)], descriptive=descriptive) for s in specs]
     claims: dict[str, object] = {}
-    if confirmatory:
+    if confirmatory and not withheld:
         adjusted = holm_adjust([r.p_tost for r in results])
         for r, hp in zip(results, adjusted, strict=True):
             r.holm_p = hp
@@ -428,12 +743,12 @@ def analyse_contrast(
             else:
                 r.holm_decision = "equivalent" if hp is not None and hp < ALPHA else "not shown"
         claims = {
-            "joint_claim_equivalent_on_all_endpoints": not partial and all(r.outcome == "equivalent" for r in results),
+            "joint_claim_equivalent_on_all_endpoints": all(r.outcome == "equivalent" for r in results),
             "n_equivalent_unadjusted": sum(r.outcome == "equivalent" for r in results),
             "n_equivalent_holm": sum(r.holm_decision == "equivalent" for r in results),
             "n_not_established": sum(r.outcome == "not_established" for r in results),
         }
-    return {"results": results, "claims": claims, "partial_cells": partial}
+    return {"results": results, "claims": claims, "partial_reasons": partial, "claims_withheld": withheld}
 
 
 # ------------------------------------------------------------------------------------------ design completeness
@@ -449,15 +764,9 @@ def cell_counts(runs: list[Run], case: str) -> dict[str, int]:
     return counts
 
 
-def partial_cells(data: dict[tuple[str, str], list[Run]], arms: tuple[str, ...]) -> list[str]:
-    """Cells of the given arms (both cases) whose run count differs from RUNS_PER_CELL, as "arm case MeV: n of 8"."""
-    out = []
-    for arm in arms:
-        for case in CASES:
-            for energy, n in cell_counts(data[(arm, case)], case).items():
-                if n != RUNS_PER_CELL:
-                    out.append(f"{arm} {case} {energy} MeV: {n} of {RUNS_PER_CELL}")
-    return out
+def partial_reasons(issues: dict[tuple[str, str], list[str]], arms: tuple[str, ...]) -> list[str]:
+    """Why the population of these arms (both cases) is not exactly the frozen one; empty when it is."""
+    return [reason for arm in arms for case in CASES for reason in issues[(arm, case)]]
 
 
 # ----------------------------------------------------------------------------------------------- reporting
@@ -507,20 +816,27 @@ def result_json(r: Result) -> dict[str, object]:
 def markdown_table(name: str, confirmatory: bool, analysed: dict[str, object]) -> list[str]:
     results: list[Result] = analysed["results"]  # type: ignore[assignment]
     claims: dict[str, object] = analysed["claims"]  # type: ignore[assignment]
-    partial: list[str] = analysed["partial_cells"]  # type: ignore[assignment]
+    partial: list[str] = analysed["partial_reasons"]  # type: ignore[assignment]
+    withheld = bool(analysed["claims_withheld"])
     lines = [f"### {name}", ""]
     if partial:
-        lines += [f"**PARTIAL** ({RUNS_PER_CELL} runs per arm, case and energy planned): " + "; ".join(partial) + ".", ""]
-    if confirmatory:
+        lines += [
+            "**PARTIAL**: the population is not exactly the frozen one (" + str(RUNS_PER_CELL) + " runs per arm, case "
+            "and energy planned)." + (" Confirmatory claims WITHHELD: no joint claim, no Holm decision, no equivalence "
+                                      "classification; the estimates below are descriptive only." if withheld else ""),
+            "",
+            *[f"- {reason}" for reason in partial],
+            "",
+        ]
+    if confirmatory and not withheld:
         lines += [
             (f"Joint claim (equivalent on all {len(results)} endpoints, unadjusted alpha {ALPHA}): "
-            f"**{'TRUE' if claims['joint_claim_equivalent_on_all_endpoints'] else 'FALSE'}**"
-            f"{' (cannot be TRUE: PARTIAL)' if partial else ''}; "
+            f"**{'TRUE' if claims['joint_claim_equivalent_on_all_endpoints'] else 'FALSE'}**; "
             f"equivalent unadjusted {claims['n_equivalent_unadjusted']}, "
             f"equivalent after Holm {claims['n_equivalent_holm']}, not established {claims['n_not_established']}."),
             "",
         ]
-    else:
+    elif not confirmatory:
         lines += ["Descriptive only: estimates and intervals; no margin, no equivalence claim.", ""]
     lines += [
         "Ring estimates and intervals are ratios; their SE is the SE of the log ratio.",
@@ -548,13 +864,33 @@ def markdown_table(name: str, confirmatory: bool, analysed: dict[str, object]) -
     return [*lines, ""]
 
 
-def run_analysis(root: Path, parts: tuple[str, ...]) -> tuple[list[str], dict[str, object]]:
-    """Return (markdown lines, JSON-able document). Raises InputError when the inputs are unusable."""
-    data = load_root(root, parts)
+def run_analysis(
+    root: Path, parts: tuple[str, ...], *, commit: str = ACQUISITION_COMMIT, sources: dict[str, str] | None = None
+) -> tuple[list[str], dict[str, object]]:
+    """Return (markdown lines, JSON-able document). Raises InputError when the inputs are unusable.
+
+    `commit` is the acquisition commit whose workflow files freeze the population; `sources` (tests only) supplies
+    those workflow texts instead of `git show`.
+    """
+    frozen = expected_population(commit, sources=sources)
+    ledger = Ledger(root)
+    data, issues = load_root(root, parts, frozen, ledger)
+    manifest = verify_manifest(root, ledger)
+    fingerprint = ledger.fingerprint()
     specs = all_specs()
     md = ["# Same-host comparison: parts " + ", ".join(parts), "", IDENTITY_SOURCE, ""]
+    md.append(f"Acquisition commit (frozen run lists): {commit}")
+    md.append(f"Dataset fingerprint: sha256 {fingerprint['sha256']} over {fingerprint['n_files']} input file(s)")
+    md.append(
+        f"Collection manifest: verified, {manifest['files_verified']} file(s)" if manifest["present"]
+        else f"Collection manifest: {manifest['note']}"
+    )
+    md.append("")
     doc: dict[str, object] = {"parts": list(parts), "alpha": ALPHA, "family_size": FAMILY_SIZE,
-                           "identity_source": IDENTITY_SOURCE, "runs_per_cell": RUNS_PER_CELL, "contrasts": []}
+                           "identity_source": IDENTITY_SOURCE, "runs_per_cell": RUNS_PER_CELL,
+                           "acquisition_commit": commit, "dataset_fingerprint": fingerprint,
+                           "collection_manifest": manifest,
+                           "legacy_bindings": [b.name for b in LEGACY_F_BINDINGS], "contrasts": []}
     md.append("Runs per arm and case (unusable runs stay in the population):")
     md.append("")
     runs_doc: dict[str, object] = {}
@@ -563,17 +899,26 @@ def run_analysis(root: Path, parts: tuple[str, ...]) -> tuple[list[str], dict[st
         modes = sorted({r.mode or "unknown" for r in runs})
         commits = sorted({r.commit or "unknown" for r in runs})
         counts = cell_counts(runs, case)
-        runs_doc[f"{arm}/{case}"] = {"n": len(runs), "unusable": bad, "modes": modes, "commits": commits, "per_energy": counts}
+        legacy = sorted({r.legacy for r in runs if r.legacy})
+        runs_doc[f"{arm}/{case}"] = {
+            "n": len(runs), "expected": len(frozen.seeds[(arm, case)]), "unusable": bad, "modes": modes,
+            "commits": commits, "per_energy": counts, "issues": issues[(arm, case)],
+            "binary_sha256": sorted({r.binary for r in runs if r.binary}),
+            "hosts": sorted({r.host for r in runs if r.host}), "legacy_bindings_used": legacy,
+        }
         md.append(
-            f"- {arm}/{case}: {len(runs)} runs ({', '.join(f'{e} MeV: {n}' for e, n in counts.items())}), {len(bad)} unusable; "
-            f"mode {'/'.join(modes)}, commit {'/'.join(c[:12] for c in commits)}" + "".join(f"\n  - {b}" for b in bad)
+            f"- {arm}/{case}: {len(runs)} of {len(frozen.seeds[(arm, case)])} expected runs "
+            f"({', '.join(f'{e} MeV: {n}' for e, n in counts.items())}), {len(bad)} unusable; "
+            f"mode {'/'.join(modes)}, commit {'/'.join(c[:12] for c in commits)}"
+            + (f", legacy binding {'/'.join(legacy)}" if legacy else "")
+            + "".join(f"\n  - {b}" for b in bad)
         )
     md.append("")
     doc["runs"] = runs_doc
     contrasts_doc: list[object] = []
     for part in parts:
         for name, arm, ref, confirmatory in CONTRASTS_BY_PART[part]:
-            analysed = analyse_contrast(data, arm, ref, specs, confirmatory=confirmatory)
+            analysed = analyse_contrast(data, arm, ref, specs, confirmatory=confirmatory, issues=issues)
             md += markdown_table(name, confirmatory, analysed)
             results: list[Result] = analysed["results"]  # type: ignore[assignment]
             contrasts_doc.append(
@@ -583,8 +928,9 @@ def run_analysis(root: Path, parts: tuple[str, ...]) -> tuple[list[str], dict[st
                     "reference": ref,
                     "kind": "confirmatory" if confirmatory else "descriptive",
                     "claims": analysed["claims"],
-                    "partial": bool(analysed["partial_cells"]),
-                    "partial_cells": analysed["partial_cells"],
+                    "claims_withheld": analysed["claims_withheld"],
+                    "partial": bool(analysed["partial_reasons"]),
+                    "partial_reasons": analysed["partial_reasons"],
                     "endpoints": [result_json(r) for r in results],
                 }
             )
@@ -597,13 +943,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("root", type=Path)
     ap.add_argument("--json", type=Path, default=None, help="also write the full result here (allow_nan=False)")
     ap.add_argument("--parts", default="A,B", help="comma-separated parts to analyse (default A,B)")
+    ap.add_argument("--acquisition-commit", default=ACQUISITION_COMMIT, help="full sha whose workflow files freeze the runs")
     args = ap.parse_args(argv)
     try:
         parts = tuple(p.strip() for p in args.parts.split(","))
         if not parts or any(p not in PART_ARMS for p in parts) or len(set(parts)) != len(parts):
             msg = f"--parts must be distinct values from {sorted(PART_ARMS)}, got {args.parts!r}"
             raise InputError(msg)
-        md, doc = run_analysis(args.root, parts)
+        md, doc = run_analysis(args.root, parts, commit=args.acquisition_commit)
         if args.json is not None:
             args.json.write_text(json.dumps(doc, indent=1, sort_keys=True, allow_nan=False) + "\n")
     except (InputError, OSError) as e:

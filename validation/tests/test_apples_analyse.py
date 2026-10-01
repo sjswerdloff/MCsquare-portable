@@ -5,6 +5,7 @@ Run: uv run --no-project --with numpy --with scipy --with pytest pytest validati
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import random
@@ -18,85 +19,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import apples_analyse as aa
 
-Mutate = Callable[[str, str, int | None, int, dict], None]
-RunMutate = Callable[[str, str, int | None, int, dict], None]
-
-N_RUNS = 8
-R80_BASE = {100: 77.5, 150: 158.0, 200: 259.0}
-RING_FRAC = {(5, 10): 0.02, (10, 20): 0.05, (20, 40): 0.20, (40, 80): 0.40, (80, 200): 0.20}
-ALL_ARMS = ("A-up", "A-port", "B-up", "B-pgcc", "B-picc")
-
-
-def _noise(rng: random.Random, sd: float) -> float:
-    return rng.gauss(0.0, sd)
-
-
-def p_record(rng: random.Random, energy: int, scale: float) -> dict:
-    rec: dict = {
-        "label": "synthetic",
-        "R80": R80_BASE[energy] + _noise(rng, 0.005 * scale),
-        "R80_multiple_crossings": False,
-        "slab_depths_mm": [3, *aa.SLAB_DEPTHS[energy]],
-    }
-    for d in aa.SLAB_DEPTHS[energy]:
-        rec[f"sigma_{d}"] = 4.0 + _noise(rng, 0.001 * scale)
-        for (lo, hi), frac in RING_FRAC.items():
-            rec[f"ring_{d}_{lo}_{hi}"] = frac * math.exp(_noise(rng, 0.0005 * scale))
-    return rec
-
-
-def f_record(rng: random.Random, scale: float) -> dict:
-    m: dict = {}
-    for depth in (127, 201):
-        for off in (5, 10, 20, 30):
-            m[f"lateral_{depth}_{off}"] = 1.0 + _noise(rng, 0.01 * scale)
-    for k in ("cax_127", "cax_201", "cax_i23"):
-        m[k] = 1.0e-3 * math.exp(_noise(rng, 0.0005 * scale))
-    m["r80_mm"], m["r20_mm"] = 250.0 + _noise(rng, 0.01 * scale), 260.0 + _noise(rng, 0.01 * scale)
-    m["r80_crossings"] = m["r20_crossings"] = 1
-    return m
-
-
-def build(
-    root: Path,
-    arms: tuple[str, ...],
-    *,
-    n: int = N_RUNS,
-    scale: float = 1.0,
-    identical: bool = False,
-    mutate: Mutate | None = None,
-    run_mutate: RunMutate | None = None,
-) -> Path:
-    """Write a synthetic tree. `identical` gives every arm exactly the same values; mutate(arm, case, energy, i, rec)
-    edits the endpoint record (case F: the metrics dict) and run_mutate edits run.json, before they are written."""
-    for a_idx, arm in enumerate(arms):
-        for case in aa.CASES:
-            energies: list[int | None] = list(aa.SLAB_DEPTHS) if case == "P" else [None]
-            for e_idx, energy in enumerate(energies):
-                for i in range(n):
-                    seed = 960000 + 1000 * a_idx + 100 * e_idx + (50 if case == "F" else 0) + i
-                    rng = random.Random(7919 * (e_idx + 1) + 31 * i + (0 if identical else 104729 * (a_idx + 1)))
-                    rec = p_record(rng, energy, scale) if energy is not None else f_record(rng, scale)
-                    if mutate is not None:
-                        mutate(arm, case, energy, i, rec)
-                    run = {
-                        "seed": seed,
-                        "energy_mev": energy if energy is not None else 200,
-                        "case": case,
-                        "arm": arm,
-                        "mode": "full",
-                        "transport_status": "ok",
-                    }
-                    if run_mutate is not None:
-                        run_mutate(arm, case, energy, i, run)
-                    d = root / arm / case / f"s{seed}"
-                    d.mkdir(parents=True)
-                    (d / "run.json").write_text(json.dumps(run))
-                    if case == "P":
-                        (d / "endpoints.json").write_text("ENDPOINTS " + json.dumps(rec, sort_keys=True) + "\n")
-                    else:
-                        (d / "record.json").write_text(json.dumps({"study": "pe1", "metrics": rec}))
-    return root
+# isort: split
+from apples_fixtures import (  # noqa: F401 - the autouse fixture must be in this module's namespace
+    _REAL_EXPECTED,
+    ACQ,
+    ALL_ARMS,
+    N_RUNS,
+    SOURCES,
+    Mutate,
+    RunMutate,
+    _frozen_from_the_working_tree,
+    binary_of,
+    build,
+    cells,
+    f_document,
+    f_record,
+    p_record,
+    run_json_of,
+)
 
 
 def analyse(root: Path, parts: tuple[str, ...] = ("A",)) -> dict:
@@ -117,6 +57,17 @@ A_CONTRAST = "A-port vs A-up"
 @pytest.fixture
 def a_identical(tmp_path: Path) -> Path:
     return build(tmp_path, ("A-up", "A-port"), identical=True)
+
+
+def assert_no_confirmatory_claims(c: dict) -> None:
+    """A PARTIAL confirmatory contrast: no joint claim, no Holm decision, no TOST classification, labelled partial."""
+    assert c["partial"] is True and c["partial_reasons"]
+    assert c["claims_withheld"] is True
+    assert c["claims"] == {}
+    assert "joint_claim_equivalent_on_all_endpoints" not in c["claims"]
+    for e in c["endpoints"]:
+        assert e["outcome"] in ("descriptive", "not_established"), e
+        assert e["holm_decision"] == "" and e["holm_adjusted_p"] is None and e["p_tost"] is None
 
 
 # --------------------------------------------------------------------------- the family and its margins
@@ -447,30 +398,24 @@ def test_f_r20_ambiguous_not_established_as_in_31(tmp_path: Path) -> None:
     assert ep(doc, A_CONTRAST, "F/r80_mm")["outcome"] == "equivalent"
 
 
-def test_fewer_than_two_runs_in_an_arm_is_not_established(tmp_path: Path) -> None:
-    def keep_one(arm: str, case: str, energy: int | None, i: int, rec: dict) -> None:
-        pass
-
-    root = build(tmp_path, ("A-up", "A-port"), mutate=keep_one)
-    victims = sorted((root / "A-port" / "P").iterdir())[N_RUNS + 1 : 2 * N_RUNS]  # all but one 150 MeV run
-    for v in victims:
-        for f in v.iterdir():
-            f.unlink()
-        v.rmdir()
+def test_fewer_than_two_runs_in_an_arm_is_not_established_and_the_contrast_is_partial(tmp_path: Path) -> None:
+    root = build(tmp_path, ("A-up", "A-port"), n=1)
     doc = analyse(root)
+    c = contrast(doc, A_CONTRAST)
     assert ep(doc, A_CONTRAST, "P150/R80")["outcome"] == "not_established"
-    assert ep(doc, A_CONTRAST, "P100/R80")["outcome"] == "equivalent"
+    assert_no_confirmatory_claims(c)
 
 
-def test_unreadable_run_json_keeps_the_run_and_places_it_by_slab_depths(tmp_path: Path) -> None:
+def test_unreadable_run_json_keeps_the_run_unusable_and_the_contrast_partial(tmp_path: Path) -> None:
     root = build(tmp_path, ("A-up", "A-port"))
     run = min((root / "A-port" / "P").iterdir())  # a 100 MeV run
     (run / "run.json").write_text("{not json")
     doc = analyse(root)
     assert doc["runs"]["A-port/P"]["n"] == 3 * N_RUNS
     assert len(doc["runs"]["A-port/P"]["unusable"]) == 1
-    assert ep(doc, A_CONTRAST, "P100/R80")["outcome"] == "not_established"
-    assert ep(doc, A_CONTRAST, "P150/R80")["outcome"] == "equivalent"
+    assert ep(doc, A_CONTRAST, "P100/R80")["outcome"] == "not_established"  # the run is placed by the frozen list
+    assert ep(doc, A_CONTRAST, "P150/R80")["estimate"] is not None  # unaffected energies keep their estimates
+    assert_no_confirmatory_claims(contrast(doc, A_CONTRAST))
 
 
 def test_missing_endpoint_file_is_an_unusable_run_not_a_crash(tmp_path: Path) -> None:
@@ -611,13 +556,14 @@ def test_exit_2_when_run_json_disagrees_with_its_directory(tmp_path: Path) -> No
     assert aa.main([str(root), "--parts", "A"]) == 2
 
 
-def test_exit_2_when_a_run_cannot_be_placed_at_an_energy(tmp_path: Path) -> None:
+def test_run_json_energy_that_contradicts_its_seeds_frozen_energy_is_a_provenance_failure(tmp_path: Path) -> None:
     def odd(arm: str, case: str, energy: int | None, i: int, run: dict) -> None:
         if arm == "A-up" and case == "P" and energy == 100 and i == 0:
             run["energy_mev"] = 70
 
-    root = build(tmp_path, ("A-up", "A-port"), run_mutate=odd)
-    assert aa.main([str(root), "--parts", "A"]) == 2
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), run_mutate=odd))
+    assert ep(doc, A_CONTRAST, "P100/R80")["outcome"] == "not_established"
+    assert_no_confirmatory_claims(contrast(doc, A_CONTRAST))
 
 
 @pytest.mark.parametrize("parts", ["C", "A,A", ""])
@@ -636,29 +582,51 @@ def test_report_header_says_where_identity_comes_from(tmp_path: Path, capsys: py
     root = build(tmp_path, ("A-up", "A-port"), identical=True)
     assert aa.main([str(root), "--parts", "A"]) == 0
     out = capsys.readouterr().out
-    assert "taken from run.json and the directory layout" in out and "`study` field of record.json is not read" in out
+    assert "frozen workflow run lists at the acquisition commit" in out and "named legacy binding" in out
+    assert f"Acquisition commit (frozen run lists): {ACQ}" in out
 
 
-@pytest.mark.parametrize("study", ["pe1", "apples-a", "garbage", None])
-def test_record_study_field_has_no_effect(tmp_path: Path, study: object) -> None:
-    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+def _set_study(root: Path, study: object) -> None:
     for rec in root.glob("*/F/s*/record.json"):
         body = json.loads(rec.read_text())
         body.pop("study", None)
         if study is not None:
             body["study"] = study
         rec.write_text(json.dumps(body))
-    c = contrast(analyse(root), A_CONTRAST)
+
+
+def test_legacy_pe1_record_is_accepted_only_through_the_named_binding(tmp_path: Path) -> None:
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True))
+    c = contrast(doc, A_CONTRAST)
     assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is True and not c["partial"]
+    assert doc["runs"]["A-up/F"]["legacy_bindings_used"] == ["pe1-at-acquisition-2f9dab40"]
+    assert doc["runs"]["A-up/P"]["legacy_bindings_used"] == []
+    assert doc["legacy_bindings"] == ["pe1-at-acquisition-2f9dab40"]
 
 
-def test_mode_and_commit_come_from_run_json(tmp_path: Path) -> None:
-    def tag(arm: str, case: str, energy: int | None, i: int, run: dict) -> None:
-        run["commit"] = "abcdef0123456789"
+@pytest.mark.parametrize("study", ["apples-a", "PE1", "garbage", "", None])
+def test_any_other_study_id_is_a_provenance_failure(tmp_path: Path, study: object) -> None:
+    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    _set_study(root, study)
+    c = contrast(analyse(root), A_CONTRAST)
+    assert_no_confirmatory_claims(c)
+    assert any("no LegacyBinding" in r for r in c["partial_reasons"])
 
-    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, run_mutate=tag))
+
+def test_legacy_binding_does_not_cover_another_commit() -> None:
+    doc = {"study": "pe1", "platform": "A-up", "seed": 1, "commit": "f" * 40, "endpoint_status": "ok", "metrics": {},
+           "metrics_sha256": aa.metrics_digest({}), "cfg_sha256": "a" * 64,
+           "sha256": {"config": "a" * 64, "binary": "b" * 64}}
+    problems, binding = aa._reconcile_f(doc, {"binary_sha256": "b" * 64}, "A-up", 1, "f" * 40)
+    assert binding is None and any("no LegacyBinding" in p for p in problems)
+    problems, binding = aa._reconcile_f(doc | {"commit": ACQ}, {"binary_sha256": "b" * 64}, "A-up", 1, ACQ)
+    assert binding == "pe1-at-acquisition-2f9dab40" and problems == []
+
+
+def test_mode_and_commit_are_reported_from_run_json(tmp_path: Path) -> None:
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True))
     assert doc["runs"]["A-port/P"]["modes"] == ["full"]
-    assert doc["runs"]["A-port/P"]["commits"] == ["abcdef0123456789"]
+    assert doc["runs"]["A-port/P"]["commits"] == [ACQ]
     assert doc["runs"]["A-up/F"]["per_energy"] == {"200": N_RUNS}
 
 
@@ -666,56 +634,496 @@ def test_complete_design_is_not_partial_and_expected_count_is_8() -> None:
     assert aa.RUNS_PER_CELL == 8 == N_RUNS
 
 
-def test_missing_run_in_one_energy_cell_makes_the_contrast_partial_and_the_joint_claim_not_true(
+
+
+# ------------------------------------------------------------------------------- the frozen population (item 1)
+
+
+def _drop(root: Path, arm: str, case: str, seed: int | str) -> None:
+    victim = root / arm / case / (seed if isinstance(seed, str) else f"s{seed}")
+    for f in victim.iterdir():
+        f.unlink()
+    victim.rmdir()
+
+
+def _clone(root: Path, arm: str, case: str, seed: int, new_name: str) -> Path:
+    src = root / arm / case / f"s{seed}"
+    dst = src.parent / new_name
+    dst.mkdir()
+    for f in src.iterdir():
+        (dst / f.name).write_text(f.read_text())
+    return dst
+
+
+def test_frozen_population_is_five_arms_by_two_cases_with_planned_counts() -> None:
+    frozen = aa.expected_population(ACQ)
+    assert len(frozen.seeds) == 10
+    assert sum(len(v) for v in frozen.seeds.values()) == 5 * (24 + 8)
+    assert frozen.seeds[("A-port", "F")][961031] == 200 and frozen.seeds[("A-port", "P")][961011] == 150
+
+
+def test_workflow_files_in_the_tree_are_those_of_the_acquisition_commit() -> None:
+    """The tests read the working tree; the analysis reads `git show <acquisition commit>:<path>`. They must agree."""
+    try:
+        from_git = _REAL_EXPECTED(ACQ)
+    except aa.InputError:
+        pytest.skip("acquisition commit not in this clone")
+    assert from_git.seeds == _REAL_EXPECTED(ACQ, sources=SOURCES).seeds
+
+
+def test_abbreviated_or_malformed_acquisition_commit_is_refused() -> None:
+    for bad in (ACQ[:12], "HEAD", "", ACQ.upper(), "--output=x"):
+        with pytest.raises(aa.InputError, match="40-hex"):
+            _REAL_EXPECTED(bad, sources=SOURCES)
+
+
+def test_a_modified_run_list_is_refused_by_the_seed_checker() -> None:
+    broken = {k: v.replace("100:961008 ", "", 1) for k, v in SOURCES.items()}
+    with pytest.raises(aa.InputError, match="apples_seeds_check"):
+        _REAL_EXPECTED(ACQ, sources=broken)
+
+
+def test_complete_frozen_population_is_not_partial(a_identical: Path) -> None:
+    c = contrast(analyse(a_identical), A_CONTRAST)
+    assert c["partial"] is False and c["partial_reasons"] == [] and c["claims_withheld"] is False
+
+
+def test_missing_seed_directory_makes_the_contrast_partial_and_withholds_every_claim(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = build(tmp_path, ("A-up", "A-port"), identical=True)
-    victim = sorted((root / "A-port" / "P").iterdir())[N_RUNS]  # one 150 MeV run
-    for f in victim.iterdir():
-        f.unlink()
-    victim.rmdir()
+    _drop(root, "A-port", "P", 961011)
     doc = analyse(root)
     c = contrast(doc, A_CONTRAST)
-    assert c["partial"] is True and c["partial_cells"] == ["A-port P 150 MeV: 7 of 8"]
-    assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is False
-    assert c["claims"]["n_equivalent_unadjusted"] == 52  # every endpoint is still equivalent: only the claim is withheld
+    assert_no_confirmatory_claims(c)
+    assert c["partial_reasons"] == ["A-port P: 1 expected seed(s) missing: 961011"]
+    assert doc["runs"]["A-port/P"]["n"] == 23 and doc["runs"]["A-port/P"]["expected"] == 24
     assert aa.main([str(root), "--parts", "A"]) == 0
     out = capsys.readouterr().out
-    assert "**PARTIAL**" in out and "A-port P 150 MeV: 7 of 8" in out and "cannot be TRUE: PARTIAL" in out
-    assert "TRUE**" not in out
+    assert "**PARTIAL**" in out and "WITHHELD" in out and "Joint claim" not in out and "TRUE**" not in out
+    assert "equivalent after Holm" not in out
 
 
-def test_missing_f_run_makes_the_contrast_partial(tmp_path: Path) -> None:
+def test_missing_f_seed_makes_the_contrast_partial(tmp_path: Path) -> None:
     root = build(tmp_path, ("A-up", "A-port"), identical=True)
-    victim = min((root / "A-up" / "F").iterdir())
-    for f in victim.iterdir():
-        f.unlink()
-    victim.rmdir()
+    _drop(root, "A-up", "F", 960031)
     c = contrast(analyse(root), A_CONTRAST)
-    assert c["partial_cells"] == ["A-up F 200 MeV: 7 of 8"]
-    assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is False
+    assert_no_confirmatory_claims(c)
+    assert "960031" in c["partial_reasons"][0]
 
 
-def test_partial_arm_marks_only_the_contrasts_that_use_it(tmp_path: Path) -> None:
+def test_missing_arm_or_case_directory_is_fatal(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = build(tmp_path, ("A-up", "A-port"))
+    for f in (root / "A-port" / "F").rglob("*"):
+        if f.is_file():
+            f.unlink()
+    for d in sorted((root / "A-port" / "F").iterdir()):
+        d.rmdir()
+    (root / "A-port" / "F").rmdir()
+    assert aa.main([str(root), "--parts", "A"]) == 2
+    assert "A-port/F" in capsys.readouterr().err.replace("\\", "/")
+
+
+def test_same_count_substitution_with_an_unexpected_seed_is_partial(tmp_path: Path) -> None:
+    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    _drop(root, "A-port", "F", 961031)
+    _clone(root, "A-port", "F", 961032, "s999999")  # still 8 directories
+    assert len(list((root / "A-port" / "F").iterdir())) == N_RUNS
+    doc = analyse(root)
+    c = contrast(doc, A_CONTRAST)
+    assert_no_confirmatory_claims(c)
+    text = " | ".join(c["partial_reasons"])
+    assert "961031" in text and "s999999 (seed not in the frozen list)" in text
+    assert doc["runs"]["A-port/F"]["n"] == 7  # the unexpected directory was not read as a run
+
+
+def test_rejected_directory_is_never_read(tmp_path: Path) -> None:
+    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    stray = _clone(root, "A-port", "P", 961001, "s999999")
+    (stray / "run.json").write_text("{definitely not json")
+    (stray / "endpoints.json").unlink()
+    assert "s999999" not in " ".join(aa.run_analysis(root, ("A",))[1]["dataset_fingerprint"].keys())
+    aa_ledger = aa.Ledger(root)
+    aa.load_arm_case(root, "A-port", "P", aa.expected_population(ACQ), aa_ledger)
+    assert not any("s999999" in k for k in aa_ledger.files)
+
+
+def test_leading_zero_alias_beside_the_real_seed_rejects_both_and_is_partial(tmp_path: Path) -> None:
+    """The reviewer's probe: seven unique seeds plus s0960050, a copy of s960050, one intended run absent."""
+    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    _drop(root, "A-port", "F", 961038)
+    _clone(root, "A-port", "F", 961031, "s0961031")
+    assert len(list((root / "A-port" / "F").iterdir())) == N_RUNS
+    doc = analyse(root)
+    c = contrast(doc, A_CONTRAST)
+    assert_no_confirmatory_claims(c)
+    text = " | ".join(c["partial_reasons"])
+    assert "s0961031, s961031 (numeric identity 961031 repeated)" in text and "961038" in text
+    assert doc["runs"]["A-port/F"]["n"] == 6  # neither copy of the repeated identity is used
+
+
+def test_leading_zero_alias_alone_is_not_the_workflows_directory_name(tmp_path: Path) -> None:
+    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    (root / "A-port" / "F" / "s961031").rename(root / "A-port" / "F" / "s0961031")
+    c = contrast(analyse(root), A_CONTRAST)
+    assert_no_confirmatory_claims(c)
+    assert any("s0961031 (not written as s961031)" in r for r in c["partial_reasons"])
+    assert any("961031" in r and "missing" in r for r in c["partial_reasons"])
+
+
+def test_a_seed_expected_for_another_arm_is_unexpected_here(tmp_path: Path) -> None:
+    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    _drop(root, "A-port", "F", 961031)
+    foreign = root / "A-port" / "F" / "s960031"  # A-up's block, in A-port's case directory
+    foreign.mkdir()
+    for f in (root / "A-up" / "F" / "s960031").iterdir():
+        (foreign / f.name).write_text(f.read_text())
+    c = contrast(analyse(root), A_CONTRAST)
+    assert_no_confirmatory_claims(c)
+    assert any("s960031 (seed not in the frozen list)" in r for r in c["partial_reasons"])
+
+
+def test_only_the_contrasts_using_a_partial_arm_lose_their_claims(tmp_path: Path) -> None:
     root = build(tmp_path, ALL_ARMS, identical=True)
-    victim = min((root / "B-picc" / "P").iterdir())
-    for f in victim.iterdir():
-        f.unlink()
-    victim.rmdir()
+    _drop(root, "B-picc", "P", 964001)
     doc = analyse(root, ("A", "B"))
     assert contrast(doc, A_CONTRAST)["partial"] is False
+    assert contrast(doc, A_CONTRAST)["claims"]["joint_claim_equivalent_on_all_endpoints"] is True
     assert contrast(doc, "B-pgcc vs B-up")["partial"] is False
-    assert contrast(doc, "B-picc vs B-up")["partial"] is True
-    assert contrast(doc, "B-pgcc vs B-picc (descriptive)")["partial"] is True
+    assert_no_confirmatory_claims(contrast(doc, "B-picc vs B-up"))
+    d = contrast(doc, "B-pgcc vs B-picc (descriptive)")
+    assert d["partial"] is True and d["claims"] == {} and d["claims_withheld"] is False
 
 
-def test_extra_run_in_a_cell_is_also_not_the_planned_design(tmp_path: Path) -> None:
-    root = build(tmp_path, ("A-up", "A-port"), identical=True)
-    src = min((root / "A-port" / "P").iterdir())
-    dup = src.parent / "s999999"
-    dup.mkdir()
-    for f in src.iterdir():
-        (dup / f.name).write_text(f.read_text().replace(src.name[1:], "999999"))
-    c = contrast(analyse(root), A_CONTRAST)
-    assert c["partial_cells"] == ["A-port P 100 MeV: 9 of 8"]
+def test_extra_directory_that_is_not_a_seed_directory_stays_fatal(tmp_path: Path) -> None:
+    root = build(tmp_path, ("A-up", "A-port"))
+    (root / "A-up" / "P" / "e100").mkdir()
+    assert aa.main([str(root), "--parts", "A"]) == 2
+
+
+# ------------------------------------------------------------------- identity and provenance (item 2)
+
+SMOKE = {"mode": "smoke", "requested": 100_000, "simulated": 100_001}
+
+
+def _only_first_of_each_cell(fn: Callable[[dict], None]) -> RunMutate:
+    def go(arm: str, case: str, energy: int | None, i: int, run: dict) -> None:
+        if arm == "A-port" and i == 0:
+            fn(run)
+
+    return go
+
+
+@pytest.mark.parametrize(
+    ("label", "edit"),
+    [
+        ("smoke mode at 1e5 histories", lambda r: r.update(SMOKE)),
+        ("mode absent", lambda r: r.pop("mode")),
+        ("mode full spelled FULL", lambda r: r.update(mode="FULL")),
+        ("commit is another commit", lambda r: r.update(commit="0" * 40)),
+        ("commit abbreviated", lambda r: r.update(commit=ACQ[:12])),
+        ("commit absent", lambda r: r.pop("commit")),
+        ("binary hash malformed", lambda r: r.update(binary_sha256="not-a-hash")),
+        ("binary hash upper case", lambda r: r.update(binary_sha256=binary_of("A-port").upper())),
+        ("binary hash absent", lambda r: r.pop("binary_sha256")),
+        ("threads 99", lambda r: r.update(threads=99)),
+        ("A arm run on B's 3 threads", lambda r: r.update(threads=3)),
+        ("threads absent", lambda r: r.pop("threads")),
+        ("simulated 1 against requested 1e7", lambda r: r.update(simulated=1)),
+        ("simulated one below requested", lambda r: r.update(simulated=r["requested"] - 1)),
+        ("simulated null", lambda r: r.update(simulated=None)),
+        ("requested 1e5", lambda r: r.update(requested=100_000)),
+        ("requested as a float", lambda r: r.update(requested=float(r["requested"]))),
+        ("requested absent", lambda r: r.pop("requested")),
+        ("arm absent", lambda r: r.pop("arm")),
+        ("case absent", lambda r: r.pop("case")),
+        ("seed absent", lambda r: r.pop("seed")),
+        ("energy absent", lambda r: r.pop("energy_mev")),
+        ("energy not the seed's energy", lambda r: r.update(energy_mev=150 if r["energy_mev"] == 100 else 100)),
+        ("energy 70", lambda r: r.update(energy_mev=70)),
+        ("energy as a string", lambda r: r.update(energy_mev=str(r["energy_mev"]))),
+    ],
+)
+def test_run_json_probe_is_not_established_and_withholds_every_claim(
+    tmp_path: Path, label: str, edit: Callable[[dict], None]
+) -> None:
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, run_mutate=_only_first_of_each_cell(edit)))
+    c = contrast(doc, A_CONTRAST)
+    assert_no_confirmatory_claims(c)
+    assert doc["runs"]["A-port/P"]["unusable"], label
+    # the affected cells' endpoints are not established, not silently estimated from the remaining runs
+    assert sum(e["outcome"] == "not_established" for e in c["endpoints"]) >= 13
+
+
+def test_the_reviewers_smoke_probe_one_observation_per_cell_is_refused(tmp_path: Path) -> None:
+    """One smoke run per A-port cell, marked smoke at 1e5, and everything else full: the old code said joint TRUE."""
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, run_mutate=_only_first_of_each_cell(lambda r: r.update(SMOKE))))
+    assert len(doc["runs"]["A-port/P"]["unusable"]) == 3 and len(doc["runs"]["A-port/F"]["unusable"]) == 1
+    assert_no_confirmatory_claims(contrast(doc, A_CONTRAST))
+
+
+def test_run_json_that_contradicts_its_directory_is_fatal(tmp_path: Path) -> None:
+    for key, value in (("arm", "A-up"), ("case", "F"), ("seed", 1)):
+        root = build(tmp_path / key, ("A-up", "A-port"), run_mutate=_only_first_of_each_cell(lambda r, k=key, v=value: r.update({k: v})))
+        assert aa.main([str(root), "--parts", "A"]) == 2
+
+
+def test_binary_hash_must_be_one_value_across_an_arm(tmp_path: Path) -> None:
+    def other(arm: str, case: str, energy: int | None, i: int, run: dict) -> None:
+        if arm == "A-up" and case == "F" and i == 0:
+            run["binary_sha256"] = binary_of("something else")
+
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, run_mutate=other))
+    c = contrast(doc, A_CONTRAST)
+    assert_no_confirmatory_claims(c)
+    assert any("binary_sha256 differs within arm A-up" in r for r in c["partial_reasons"])
+    assert len(doc["runs"]["A-up/P"]["unusable"]) == 24 and len(doc["runs"]["A-up/F"]["unusable"]) == 8
+    assert doc["runs"]["A-port/P"]["unusable"] == []
+
+
+def test_binary_hash_is_reported_per_arm(tmp_path: Path) -> None:
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True))
+    assert doc["runs"]["A-port/P"]["binary_sha256"] == [binary_of("A-port")]
+    assert doc["runs"]["A-up/F"]["binary_sha256"] == [binary_of("A-up")]
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda d: d.update(slab_depths_mm=[999]),
+        lambda d: d.update(slab_depths_mm=[3, *d["slab_depths_mm"]]),
+        lambda d: d.update(slab_depths_mm=list(reversed(d["slab_depths_mm"]))),
+        lambda d: d.pop("slab_depths_mm"),
+        lambda d: d.update(label="A-up_P_E100_N1e7_seed1"),
+        lambda d: d.pop("label"),
+        lambda d: d.update(layout="topas"),
+    ],
+)
+def test_p_slab_depths_label_and_layout_must_match_the_frozen_energy(tmp_path: Path, edit: Callable[[dict], None]) -> None:
+    def go(arm: str, case: str, energy: int | None, i: int, d: dict) -> None:
+        if arm == "A-port" and case == "P" and energy == 100 and i == 0:
+            edit(d)
+
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, doc_mutate=go))
+    assert_no_confirmatory_claims(contrast(doc, A_CONTRAST))
+    assert ep(doc, A_CONTRAST, "P100/R80")["outcome"] == "not_established"
+
+
+def test_slab_depths_of_another_energy_do_not_move_the_run_to_that_energy(tmp_path: Path) -> None:
+    """The old loader fell back to slab_depths_mm for placement; the frozen list now decides the energy."""
+
+    def go(arm: str, case: str, energy: int | None, i: int, d: dict) -> None:
+        if arm == "A-port" and case == "P" and energy == 100 and i == 0:
+            d["slab_depths_mm"] = list(aa.SLAB_DEPTHS[150])
+
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, doc_mutate=go))
+    assert doc["runs"]["A-port/P"]["per_energy"] == {"100": 8, "150": 8, "200": 8}
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda d: d.update(platform="A-up"),
+        lambda d: d.update(seed=1),
+        lambda d: d.update(commit="1" * 40),
+        lambda d: d.update(endpoint_status="error"),
+        lambda d: d.pop("endpoint_status"),
+        lambda d: d.update(metrics_sha256="0" * 64),
+        lambda d: d.pop("metrics_sha256"),
+        lambda d: d.update(cfg_sha256="0" * 64),
+        lambda d: d["sha256"].update(binary="0" * 64),
+        lambda d: d["sha256"].pop("binary"),
+        lambda d: d.pop("sha256"),
+    ],
+)
+def test_f_record_top_level_is_reconciled_with_run_json(tmp_path: Path, edit: Callable[[dict], None]) -> None:
+    def go(arm: str, case: str, energy: int | None, i: int, d: dict) -> None:
+        if arm == "A-port" and case == "F" and i == 0:
+            edit(d)
+
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, doc_mutate=go))
+    assert_no_confirmatory_claims(contrast(doc, A_CONTRAST))
+    assert ep(doc, A_CONTRAST, "F/cax_127")["outcome"] == "not_established"
+
+
+def test_f_record_with_failed_endpoints_and_null_metrics_is_unusable(tmp_path: Path) -> None:
+    def go(arm: str, case: str, energy: int | None, i: int, d: dict) -> None:
+        if arm == "A-port" and case == "F" and i == 0:
+            d.update(metrics=None, metrics_sha256=None, endpoint_status="error", endpoint_error="ValueError: x")
+
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, doc_mutate=go))
+    assert_no_confirmatory_claims(contrast(doc, A_CONTRAST))
+
+
+def test_f_energy_70_probe(tmp_path: Path) -> None:
+    def odd(arm: str, case: str, energy: int | None, i: int, run: dict) -> None:
+        if arm == "A-port" and case == "F" and i == 0:
+            run["energy_mev"] = 70
+
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, run_mutate=odd))
+    assert_no_confirmatory_claims(contrast(doc, A_CONTRAST))
+    assert ep(doc, A_CONTRAST, "F/r80_mm")["outcome"] == "not_established"
+
+
+def test_part_b_threads_are_three_and_part_a_four(tmp_path: Path) -> None:
+    doc = analyse(build(tmp_path, ALL_ARMS, identical=True), ("A", "B"))
+    assert all(not c["partial"] for c in doc["contrasts"])
+    assert {a: aa.ARM_THREADS[a] for a in ALL_ARMS} == {"A-up": 4, "A-port": 4, "B-up": 3, "B-pgcc": 3, "B-picc": 3}
+
+
+# -------------------------------------------------------------------------------------- dataset fingerprint
+
+
+def test_fingerprint_is_deterministic_and_covers_exactly_the_files_read(a_identical: Path) -> None:
+    md1, doc1 = aa.run_analysis(a_identical, ("A",))
+    _, doc2 = aa.run_analysis(a_identical, ("A",))
+    fp = doc1["dataset_fingerprint"]
+    assert fp == doc2["dataset_fingerprint"] and len(fp["sha256"]) == 64
+    assert fp["n_files"] == 2 * (24 + 8) * 2  # two files per run directory, 64 runs
+    assert any(fp["sha256"] in line for line in md1)
+    (a_identical / "A-up" / "P" / ".provenance").mkdir()
+    (a_identical / "A-up" / "P" / ".provenance" / "run_root.txt").write_text("not read by the analysis")
+    assert aa.run_analysis(a_identical, ("A",))[1]["dataset_fingerprint"] == fp
+
+
+def test_fingerprint_changes_with_any_byte_of_any_input(a_identical: Path) -> None:
+    before = analyse(a_identical)["dataset_fingerprint"]["sha256"]
+    target = a_identical / "A-port" / "P" / "s961011" / "endpoints.json"
+    original = target.read_text()
+    target.write_text(original.replace("R80", "R81", 1) if "R80" in original else original + " ")
+    changed = analyse(a_identical)["dataset_fingerprint"]["sha256"]
+    assert changed != before
+    target.write_text(original)
+    assert analyse(a_identical)["dataset_fingerprint"]["sha256"] == before
+
+
+def test_fingerprint_depends_on_which_path_holds_the_bytes(tmp_path: Path) -> None:
+    root = build(tmp_path / "x", ("A-up", "A-port"), identical=True)
+    before = analyse(root)["dataset_fingerprint"]["sha256"]
+    a, b = root / "A-port" / "P" / "s961001", root / "A-port" / "P" / "s961002"
+    ta, tb = (a / "endpoints.json").read_text(), (b / "endpoints.json").read_text()
+    (a / "endpoints.json").write_text(tb)
+    (b / "endpoints.json").write_text(ta)
+    assert analyse(root)["dataset_fingerprint"]["sha256"] != before
+
+
+# ------------------------------------------------------------------ domain bounds (item 3), unit and end to end
+
+
+def _rec(energy: int = 100, **over: object) -> dict:
+    rec = p_record(random.Random(1), energy, 1.0)
+    rec.update(over)
+    return rec
+
+
+SIGMA_LO, SIGMA_HI = 1.0, 20.0
+
+
+@pytest.mark.parametrize(
+    ("value", "kept"),
+    [
+        (SIGMA_LO, True), (SIGMA_LO + 1e-9, True), (SIGMA_HI - 1e-9, True), (SIGMA_HI, True), (4.0, True),
+        (math.nextafter(SIGMA_LO, 0.0), False), (SIGMA_LO - 1e-9, False), (math.nextafter(SIGMA_HI, 99.0), False),
+        (SIGMA_HI + 1e-9, False), (0.0, False), (-0.0, False), (-1.0, False), (-4.0, False),
+        (math.nan, False), (math.inf, False), (-math.inf, False), (None, False), ("4.0", False), (True, False),
+    ],
+)
+def test_sigma_domain_is_the_producers_fit_contract(value: object, kept: bool) -> None:
+    out = aa._p_values(_rec(sigma_40=value), 100)
+    assert (out["P100/sigma_40"] is not None) is kept
+    assert out["P100/sigma_60"] is not None  # only that endpoint
+
+
+def test_sigma_bounds_are_the_producers() -> None:
+    from pencil_endpoints import SIGMA_VALID_MM
+
+    assert aa.SIGMA_BOUNDS_MM == SIGMA_VALID_MM == (SIGMA_LO, SIGMA_HI)
+
+
+@pytest.mark.parametrize(
+    ("value", "kept"),
+    [
+        (1.0, True), (1.0 - 1e-12, True), (0.5, True), (1e-300, True), (5e-324, True),
+        (math.nextafter(1.0, 2.0), False), (1.0 + 1e-9, False), (1.01, False), (2.0, False),
+        (0.0, False), (-0.0, False), (-1e-12, False), (-0.01, False),
+        (math.nan, False), (math.inf, False), (-math.inf, False), (None, False), ("0.2", False), (False, False),
+    ],
+)
+def test_ring_fraction_domain_is_0_to_1_and_zero_has_no_logarithm(value: object, kept: bool) -> None:
+    out = aa._p_values(_rec(ring_40_20_40=value), 100)
+    assert (out["P100/ring_40_20_40"] is not None) is kept
+    assert out["P100/ring_40_40_80"] is not None
+
+
+def test_out_of_domain_values_in_both_arms_are_not_established_end_to_end(tmp_path: Path) -> None:
+    """The reviewer's probe: sigma=-1 mm and ring_5_10=1.01 in both arms used to give joint TRUE and 52 Holm decisions."""
+
+    def bad(arm: str, case: str, energy: int | None, i: int, rec: dict) -> None:
+        if case == "P" and energy == 100:
+            rec["sigma_40"], rec["ring_40_5_10"] = -1.0, 1.01
+
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, mutate=bad))
+    c = contrast(doc, A_CONTRAST)
+    assert ep(doc, A_CONTRAST, "P100/sigma_40")["outcome"] == "not_established"
+    assert ep(doc, A_CONTRAST, "P100/ring_40_5_10")["outcome"] == "not_established"
+    assert ep(doc, A_CONTRAST, "P100/sigma_60")["outcome"] == "equivalent"
     assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is False
+    assert c["claims"]["n_not_established"] == 2
+    assert ep(doc, A_CONTRAST, "P100/sigma_40")["holm_decision"] == "not_established"
+
+
+def test_values_exactly_at_the_bounds_in_both_arms_are_established(tmp_path: Path) -> None:
+    def edge(arm: str, case: str, energy: int | None, i: int, rec: dict) -> None:
+        if case == "P" and energy == 100:
+            rec["sigma_40"], rec["sigma_60"], rec["ring_40_80_200"] = SIGMA_LO, SIGMA_HI, 1.0
+
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, mutate=edge))
+    for eid in ("P100/sigma_40", "P100/sigma_60", "P100/ring_40_80_200"):
+        assert ep(doc, A_CONTRAST, eid)["outcome"] == "equivalent"
+
+
+# ------------------------------------------------------------------------------ collection manifest (analysis side)
+
+
+def _write_manifest(root: Path, *, skip: str | None = None, extra: dict | None = None) -> None:
+    files = []
+    for f in sorted(root.rglob("*")):
+        rel = f.relative_to(root).as_posix()
+        if f.is_file() and rel != aa.MANIFEST_NAME and rel != skip:
+            files.append({"path": rel, "sha256": hashlib.sha256(f.read_bytes()).hexdigest()})
+    (root / aa.MANIFEST_NAME).write_text(json.dumps({"acquisition_commit": ACQ, "files": files, **(extra or {})}))
+
+
+def test_report_says_when_there_is_no_manifest(a_identical: Path) -> None:
+    doc = analyse(a_identical)
+    assert doc["collection_manifest"]["present"] is False and "not attested" in doc["collection_manifest"]["note"]
+
+
+def test_manifest_is_verified_when_present(a_identical: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write_manifest(a_identical)
+    assert aa.main([str(a_identical), "--parts", "A"]) == 0
+    assert "Collection manifest: verified, 128 file(s)" in capsys.readouterr().out
+    assert analyse(a_identical)["collection_manifest"]["present"] is True
+
+
+def test_file_changed_since_collection_is_refused(a_identical: Path) -> None:
+    _write_manifest(a_identical)
+    target = a_identical / "A-up" / "P" / "s960001" / "run.json"
+    target.write_text(target.read_text().replace("HOST", "H0ST"))
+    assert aa.main([str(a_identical), "--parts", "A"]) == 2
+
+
+def test_file_read_but_not_in_the_manifest_is_refused(a_identical: Path) -> None:
+    _write_manifest(a_identical, skip="A-up/P/s960001/run.json")
+    assert aa.main([str(a_identical), "--parts", "A"]) == 2
+
+
+def test_manifest_listing_a_missing_file_is_refused(a_identical: Path) -> None:
+    _write_manifest(a_identical)
+    (a_identical / "A-up" / "P" / "s960001" / "endpoints.json").unlink()
+    assert aa.main([str(a_identical), "--parts", "A"]) == 2
+
+
+def test_unreadable_manifest_is_refused(a_identical: Path) -> None:
+    (a_identical / aa.MANIFEST_NAME).write_text("{")
+    assert aa.main([str(a_identical), "--parts", "A"]) == 2
