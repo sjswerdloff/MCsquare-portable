@@ -1,4 +1,4 @@
-"""Recompute the PLANNING tables of docs/validation_report_draft.md (sections 5 and 6) from the committed endpoint records.
+"""Recompute the PLANNING tables of docs/validation_report_draft.md (the PRELIMINARY pencil-beam rows of sections 5.1, 5.2 and 5.4) from the committed endpoint records.
 
 Inputs are the JSON-lines files in validation/report_data/, one per arm; each line carries one run's endpoints as written
 by validation/pencil_endpoints.py, plus where the run lives and the sha256 of the record or script it came from.
