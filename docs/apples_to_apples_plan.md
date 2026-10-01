@@ -188,8 +188,11 @@ In each confirmatory contrast 46 of 52 endpoints are equivalent, 4 inconclusive,
 the joint claim is not established in any (report §5.0). Nothing below changes that result or adds runs to it.
 
 - **Far halo at 100 and 150 MeV.** These rows had no planning variance (Sizing, above). From the observed standard
-  errors, and for 80% power at a true difference of zero, the 40–80 mm annulus at 100 MeV needs about 3 to 14 times
-  the histories and the 80–200 mm annulus at 150 MeV about 2 to 5 times, in both arms. The 80–200 mm annulus at
+  errors, and for 80% power at a true difference of zero, the 40–80 mm annulus at 100 MeV needs about 4 to 19 times
+  the histories and the 80–200 mm annulus at 150 MeV about 3 to 7 times, in both arms. The condition is
+  margin / SE = t(0.95) + t(0.90), since at a true difference of zero both one-sided tests must reject (#45 review
+  7059). The Sizing rule above, (margin − |δ|) / SE ≥ about 2.6, is right when δ is near a margin and optimistic at
+  δ = 0, where about 2.9 is needed. The 80–200 mm annulus at
   100 MeV scored exactly zero in all 80 runs; a log-ratio endpoint is undefined there, so a follow-up needs either
   far more histories or a different, pre-stated estimator for that annulus.
 - **B-pgcc at 100 MeV, 40 mm, 40–80 mm** (1.035 against B-up, 95% [1.004, 1.067]) is to be named in advance in any

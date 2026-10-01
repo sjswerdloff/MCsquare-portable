@@ -141,13 +141,15 @@ missing.
   PowerShell wrote as UTF-16; it refused all of part A and wrote nothing. It was corrected at `bad1419` before any
   collection succeeded, so, as far as connor-227743e6 knows, before any full-run endpoint was read. After the results
   were read, a second review found two checks missing from the analysis (a contrast whose two arms carry one binary;
-  a run that is not usable); they were added in #53 and change no result (AP, chronology).
+  a run that is not usable); they are added in #53 (not yet merged) and change no result (AP, chronology).
 - **Independent checks** (silas-397300f6; #48 comments 28187 and 28192). All 208 endpoint rows (4 contrasts × 52)
-  were recomputed from the plan text with separate code; they agree with the analysis document to a relative
-  difference of at most 3.6e-10. The endpoint scripts of each arm's snapshot were re-run on the Dose files of all 160
-  runs: the case-F values and the case-P R80 and annulus values are identical to the recorded ones, and the case-P σ
-  values agree within 7.4e-6 mm (margin 0.02 mm). The collector itself does not tie endpoint values to the Dose files
-  (#52); for this collection that recomputation does.
+  were recomputed from the plan text with separate code. All 208 agree with the analysis document on outcome, and the
+  200 that have estimates agree to a relative difference of at most 3.6e-10. The endpoint scripts of each arm's
+  snapshot, the same scripts the runs used, were re-run on a different host on the Dose files of all 160 runs: the
+  case-F values and the case-P R80 and annulus values are identical to the recorded ones, and the case-P σ values
+  agree within 7.4e-6 mm (margin 0.02 mm; the fit is not bit-reproducible across hosts). That shows the recorded
+  values are what those scripts give on those Dose files. It does not test the endpoint definitions. The collector
+  itself does not tie endpoint values to the Dose files (#52); for this collection that recomputation does.
 
 ## 5. Results
 
@@ -211,13 +213,18 @@ How these are to be read:
 - **Why the far halo is inconclusive.** The number of histories was sized from 200 MeV planning data. At 200 MeV
   every annulus is equivalent in every contrast. At 100 and 150 MeV the outer annuli hold less energy, and their run-to-run
   spread is too large for the margins at 1e7 histories. From the observed standard errors, and assuming the true
-  difference is zero, 80% power to show equivalence at the stated margins would need roughly 3 to 14 times the
-  histories for the 40–80 mm annulus at 100 MeV and 2 to 5 times for the 80–200 mm annulus at 150 MeV, **in both
-  arms**; adding histories to one arm alone reduces the standard error by at most a factor of 1.4. The 80–200 mm
+  difference is zero, 80% power to show equivalence at the stated margins would need roughly 4 to 19 times the
+  histories for the 40–80 mm annulus at 100 MeV and 3 to 7 times for the 80–200 mm annulus at 150 MeV, **in both
+  arms** (margin / SE = t(0.95) + t(0.90): at a true difference of zero both one-sided tests must reject); adding histories to one arm alone reduces the standard error by at most a factor of 1.4. The 80–200 mm
   annulus at 100 MeV would need far more, since no run scored any energy there. That is design information for a
   separate, pre-specified acquisition. These results are not to be rescued by adding runs to this one (AP).
-- **One row to watch.** Six of the 150 confirmatory 95% intervals exclude the null value, which is about what chance
-  gives at that level (7.5 expected). Five of the six are equivalent. The sixth is the B1 row above (1.035). Portable
+- **One row to watch.** Six of the 150 confirmatory 95% intervals exclude the null value, against 7.5 expected by
+  chance at that level. Four are in contrast A, all in the dose outside the field edge: 127 mm depth at 30 mm
+  (+0.025 points), and 201 mm depth at 10, 20 and 30 mm (+0.070, +0.031, −0.028). The others are the B1 row above
+  (1.035) and B2's 200 MeV, 200 mm, 10–20 mm annulus (0.9988). The 150 intervals are not independent: endpoints of
+  one run share its noise, and B1 and B2 share the B-up runs. So the count varies more than a binomial count would,
+  and four lateral rows in one contrast are weaker evidence than four independent rows. Five of the six, including
+  those four, are equivalent. The sixth is the B1 row. Portable
   built with gcc is also above Portable built with icc on the same host at this endpoint (Appendix A), and A (gcc
   against icl) points the same way without excluding 1. At the other 100 MeV depth the same annulus points the other
   way in all three contrasts. This is recorded as an observation, not as a compiler effect. A follow-up acquisition
