@@ -34,7 +34,7 @@ on:
     paths: [.gitea/workflows/apples-b-linux.yml]
 
 env:
-  MODE: smoke
+  MODE: full
   UPSTREAM: 85bf2911ddadbb40bd41b1a18b4b247536bb33ab
   PATCH: validation/topas/openmcsquare/fix_secondary_angle_energy.patch
   PATCH_SHA256: e22990c96942286304f538b844ed2697a917c4e8b235f970731824b90ae8e347
