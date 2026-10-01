@@ -57,10 +57,16 @@ def parse_log(text: str, requested: int) -> int:
         raise Refused("config key not recognised (Unknown tag)")
     if "generated outside the geometry" in text:
         raise Refused("primaries generated outside the geometry")
-    found = re.findall(r"Nbr primaries simulated:\s*(\d+)", text)
-    if len(found) != 1:
-        raise Refused(f"{len(found)} 'Nbr primaries simulated' lines")
-    simulated = int(found[0])
+    # Every line carrying the label counts, then the whole field must be one integer: a regex on the digits alone read
+    # "100000garbage" and "100000.5" as 100000 and skipped a malformed labelled line beside a valid one.
+    label = "Nbr primaries simulated:"
+    lines = [line for line in text.splitlines() if label in line]
+    if len(lines) != 1:
+        raise Refused(f"{len(lines)} '{label[:-1]}' lines")
+    before, value = (part.strip() for part in lines[0].split(label, 1))
+    if before or not value.isdigit():
+        raise Refused(f"'{label[:-1]}' line is not one whole count: {lines[0].strip()!r}")
+    simulated = int(value)
     if simulated < requested:
         raise Refused(f"simulated {simulated} < requested {requested}")
     return simulated

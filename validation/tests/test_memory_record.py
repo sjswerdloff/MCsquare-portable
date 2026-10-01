@@ -70,8 +70,16 @@ def test_malformed_time_output_is_refused(tmp_path, capsys, time):
         LOG_OK + "Nbr primaries simulated: 100000\n",
         LOG_OK + "WARNING: Unknown tag Foo\n",
         LOG_OK + "12 primaries generated outside the geometry\n",
+        "Nbr primaries simulated: not_a_number\n",
+        "Nbr primaries simulated: not_a_number\n" + LOG_OK,
+        "Nbr primaries simulated: 100000garbage\n",
+        "Nbr primaries simulated: 100000.5\n",
+        "x Nbr primaries simulated: 100000\n",
     ],
-    ids=["short", "absent", "twice", "unknown-tag", "outside-geometry"],
+    ids=[
+        "short", "absent", "twice", "unknown-tag", "outside-geometry",
+        "malformed-only", "malformed-plus-valid", "trailing-junk", "fractional", "leading-junk",
+    ],
 )
 def test_incomplete_or_wrong_run_is_refused(tmp_path, log):
     assert mr.main(_args(tmp_path, log=log)) == 1

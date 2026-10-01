@@ -2,8 +2,9 @@
 # sjswerdloff 2026-10-01 ("go ahead with the four core run"). Not part of any study: no endpoints, no seeds from any
 # study block, outputs on the system disk under memory/.
 #
-# Peak memory is set by the grids, the physics tables and the per-thread buffers, not by the number of primaries, so a
-# short run (N = 1e5) is enough. Two cases bracket the size range:
+# The grids, the physics tables and the per-thread buffers are allocated before transport, and in the one short run
+# measured (N = 1e5) they account for the peak. Whether the peak grows in a longer run has NOT been measured. Two cases
+# bracket the size range:
 #   pencil      400 x 350 x 400 voxels at 1 mm (56.0 M voxels), water (Scanners/Water_Phantom), one spot, 200 MeV
 #   fieldedge   150^3 voxels at 2 mm (3.4 M voxels), HU 0 in Scanners/default = Schneider_AT_AG_SI4 (NOT water),
 #               15 x 15 cm field, 200 MeV  (field_edge_make_cases.py)
@@ -84,7 +85,7 @@ jobs:
             "BDL_Machine_Parameter_File bdl_E200.txt" "BDL_Plan_File plan_E200.txt" \
             "Output_Directory out" "Dose_MHD_Output True" > "$C/config.txt"
 
-          # fieldedge: 200 MeV, 15 x 15 cm, water cube 150^3 at 2 mm
+          # fieldedge: 200 MeV, 15 x 15 cm, cube 150^3 at 2 mm, HU 0 in Scanners/default (Schneider_AT_AG_SI4, not water)
           C="$ROOT/fieldedge"; mkdir "$C" "$C/out"
           (cd "$C" && "$UV" run --no-project --with numpy python "$W/validation/field_edge_make_cases.py" 200 150)
           printf '%s\n' "Num_Threads $THREADS" "Num_Primaries $N" "RNG_Seed $SEED" "CT_File cube.mhd" \
