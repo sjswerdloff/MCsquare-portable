@@ -1,0 +1,109 @@
+# Peak memory of portable MCsquare at 4 threads, for sizing small hosts (e.g. a Raspberry Pi). Requested by
+# sjswerdloff 2026-10-01 ("go ahead with the four core run"). Not part of any study: no endpoints, no seeds from any
+# study block, outputs on the system disk under memory/.
+#
+# Peak memory is set by the grids, the physics tables and the per-thread buffers, not by the number of primaries, so a
+# short run (N = 1e5) is enough. Two cases bracket the size range:
+#   pencil      400 x 350 x 400 voxels at 1 mm (56.0 M voxels), one spot, 200 MeV  (mcsquare_pencil_case.py)
+#   fieldedge   150^3 voxels at 2 mm (3.4 M voxels), 15 x 15 cm field, 200 MeV    (field_edge_make_cases.py)
+# Measured with macOS /usr/bin/time -l: "maximum resident set size" and "peak memory footprint" (bytes).
+#
+# BUILD and RUN are separate jobs (sjswerdloff), as in topas-mcsquare-planning.yml.
+
+name: Memory footprint, portable MCsquare at 4 threads (Studio)
+
+# THIS FILE IS THE REQUEST. It runs on a push that changes this file.
+on:
+  push:
+    branches: ['connor/memory-footprint']
+    paths: [.gitea/workflows/memory-footprint.yml]
+
+env:
+  TARGET: arm64-mcpu-native
+  EXTRA_CFLAGS: -mcpu=native
+  THREADS: "4"
+  N: "1e5"
+  SEED: "990001"
+  OUT_ROOT: /Users/gitearunner/topas-study
+
+jobs:
+  build:
+    name: Build (write-once)
+    runs-on: stuart-m3ultra-canary
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build into builds/<commit>/<target>
+        run: |
+          set -euo pipefail
+          B="$HOME/mcsq-builds/$GITHUB_SHA/$TARGET"
+          if [ -e "$B/sha256.txt" ]; then echo "already built: $B"; cat "$B/build.txt" "$B/sha256.txt"; exit 0; fi
+          if [ -e "$B" ]; then echo "$B exists without sha256.txt (interrupted build): refusing"; exit 1; fi
+          make -B MCsquare_arm64 EXTRA_CFLAGS="$EXTRA_CFLAGS"
+          mkdir -p "$(dirname "$B")"; mkdir "$B"
+          cp MCsquare_arm64 "$B/MCsquare"
+          { echo "commit $GITHUB_SHA"; echo "host $(hostname)"; echo "cpu $(sysctl -n machdep.cpu.brand_string)";
+            echo "compiler $(clang --version | head -1)"; echo "target MCsquare_arm64 EXTRA_CFLAGS=$EXTRA_CFLAGS"; } > "$B/build.txt"
+          (cd "$B" && shasum -a 256 MCsquare > sha256.txt)
+          chmod a-w "$B/MCsquare" "$B/build.txt" "$B/sha256.txt"
+          cat "$B/build.txt" "$B/sha256.txt"
+
+  measure:
+    name: Peak memory, 4 threads
+    needs: build
+    runs-on: stuart-m3ultra-canary
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify binary, generate the cases, run under /usr/bin/time -l
+        run: |
+          set -euo pipefail
+          UV="$(command -v uv || true)"; [ -n "$UV" ] || UV="$HOME/.local/bin/uv"
+          [ -x "$UV" ] || { echo "no uv on this runner"; exit 1; }
+          B="$HOME/mcsq-builds/$GITHUB_SHA/$TARGET"
+          (cd "$B" && shasum -a 256 -c sha256.txt)
+          cat "$B/build.txt"
+          [ -d "$OUT_ROOT" ] || { echo "$OUT_ROOT not present: refusing"; exit 1; }
+          ROOT="$OUT_ROOT/memory/$GITHUB_SHA/run${GITHUB_RUN_NUMBER}"
+          mkdir -p "$(dirname "$ROOT")"
+          mkdir "$ROOT" || { echo "cannot create $ROOT: refusing"; exit 1; }
+          W="$PWD"
+          echo "host memory: $(sysctl -n hw.memsize) bytes; cpu: $(sysctl -n machdep.cpu.brand_string)"
+
+          # pencil: 200 MeV, water 400 x 350 x 400 mm at 1 mm
+          C="$ROOT/pencil"; mkdir "$C" "$C/out"
+          (cd "$C" && "$UV" run --no-project --with numpy python "$W/validation/mcsquare_pencil_case.py" \
+            200 --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1)
+          printf '%s\n' "Num_Threads $THREADS" "Num_Primaries $N" "RNG_Seed $SEED" "CT_File water.mhd" \
+            "HU_Density_Conversion_File $W/Scanners/Water_Phantom/HU_Density_Conversion.txt" \
+            "HU_Material_Conversion_File $W/Scanners/Water_Phantom/HU_Material_Conversion.txt" \
+            "BDL_Machine_Parameter_File bdl_E200.txt" "BDL_Plan_File plan_E200.txt" \
+            "Output_Directory out" "Dose_MHD_Output True" > "$C/config.txt"
+
+          # fieldedge: 200 MeV, 15 x 15 cm, water cube 150^3 at 2 mm
+          C="$ROOT/fieldedge"; mkdir "$C" "$C/out"
+          (cd "$C" && "$UV" run --no-project --with numpy python "$W/validation/field_edge_make_cases.py" 200 150)
+          printf '%s\n' "Num_Threads $THREADS" "Num_Primaries $N" "RNG_Seed $SEED" "CT_File cube.mhd" \
+            "HU_Density_Conversion_File $W/Scanners/default/HU_Density_Conversion.txt" \
+            "HU_Material_Conversion_File $W/Scanners/default/HU_Material_Conversion.txt" \
+            "BDL_Machine_Parameter_File $W/BDL/BDL_default_DN_RangeShifter.txt" "BDL_Plan_File E200_S150.txt" \
+            "Output_Directory out" "Dose_MHD_Output True" > "$C/config.txt"
+
+          for name in pencil fieldedge; do
+            C="$ROOT/$name"
+            # The checkout path has no spaces, so absolute paths are safe for the config parser here.
+            (cd "$C" && MCsquare_Materials_Dir="$W/Materials/" /usr/bin/time -l "$B/MCsquare" config.txt) \
+              > "$C/log.txt" 2> "$C/time.txt" || { tail -20 "$C/log.txt" "$C/time.txt"; echo "$name: MCsquare failed"; exit 1; }
+            if grep -q 'Unknown tag' "$C/log.txt"; then grep 'Unknown tag' "$C/log.txt"; echo "$name: config tag not recognised"; exit 1; fi
+            test -s "$C/out/Dose.raw" || { echo "$name: no dose written"; exit 1; }
+            RSS=$(awk '/maximum resident set size/ {print $1}' "$C/time.txt")
+            PEAK=$(awk '/peak memory footprint/ {print $1}' "$C/time.txt")
+            [ -n "$RSS" ] || { cat "$C/time.txt"; echo "$name: no RSS line from /usr/bin/time -l"; exit 1; }
+            DIMS=$(awk -F' = ' '/^DimSize/ {print $2}' "$C"/*.mhd | head -1)
+            SIM=$(grep -o 'Nbr primaries simulated: [0-9]*' "$C/log.txt" | awk '{print $4}' || true)
+            printf '{"case": "%s", "threads": %s, "requested": "%s", "simulated": "%s", "ct_dims": "%s", "max_rss_bytes": %s, "peak_footprint_bytes": "%s", "binary_sha256": "%s"}\n' \
+              "$name" "$THREADS" "$N" "$SIM" "$DIMS" "$RSS" "$PEAK" "$(awk '{print $1}' "$B/sha256.txt")" | tee "$C/memory.json"
+            cat "$C/time.txt"
+            rm -f "$C/out/Dose.raw"   # not needed for this measurement
+          done
+          echo "outputs: $ROOT"
