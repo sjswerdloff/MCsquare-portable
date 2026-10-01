@@ -8,12 +8,14 @@ after results are read. Results feed [`validation_report_draft.md`](validation_r
 ## Host rulings (sjswerdloff, 2026-10-01, in conversation with connor-227743e6)
 
 - **Windows:** for the same source code, results from the HP and the Lenovo are interchangeable, so where a Windows
-  run takes place doesn't matter. Windows work is divided roughly evenly between the two machines. This supersedes,
-  for Windows, his earlier "no portable MCsquare arm on the HP" (relayed by clement-7074f29f).
-- **Linux on the HP (part B) is not covered** by that ruling, so **part B stays DISABLED** unless he re-authorises
-  portable on the HP under WSL2.
-- **Compute jobs under two hours go ahead without a further ask.** Every job below is one arm × one case on one
-  host, and is estimated under 2 h.
+  run takes place doesn't matter.
+- **Load:** the work is divided roughly evenly between the two Intel machines. Linux runs only on the HP (WSL2), so
+  when Linux work is needed the Windows load goes to the Lenovo. This supersedes his earlier "no portable MCsquare arm
+  on the HP" (relayed by clement-7074f29f).
+- **So: part A (Windows) runs on the Lenovo, part B (Linux) runs on the HP.** Each part then has one fixed host, and
+  host is not confounded within any part-A or part-B contrast.
+- **Compute jobs under two hours go ahead without a further ask.** Four jobs below are estimated at over 2 h and are
+  marked; they wait for his go-ahead.
 
 ## What "same-host" means here, and what it doesn't
 
@@ -25,10 +27,10 @@ attribute a difference to any single factor.
 
 | part | contrast | matched | differs (confounded within the contrast) | host |
 |---|---|---|---|---|
-| **A. Intel, Windows 10** | upstream 85bf2911 + fix vs portable | OS, thread count (4), cases, histories, endpoint script, seed policy; host **balanced**, not fixed: each machine runs half of every arm | source tree; compiler (icl 2021.1 vs MSYS2 gcc 16.2); RNG (MKL vs PCG); OpenMP runtime; math library; build flags | Lenovo + HP, 4 + 4 runs per arm per case |
-| **B. Intel, Linux** (**DISABLED**, see above) | upstream + fix (icc) vs portable (gcc 13) vs portable (icc) | host (HP, WSL2), threads (3), cases, histories, script | upstream-icc vs portable-icc: source tree and RNG, same compiler. portable-icc vs portable-gcc: compiler, runtime and flags, same source. Not a full factorial: source and RNG stay together | HP |
+| **A. Intel, Windows 10** | upstream 85bf2911 + fix vs portable | OS, thread count (4), cases, histories, endpoint script, seed policy; host (Lenovo) | source tree; compiler (icl 2021.1 vs MSYS2 gcc 16.2); RNG (MKL vs PCG); OpenMP runtime; math library; build flags | Lenovo |
+| **B. Intel, Linux** | upstream + fix (icc) vs portable (gcc 13) vs portable (icc) | host (HP, WSL2), threads (3), cases, histories, script | upstream-icc vs portable-icc: source tree and RNG, same compiler. portable-icc vs portable-gcc: compiler, runtime and flags, same source. Not a full factorial: source and RNG stay together | HP |
 | **C. Apple Silicon vs TOPAS** (confirmatory) | portable vs TOPAS opt0 (opt4 secondary) | host (Mac Studio), case, histories, endpoint definitions | everything about the codes, per the frozen design (TD) | Mac Studio |
-| **D. Bridge** | portable on Windows (both Intel machines, from A) vs portable on the Studio | source commit, case, histories, endpoint script | host, CPU architecture, OS, compiler (MSYS2 gcc vs Apple clang), runtime, threads (4 vs 24). A platform-bundle contrast, not platform alone | reuses A's and C's portable runs |
+| **D. Bridge** | portable on the Lenovo (from A) vs portable on the Studio | source commit, case, histories, endpoint script | host, CPU architecture, OS, compiler (MSYS2 gcc vs Apple clang), runtime, threads (4 vs 24). A platform-bundle contrast, not platform alone | reuses A's and C's portable runs |
 
 ## Cases
 
@@ -105,16 +107,19 @@ individually. **100 and 150 MeV have no planning variance.** Their power is assu
 intervals are too wide are reported inconclusive. B = 8 per arm unless Alden's precision targets for part C say
 otherwise.
 
-**Host balance in part A.** Host is not part of the estimand (the Windows ruling above), but it is a nuisance factor,
-so it is balanced rather than left to chance: for every arm and case, 4 runs on the Lenovo and 4 on the HP, seeds
-assigned to hosts in the committed run list, host recorded per run. The analysis is the same Welch comparison over all
-8 runs per arm; host-mean differences within each arm are reported descriptively, so a host effect shows up rather
-than hiding in the SE.
+**Timing (resource only; upper estimates, since 100 and 150 MeV run faster than the 200 MeV rates used).** One job per
+arm × case, each 8 runs; pencil = 8 × 3 energies × 1e7, field edge = 8 × 3e7.
 
-**Timing (resource only):** upstream icl about 223 s per 1e7 at 4 threads (task 10480); portable MSYS2 gcc about
-400 s per 1e7 (estimated from the HP at 3 threads; measured by the first run). Per host, one job per arm × case:
-upstream pencil (4 × 3 energies × 1e7) about 45 min and field edge (4 × 3e7) about 45 min; portable about 80 min each.
-Each job is under 2 h; about 4 h 10 min of jobs per machine in all, run one after another. Part C per the frozen design; TOPAS is the long pole, scheduled by clement-7074f29f.
+| host | job | rate used | estimate |
+|---|---|---|---|
+| Lenovo, 4 thr | A upstream icl, pencil / field edge | 223 s per 1e7 (task 10480) | about 1.5 h each |
+| Lenovo, 4 thr | A portable MSYS2 gcc, pencil / field edge | about 400 s per 1e7 (estimated from the HP at 3 threads) | **about 2.7 h each: over 2 h** |
+| HP, 3 thr | B upstream icc and portable icc, pencil / field edge | about 150 s per 1e7 (#3 c26744, sample plan) | about 1 h each |
+| HP, 3 thr | B portable gcc 13, pencil / field edge | about 360 s per 1e7 (#3 c26744) | **about 2.4 h each: over 2 h** |
+
+About 8.3 h on the Lenovo and 8.8 h on the HP in all, so the load is roughly even. The jobs under 2 h start once their
+prerequisites merge. The four marked jobs wait for sjswerdloff's go-ahead; each job's first run checks its own time
+against these estimates. Part C per the frozen design; TOPAS is the long pole, scheduled by clement-7074f29f.
 
 ## Seeds
 
@@ -129,22 +134,22 @@ authorised, 962001+ / 963001+ / 964001+; C per TD. The run-list commit includes 
 1. **Build once per host** (write-once directory, sha256 recorded); run jobs verify the hash and never compile
    (sjswerdloff's build/run separation). The workflow file is the run request; RUNS empty = build only.
 2. **One workflow per part,** each with its own seed block.
-3. **Outputs:** MCsquare on each host's system disk (sjswerdloff, #32 c27726): Lenovo and HP under `C:\mcsq-win\ts\<sha12>` (short paths, #40);
+3. **Outputs:** MCsquare on each host's system disk (sjswerdloff, #32 c27726): Lenovo under `C:\mcsq-win\ts\<sha12>` (short paths, #40); HP Linux under `~/fe-study/`;
    TOPAS on the T7.
 4. **No human step mid-run.** Each job snapshots its scripts and inputs, writes `run.json`, refuses on any count, config
    or hash failure, and leaves the failure recorded. A failed part does not block the others.
 5. **Watching:** clement-7074f29f and connor-227743e6 check task status and post per-part status to #32. Nobody reads
    endpoint results before every run of that part is complete.
-6. **Order:** A first (after #31 and the `--depths` change merge). C once the freeze PR is merged. D needs no new runs.
+6. **Order:** A and B start in parallel on their two machines once the `--depths` change (#47) merges (#31 is merged).
+   C once the freeze PR is merged. D needs no new runs.
 
 ## Decisions needed from sjswerdloff before he leaves
 
 1. Approve parts A, C and D, or name the parts to drop.
 2. The margins above, every row (80–200 ring settled at ±5%; the others proposed).
-3. Merge #31 (prerequisite for case F).
-4. ~~HP fallback~~: settled by the Windows ruling; part A is split across both machines.
-5. **Only if you want part B:** re-authorise portable MCsquare on the HP under Linux (WSL2). Without that, B stays
-   disabled.
+3. ~~Merge #31~~: merged.
+4. ~~Hosts~~: settled. A on the Lenovo, B on the HP.
+5. Go-ahead for the four jobs estimated at over 2 h (timing table).
 
 ## Out of scope
 
