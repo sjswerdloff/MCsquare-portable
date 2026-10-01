@@ -1,17 +1,31 @@
 """Shared synthetic-data helpers for the apples tests: trees of the FROZEN seeds, with full-run metadata. No run output
-from any machine is read."""
+from any machine is read.
+
+Case-F record.json files are not hand-written: they are produced by RUNNING a record writer's main() in a synthetic run
+directory (cwd = run directory, as both workflows run it), with synthetic transport inputs and the endpoint computation
+stubbed to return (or raise) synthetic metrics. The default writer is the PINNED one, `git show 2f9dab40:validation/
+platform_study_record.py` (the acquisition snapshot's), imported from a temporary copy and checked against its sha256;
+the "v2" writer is the working tree's platform_study_record.py (cfg_sha256, metrics_sha256, endpoint_status, 0f5ef7c on).
+"""
 
 from __future__ import annotations
 
+import contextlib
+import functools
 import hashlib
+import importlib.util
 import io
 import json
 import math
+import os
 import random
+import subprocess
 import sys
 import tarfile
-from collections.abc import Callable
+import tempfile
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -77,26 +91,130 @@ def binary_of(arm: str) -> str:
     return hashlib.sha256(f"binary of {arm}".encode()).hexdigest()
 
 
-def run_json_of(arm: str, case: str, energy: int, seed: int) -> dict:
+def run_json_of(arm: str, case: str, energy: int, seed: int, commit: str = ACQ) -> dict:
     """A complete full-run run.json as the workflows write it."""
     return {
         "seed": seed, "requested": aa.REQUESTED[case], "simulated": aa.REQUESTED[case] + 17,
         "overshoot": 17, "threads": aa.ARM_THREADS[arm], "energy_mev": energy, "case": case, "arm": arm,
-        "mode": "full", "host": "HOST", "cpu": "cpu", "binary_sha256": binary_of(arm), "commit": ACQ,
+        "mode": "full", "host": "HOST", "cpu": "cpu", "binary_sha256": binary_of(arm), "commit": commit,
         "start_utc": "2026-10-01T00:00:00Z", "end_utc": "2026-10-01T01:00:00Z", "wall_s": 3600,
         "transport_status": "ok",
     }
 
 
-def f_document(arm: str, seed: int, metrics: dict) -> dict:
-    """record.json as platform_study_record.py writes it at the acquisition commit (study defaults to pe1)."""
-    cfg = hashlib.sha256(f"cfg {seed}".encode()).hexdigest()
-    return {
-        "study": "pe1", "platform": arm, "seed": seed, "host": "host", "machine": "x86_64", "commit": ACQ,
-        "compiler": "cc", "sha256": {"config": cfg, "binary": binary_of(arm), "Dose.raw": "0" * 64},
-        "materials": {"files": 1, "combined_sha256": "0" * 64}, "cfg_sha256": cfg, "metrics": metrics,
-        "metrics_sha256": aa.metrics_digest(metrics), "endpoint_status": "ok",
-    }
+# ------------------------------------------------------------------------------------ the case-F record writers
+
+WRITER_PATH = "validation/platform_study_record.py"
+PINNED_WRITER_SHA256 = "c86444fa54e7f219488a4d95bed1b81230128b3b5f9bb07a92610cb24c916a0a"  # git show ACQ:WRITER_PATH
+V2_COMMIT = "0f5ef7c76eb70e3e3089988f0fb17a964f86573f"  # the writer adds cfg_sha256/metrics_sha256/endpoint_status here
+V2_BINDING = aa.RecordBinding("test-only-v2-at-0f5ef7c", V2_COMMIT, "pe1", aa.RECORD_SCHEMA_V2,
+                              "tests only: no acquisition is bound to the v2 schema")
+
+
+class WriterUnavailableError(RuntimeError):
+    """The pinned writer cannot be read from the acquisition commit, or is not the expected bytes."""
+
+
+@functools.cache
+def pinned_writer() -> ModuleType:
+    """platform_study_record.py as committed at the acquisition commit, imported from a temporary copy of its
+    `git show` source (never from the working tree). Refuses unless the bytes hash as pinned."""
+    proc = subprocess.run(["git", "-C", str(aa.REPO), "show", f"{ACQ}:{WRITER_PATH}"], capture_output=True, check=False)
+    if proc.returncode != 0:
+        msg = f"cannot read {WRITER_PATH} at {ACQ}: {proc.stderr.decode(errors='replace').strip()}"
+        raise WriterUnavailableError(msg)
+    if sha(proc.stdout) != PINNED_WRITER_SHA256:
+        msg = f"{WRITER_PATH} at {ACQ} hashes {sha(proc.stdout)}, pinned {PINNED_WRITER_SHA256}"
+        raise WriterUnavailableError(msg)
+    copy = Path(tempfile.mkdtemp(prefix="writer_2f9dab40_")) / "platform_study_record_2f9dab40.py"
+    copy.write_bytes(proc.stdout)
+    spec = importlib.util.spec_from_file_location("platform_study_record_2f9dab40", copy)
+    if spec is None or spec.loader is None:
+        msg = f"cannot import {copy}"
+        raise WriterUnavailableError(msg)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def current_writer() -> ModuleType:
+    import platform_study_record
+
+    return platform_study_record
+
+
+WRITERS: dict[str, Callable[[], ModuleType]] = {"2f9dab40": pinned_writer, "v2": current_writer}
+
+
+@contextlib.contextmanager
+def _writer_context(writer: ModuleType, run_dir: Path, metrics: dict | BaseException) -> Iterator[None]:
+    """cwd = the run directory, STUDY_ID unset (the workflows never set it), the endpoint computation stubbed."""
+
+    def endpoints(_dose: object, _side: float) -> dict:
+        if isinstance(metrics, BaseException):
+            raise metrics
+        return dict(metrics)
+
+    saved = (writer.load, writer.endpoints, os.getcwd(), os.environ.pop("STUDY_ID", None))
+    writer.load = lambda outdir: outdir
+    writer.endpoints = endpoints
+    os.chdir(run_dir)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            yield
+    finally:
+        writer.load, writer.endpoints = saved[0], saved[1]
+        os.chdir(saved[2])
+        if saved[3] is not None:
+            os.environ["STUDY_ID"] = saved[3]
+
+
+def run_writer(
+    run_dir: Path, arm: str, seed: int, binary: Path, metrics: dict | BaseException, *, commit: str = ACQ,
+    writer: str = "2f9dab40",
+) -> dict | None:
+    """Run the writer's main() as the workflows do: `(cd <run dir> && platform_study_record.py <run dir> out_seed <arm>
+    <seed> <binary> <compiler> <commit>)`. Returns record.json as written, or None when the writer wrote none (the
+    2f9dab40 writer raises on an endpoint failure, before it opens record.json)."""
+    module = WRITERS[writer]()
+    with _writer_context(module, run_dir, metrics):
+        try:
+            module.main(str(run_dir), "out_seed", arm, str(seed), str(binary), "cc 1.0\n", commit)
+        except Exception:  # the pinned writer's only failure shape: no record
+            if writer != "2f9dab40":
+                raise
+    path = run_dir / "record.json"
+    return json.loads(path.read_text()) if path.is_file() else None
+
+
+def write_binary(path: Path, arm: str) -> Path:
+    """A synthetic MCsquare whose sha256 is binary_of(arm)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_bytes(f"binary of {arm}".encode())
+    return path
+
+
+F_CASE = {"cube.mhd": b"mhd", "cube.raw": b"raw", "E200_S150.txt": b"plan"}
+F_DATA = {"Materials/Water.txt": b"water\n", "Materials/Air/air.txt": b"air\n",
+          "Scanners/default/HU_Density_Conversion.txt": b"default density\n",
+          "Scanners/default/HU_Material_Conversion.txt": b"default material\n",
+          "BDL/BDL_default_DN_RangeShifter.txt": b"bdl\n"}
+
+
+def f_cfg(arm: str, seed: int) -> bytes:
+    return f"Num_Threads {aa.ARM_THREADS[arm]}\nNum_Primaries 3e7\nRNG_Seed {seed}\nOutput_Directory out_seed\n".encode()
+
+
+def synthetic_f_record(
+    work: Path, arm: str, seed: int, metrics: dict | BaseException, *, commit: str = ACQ, writer: str = "2f9dab40"
+) -> dict | None:
+    """A case-F record from the writer, run in a synthetic run directory <work>/<arm>/s<seed> (transport inputs and
+    Dose files are synthetic; the binary hashes as binary_of(arm))."""
+    d = work / arm / f"s{seed}"
+    write_tree(d, {**F_CASE, **F_DATA, "cfg.txt": f_cfg(arm, seed), "out_seed/Dose.raw": f"raw {arm} {seed}".encode(),
+                   "out_seed/Dose.mhd": f"mhd {arm} {seed}".encode()})
+    return run_writer(d, arm, seed, write_binary(work / arm / "MCsquare", arm), metrics, commit=commit, writer=writer)
 
 
 def cells(arm: str, case: str) -> list[tuple[int | None, int, int, int]]:
@@ -121,10 +239,13 @@ def build(
     mutate: Mutate | None = None,
     run_mutate: RunMutate | None = None,
     doc_mutate: Mutate | None = None,
+    commit: str = ACQ,
+    writer: str = "2f9dab40",
 ) -> Path:
     """Write a synthetic tree of the FROZEN seeds (first `n` of each cell). `identical` gives every arm exactly the same
-    values; mutate(arm, case, energy, i, rec) edits the endpoint record (case F: the metrics dict), run_mutate edits
-    run.json and doc_mutate the whole endpoint document (case F: record.json), before they are written."""
+    values; mutate(arm, case, energy, i, rec) edits the endpoint record (case F: the metrics dict, BEFORE the writer
+    runs), run_mutate edits run.json and doc_mutate the whole endpoint document (case F: the writer's record.json),
+    before they are written. Case-F records come from `writer` (synthetic_f_record), run under <root>/.writer/."""
     for a_idx, arm in enumerate(arms):
         for case in aa.CASES:
             for energy, i, seed, _ordinal in cells(arm, case):
@@ -135,10 +256,17 @@ def build(
                 rec = p_record(rng, energy, scale, arm, seed) if energy is not None else f_record(rng, scale)
                 if mutate is not None:
                     mutate(arm, case, energy, i, rec)
-                run = run_json_of(arm, case, energy if energy is not None else 200, seed)
+                run = run_json_of(arm, case, energy if energy is not None else 200, seed, commit)
                 if run_mutate is not None:
                     run_mutate(arm, case, energy, i, run)
-                doc = rec if energy is not None else f_document(arm, seed, rec)
+                if energy is None:
+                    written = synthetic_f_record(root / ".writer", arm, seed, rec, commit=commit, writer=writer)
+                    if written is None:
+                        msg = f"the {writer} writer wrote no record for {arm} s{seed}"
+                        raise WriterUnavailableError(msg)
+                    doc = written
+                else:
+                    doc = rec
                 if doc_mutate is not None:
                     doc_mutate(arm, case, energy, i, doc)
                 d = root / arm / case / f"s{seed}"
@@ -191,12 +319,15 @@ def write_git_archive(path: Path, files: dict[str, bytes], commit: str) -> None:
             tf.addfile(info, io.BytesIO(data))
 
 
-def make_native(parent: Path, arms: tuple[str, ...] = tuple(NATIVE_ARM), *, commit: str = ACQ) -> dict[str, Path]:
+def make_native(
+    parent: Path, arms: tuple[str, ...] = tuple(NATIVE_ARM), *, commit: str = ACQ, writer: str = "2f9dab40"
+) -> dict[str, Path]:
     """Native workflow trees of the frozen full runs, one root per host (`<parent>/win/<sha12>`, `<parent>/lin/<sha12>`).
 
     Returns {"win": root, "lin": root}. The layout, file names and hash-list formats follow apples-a-windows.yml and
     apples-b-linux.yml: <arm>/<p|f>/{run_root.txt, snapshot/, snapshot_sha256.txt, ...}, P under e<E>/s<seed>, F under
-    s<seed>, run.json/endpoints.json/record.json from the same generators the analysis tests use."""
+    s<seed>, run.json/endpoints.json from the same generators the analysis tests use, and each record.json written by
+    RUNNING `writer` in its run directory (see run_writer), with the binary at <parent>/bin/<arm>/MCsquare."""
     roots = {"win": parent / "win" / commit[:12], "lin": parent / "lin" / commit[:12]}
     for host in roots.values():
         host.mkdir(parents=True)
@@ -205,12 +336,10 @@ def make_native(parent: Path, arms: tuple[str, ...] = tuple(NATIVE_ARM), *, comm
         windows = arm in WINDOWS_ARMS
         host = roots["win" if windows else "lin"]
         binary = binary_of(arm)
+        binary_file = write_binary(parent / "bin" / arm / "MCsquare", arm)
         snapshot = {
-            "Materials/Water.txt": b"water\n", "Scanners/Water_Phantom/HU_Density_Conversion.txt": b"hu density\n",
-            "Scanners/Water_Phantom/HU_Material_Conversion.txt": b"hu material\n",
-            "Scanners/default/HU_Density_Conversion.txt": b"default density\n",
-            "Scanners/default/HU_Material_Conversion.txt": b"default material\n",
-            "BDL/BDL_default_DN_RangeShifter.txt": b"bdl\n", "validation/pencil_endpoints.py": b"# script\n",
+            **F_DATA, "Scanners/Water_Phantom/HU_Density_Conversion.txt": b"hu density\n",
+            "Scanners/Water_Phantom/HU_Material_Conversion.txt": b"hu material\n", "validation/pencil_endpoints.py": b"# script\n",
             "build.txt": b"host HOST\ncompiler cc\n", "binary_sha256.txt": f"{binary}  MCsquare.exe\n".encode(),
         }
         for case in aa.CASES:
@@ -226,7 +355,7 @@ def make_native(parent: Path, arms: tuple[str, ...] = tuple(NATIVE_ARM), *, comm
             write_tree(case_dir / "snapshot", {"validation/__pycache__/x.pyc": b"pyc"})
             seeds = frozen.seeds[(arm, case)]
             if case == "F":
-                fcase = {"cube.mhd": b"mhd", "cube.raw": b"raw", "E200_S150.txt": b"plan"}
+                fcase = dict(F_CASE)
                 write_tree(case_dir / "fcase", fcase)
                 (case_dir / "fcase_sha256.txt").write_bytes(hash_lines(fcase, windows=windows))
             inputs: dict[int, dict[str, bytes]] = {}
@@ -241,7 +370,7 @@ def make_native(parent: Path, arms: tuple[str, ...] = tuple(NATIVE_ARM), *, comm
             for energy, i, seed, _n in cells(arm, case):
                 e_idx = list(aa.SLAB_DEPTHS).index(energy) if energy is not None else 0
                 rng = random.Random(7919 * (e_idx + 1) + 31 * i + 104729 * (a_idx + 1))
-                run = run_json_of(arm, case, energy if energy is not None else 200, seed)
+                run = run_json_of(arm, case, energy if energy is not None else 200, seed, commit)
                 n_text = "1e7" if case == "P" else "3e7"
                 dose = {"Dose.raw": f"raw {arm} {seed}".encode(), "Dose.mhd": f"mhd {arm} {seed}".encode()}
                 if case == "P":
@@ -255,21 +384,18 @@ def make_native(parent: Path, arms: tuple[str, ...] = tuple(NATIVE_ARM), *, comm
                 extra = {}
                 cfg = f"Num_Threads {run['threads']}\nNum_Primaries {n_text}\nRNG_Seed {seed}\nOutput_Directory x\n".encode()
                 if case == "F":
-                    document = f_document(arm, seed, f_record(rng, 1.0))
-                    document["cfg_sha256"] = document["sha256"]["config"] = sha(cfg)
-                    document["sha256"].update(
-                        {"Dose.raw": sha(dose["Dose.raw"]), "Dose.mhd": sha(dose["Dose.mhd"]), "binary": binary,
-                         "cube.mhd": sha(fcase["cube.mhd"]), "cube.raw": sha(fcase["cube.raw"]),
-                         "plan E200_S150.txt": sha(fcase["E200_S150.txt"])}
-                    )
-                    rec_text = json.dumps(document)
                     extra = {
                         **{k: v for k, v in fcase.items()},
                         **{k: v for k, v in snapshot.items() if k.startswith(("Materials/", "Scanners/default/", "BDL/"))},
                     }
-                write_tree(d, {"run.json": json.dumps(run).encode(), rec_name: rec_text.encode(), cfg_name: cfg,
+                else:
+                    extra = {rec_name: rec_text.encode()}
+                write_tree(d, {"run.json": json.dumps(run).encode(), cfg_name: cfg,
                                "log.txt": f"Nbr primaries simulated: {run['simulated']}\n".encode(), **extra})
                 write_tree(d / out_name, {**dose, "sha256.txt": hash_lines(dose, windows=windows)})
+                if case == "F" and run_writer(d, arm, seed, binary_file, f_record(rng, 1.0), commit=commit, writer=writer) is None:
+                    msg = f"the {writer} writer wrote no record for {arm} s{seed}"
+                    raise WriterUnavailableError(msg)
     return roots
 
 
@@ -338,3 +464,25 @@ def interrupted(native: dict[str, Path], arm: str, case: str, seed: int) -> Path
     for f in out.iterdir():
         f.unlink()
     return d
+
+
+# ------------------------------------------------------------------------- attesting a flat tree as a collection
+
+
+def attest(root: Path, parts: tuple[str, ...] = ("A",), *, commit: str = ACQ, **override: object) -> dict:
+    """Write a schema-3 collection_manifest.json over a flat tree as it now stands (every file under the parts' arm
+    directories), standing in for apples_collect.py in analysis tests; `override` replaces top-level manifest keys."""
+    arms = [arm for part in parts for arm in aa.PART_ARMS[part]]
+    files = [
+        {"path": f.relative_to(root).as_posix(), "source": "synthetic", "sha256": sha(f.read_bytes())}
+        for arm in arms for f in sorted((root / arm).rglob("*")) if f.is_file()
+    ]
+    binding = aa.record_binding(commit)
+    manifest: dict = {
+        "schema": aa.MANIFEST_SCHEMA, "acquisition_commit": commit, "parts": list(parts), "files": files,
+        "not_established": [],
+        "f_record_binding": None if binding is None else {"name": binding.name, "schema": binding.schema.name},
+    }
+    manifest.update(override)
+    (root / aa.MANIFEST_NAME).write_text(json.dumps(manifest))
+    return manifest

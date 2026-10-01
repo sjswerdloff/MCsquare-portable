@@ -40,16 +40,30 @@ equal to the directory (a contradiction is fatal), mode "full", commit equal to 
 the workflow (F: 200), transport_status "ok" and a sha256 binary_sha256 that is the same across the whole arm. The
 endpoint record is reconciled with run.json: case P needs layout "mcsquare", the label
 `<arm>_P_E<energy>_N1e7_seed<seed>` and slab_depths_mm exactly the energy's frozen depths (100: 40,60; 150: 80,125;
-200: 100,200); case F needs platform = arm, seed, commit, sha256.binary = run.json binary_sha256, endpoint_status "ok",
-metrics_sha256 equal to the digest of metrics, cfg_sha256 equal to sha256.config, and a study id that is bound by an
-explicit LegacyBinding (only "pe1", only at the acquisition commit, whose records were written before STUDY_ID was set).
+200: 100,200); case F is read through the RECORD BINDING of the acquisition commit (F_RECORD_BINDINGS), which names
+the producer version's record schema and study. 2f9dab40 (the full runs' snapshot) is bound to the schema its
+platform_study_record.py writes: exactly study, platform, seed, host, machine, commit, compiler, sha256 (ten keys),
+materials and metrics, with NO cfg_sha256, metrics_sha256 or endpoint_status (that writer has no failure record: an
+endpoint failure leaves no record.json). Such a record needs study "pe1", platform = arm, seed, commit and sha256.binary
+= run.json binary_sha256; its endpoints are its `metrics`, which no hash covers (stated in the report). A record of the
+later schema (cfg_sha256, metrics_sha256, endpoint_status, from 0f5ef7c) is read only under a commit bound to that schema
+and also needs endpoint_status "ok", metrics_sha256 = digest of metrics and cfg_sha256 = sha256.config. A record that
+mixes the schemas, has the other schema than its commit's binding, lacks or adds a field, or whose commit has no binding
+REFUSES (exit 2); a wrong study, platform, seed, commit or binary keeps the run as unusable (PARTIAL).
 Domain bounds on case P: sigma_d in [1, 20] mm (the fit contract in pencil_endpoints.py) and ring fractions in (0, 1]
 (0 is inside the energy-fraction domain but has no logarithm); otherwise that endpoint is not_established.
 
 Every file read (run.json and the endpoint record of each accepted seed directory, collection_manifest.json when
 present and the not_established entries' copied files) enters the DATASET FINGERPRINT, the sha256 of the sorted "<sha256>  <path relative to the root>" lines, written
-to the report and the JSON. collection_manifest.json, written by apples_collect.py, is verified when present (every
-file it lists must hash as recorded; every file read must be listed); without it the report says the copy is unattested.
+to the report and the JSON.
+
+Collection attestation. Confirmatory claims need a VERIFIED collection. collection_manifest.json (apples_collect.py,
+schema 3) is validated BEFORE any run is read: a schema other than 3, an acquisition_commit other than the frozen
+commit in use, parts that do not cover the analysed parts, or a case-F record binding other than this analysis's refuse;
+then every file it lists must hash as recorded and every file read must be listed. WITHOUT a manifest the tree may
+still be analysed as a preview, but every contrast is PARTIAL through the same withholding path as a population issue:
+descriptive estimates only, no joint claim, no Holm decision, no TOST classification, stated in the report header and
+in the JSON (confirmatory_claims_possible false).
 
 Runs that were not established (apples_collect.py, manifest schema 2): the collector lists every frozen run it did not
 collect in the manifest's `not_established` list, outcome `failed` (interrupted, transport failure, endpoint failure;
@@ -122,6 +136,12 @@ ARM_THREADS = {"A-up": 4, "A-port": 4, "B-up": 3, "B-pgcc": 3, "B-picc": 3}
 REQUESTED = {"P": 10_000_000, "F": 30_000_000}
 P_LABEL = "{arm}_P_E{energy}_N1e7_seed{seed}"  # the --label the workflows pass to pencil_endpoints.py
 MANIFEST_NAME = "collection_manifest.json"
+MANIFEST_SCHEMA = 3  # written by apples_collect.py; the only one this analysis reads
+SUPPORTED_MANIFEST_SCHEMAS = (MANIFEST_SCHEMA,)
+NO_MANIFEST_REASON = (
+    "collection not verified: there is no collection manifest, so the collector's checks (config, snapshot, log, Dose "
+    "and record-hash verification) are not attested for this tree; every contrast is descriptive only"
+)
 PROVENANCE_DIR = ".provenance"  # apples_collect.py puts run_root.txt and the *_sha256.txt files here; skipped (hidden)
 NOT_ESTABLISHED_DIR = ".not_established"  # apples_collect.py copies a failed run's diagnostics here, never as a run
 NE_OUTCOMES = ("failed", "absent")
@@ -129,29 +149,103 @@ NE_OUTCOMES = ("failed", "absent")
 IDENTITY_SOURCE = (
     "Run identity comes from the frozen workflow run lists at the acquisition commit and is validated against "
     "run.json and the endpoint record (arm, case, seed, mode, commit, requested/simulated, threads, energy, binary "
-    "hash, slab depths, record hashes). The `study` field of record.json is accepted only through a named legacy "
-    "binding (pe1 at the acquisition commit); a record that is not that is an unusable run."
+    "hash, slab depths, record hashes). A case-F record.json is read only through the record binding of the "
+    "acquisition commit, which names the schema its writer emitted and the study it wrote (pe1 at 2f9dab40); a "
+    "record of another schema, or mixing two, refuses; a record whose study is not the bound one is an unusable run."
+)
+
+# ------------------------------------------------------------------------- case-F record schemas, by producer version
+
+# The fields platform_study_record.py writes, per version of the writer. At the acquisition commit 2f9dab40 the writer
+# (`git show 2f9dab40:validation/platform_study_record.py`) emits exactly LEGACY_RECORD_FIELDS, computes the endpoints
+# BEFORE opening record.json and has no failure path: an endpoint failure raises, no record.json is written and the job
+# stops. From 0f5ef7c the writer adds V2_ENDPOINT_FIELDS (and endpoint_error on failure) and writes a record either way.
+F_RECORD_SHA256_KEYS = frozenset(
+    {"Dose.raw", "Dose.mhd", "config", "plan E200_S150.txt", "cube.mhd", "cube.raw", "BDL", "HU_Density", "HU_Material",
+     "binary"}
+)
+LEGACY_RECORD_FIELDS = frozenset(
+    {"study", "platform", "seed", "host", "machine", "commit", "compiler", "sha256", "materials", "metrics"}
+)
+V2_ENDPOINT_FIELDS = frozenset({"cfg_sha256", "metrics_sha256", "endpoint_status"})
+MATERIALS_KEYS = frozenset({"files", "combined_sha256"})
+
+_RECORD_VERIFIED_COMMON = (
+    "study equals the binding's study; platform, seed and commit equal the run directory, run.json and the binding",
+    "sha256.config equals the sha256 of the run's cfg.txt",
+    "sha256.binary equals run.json binary_sha256 and snapshot/binary_sha256.txt",
+    "sha256.Dose.raw and sha256.Dose.mhd equal the out_seed files, which hash as out_seed/sha256.txt lists",
+    "sha256 of the plan and cube equal the run directory's files and fcase_sha256.txt",
+    "sha256.BDL, HU_Density and HU_Material equal the run directory's files and the snapshot's",
+    "materials recomputed from the run directory's Materials/ with the writer's tree_digest formula",
 )
 
 
 @dataclass(frozen=True)
-class LegacyBinding:
-    """An explicit, named exception: a record `study` value accepted only for one commit (no other provenance relaxed)."""
+class RecordSchema:
+    """The top-level fields one version of platform_study_record.py writes, and what can be verified from them."""
 
     name: str
-    study: str
+    fields: frozenset[str]  # required, exactly
+    optional: frozenset[str]
+    endpoint_status: bool  # the writer records endpoint failures (else a failure leaves no record.json)
+    verified: tuple[str, ...]  # what apples_collect.py (files) and this analysis (run.json) verify
+    not_verifiable: tuple[str, ...]
+
+
+RECORD_SCHEMA_2F9DAB40 = RecordSchema(
+    "platform_study_record@2f9dab40",
+    LEGACY_RECORD_FIELDS,
+    frozenset(),
+    endpoint_status=False,
+    verified=_RECORD_VERIFIED_COMMON,
+    not_verifiable=(
+        "metrics: this schema carries no metrics hash; the endpoint values are taken from `metrics` as written",
+        "a missing record.json after transport ok is the endpoint-failure shape (the writer has no failure record)",
+    ),
+)
+RECORD_SCHEMA_V2 = RecordSchema(
+    "platform_study_record@0f5ef7c",
+    LEGACY_RECORD_FIELDS | V2_ENDPOINT_FIELDS,
+    frozenset({"endpoint_error"}),
+    endpoint_status=True,
+    verified=(
+        *_RECORD_VERIFIED_COMMON,
+        "cfg_sha256 equals sha256.config",
+        "metrics_sha256 equals the digest of metrics",
+        "endpoint_status is ok (else the run is an endpoint failure)",
+    ),
+    not_verifiable=(),
+)
+
+
+@dataclass(frozen=True)
+class RecordBinding:
+    """An explicit, named binding of a producer version: case-F records under `commit` must have exactly `schema` and
+    carry `study`. Nothing else is relaxed."""
+
+    name: str
     commit: str
+    study: str
+    schema: RecordSchema
     reason: str
 
 
-LEGACY_F_BINDINGS = (
-    LegacyBinding(
+F_RECORD_BINDINGS = (
+    RecordBinding(
         "pe1-at-acquisition-2f9dab40",
-        "pe1",
         ACQUISITION_COMMIT,
-        "case-F records written by platform_study_record.py before STUDY_ID was set carry its default, pe1",
+        "pe1",
+        RECORD_SCHEMA_2F9DAB40,
+        "the full runs use the snapshot of 2f9dab40, whose platform_study_record.py writes the pe1 study id and none "
+        "of cfg_sha256, metrics_sha256 or endpoint_status",
     ),
 )
+
+
+def record_binding(commit: str) -> RecordBinding | None:
+    """The case-F record binding for an acquisition commit, or None (no record from that commit can be read)."""
+    return next((b for b in F_RECORD_BINDINGS if b.commit == commit), None)
 
 # (name, arm, reference, confirmatory?)
 CONTRASTS_BY_PART = {
@@ -197,7 +291,7 @@ class Run:
     commit: str | None = None  # run.json "commit", None if absent
     binary: str | None = None  # run.json "binary_sha256" when it is a well-formed sha256
     host: str | None = None
-    legacy: str | None = None  # name of the LegacyBinding that admitted this run's record, if any
+    binding: str | None = None  # name of the RecordBinding that admitted this run's case-F record, if any
     raw: dict[str, float | None] = field(default_factory=dict)  # eid -> value, None = invalid for that endpoint
 
 
@@ -446,34 +540,92 @@ def _reconcile_p(doc: dict[str, object], arm: str, seed: int, energy: int) -> li
     return bad
 
 
+def _is_sha256(v: object) -> bool:
+    return isinstance(v, str) and SHA256_HEX.match(v) is not None
+
+
+def f_record_shape(doc: dict[str, object], commit: str) -> tuple[RecordBinding | None, list[str]]:
+    """The record binding of `commit` and the SHAPE problems of a case-F record.json under it (empty when the record
+    has exactly the bound schema). A shape problem is an integrity failure (the record cannot come from the bound
+    writer) and refuses; it is never an endpoint failure:
+      - no binding for the commit;
+      - a record carrying some but not all of cfg_sha256 / metrics_sha256 / endpoint_status (mixed schemas);
+      - a record of one schema under a commit bound to the other (e.g. the 2f9dab40 schema at a later commit, or a
+        record carrying endpoint_status at 2f9dab40);
+      - a missing or unexpected top-level field; sha256 not exactly the writer's ten keys of sha256 hex; materials not
+        {files, combined_sha256}; metrics not an object (2f9dab40, and a v2 record with endpoint_status ok); a v2
+        record whose endpoint_status is not ok/error or whose error record is not the writer's error shape.
+    """
+    binding = record_binding(commit)
+    if binding is None:
+        return None, [f"no case-F record binding for commit {commit[:12]}"]
+    keys = set(doc)
+    v2 = keys & V2_ENDPOINT_FIELDS
+    if v2 and v2 != V2_ENDPOINT_FIELDS:
+        return binding, [f"mixes record schemas: carries {sorted(v2)} but not {sorted(V2_ENDPOINT_FIELDS - v2)}"]
+    schema = RECORD_SCHEMA_V2 if v2 else RECORD_SCHEMA_2F9DAB40
+    if schema is not binding.schema:
+        why = f"record has the {schema.name} schema, but commit {commit[:12]} is bound to {binding.schema.name} ({binding.name})"
+        return binding, [why]
+    bad: list[str] = []
+    missing, extra = sorted(schema.fields - keys), sorted(keys - schema.fields - schema.optional)
+    if missing:
+        bad.append(f"record lacks field(s) {missing} of {schema.name}")
+    if extra:
+        bad.append(f"record has field(s) {extra} that {schema.name} does not write")
+    hashes = doc.get("sha256")
+    if not isinstance(hashes, dict) or set(hashes) != F_RECORD_SHA256_KEYS or not all(map(_is_sha256, hashes.values())):
+        got = sorted(hashes) if isinstance(hashes, dict) else hashes
+        bad.append(f"record sha256 is not the writer's {len(F_RECORD_SHA256_KEYS)} sha256 values (keys {got!r})")
+    materials = doc.get("materials")
+    if (not isinstance(materials, dict) or set(materials) != MATERIALS_KEYS or _int(materials.get("files")) is None
+            or not _is_sha256(materials.get("combined_sha256"))):
+        bad.append(f"record materials {materials!r} is not {{files, combined_sha256}}")
+    status = doc.get("endpoint_status")
+    if schema.endpoint_status and status not in ("ok", "error"):
+        bad.append(f"record endpoint_status {status!r} is not one the writer writes")
+    elif schema.endpoint_status and status == "error":
+        if doc.get("metrics") is not None or doc.get("metrics_sha256") is not None or not isinstance(doc.get("endpoint_error"), str):
+            bad.append("record endpoint_status error without the writer's error shape (null metrics, endpoint_error)")
+    elif "metrics" in keys and not isinstance(doc.get("metrics"), dict):
+        bad.append("record metrics is not an object")
+    if schema.endpoint_status and status == "ok" and "endpoint_error" in keys:
+        bad.append("record endpoint_status ok with an endpoint_error")
+    return binding, bad
+
+
 def _reconcile_f(
     doc: dict[str, object], run_json: dict[str, object] | None, arm: str, seed: int, commit: str
 ) -> tuple[list[str], str | None]:
-    """Case-F record.json top level against run.json and the frozen expectation; returns (problems, legacy binding)."""
+    """Case-F record.json against its binding, run.json and the frozen expectation; returns (provenance problems,
+    binding name). A record whose shape is not the bound schema refuses (InputError); see f_record_shape.
+
+    Both schemas: study is the binding's, platform/seed/commit are this run's, sha256.binary is run.json's. The 2f9dab40
+    schema has no endpoint status and no metrics hash: its endpoints are `metrics` as written (the collector verifies
+    the record's file hashes; nothing can verify the metrics). The v2 schema also needs endpoint_status ok,
+    metrics_sha256 equal to the digest of metrics and cfg_sha256 equal to sha256.config.
+    """
+    binding, shape = f_record_shape(doc, commit)
+    if shape or binding is None:
+        msg = f"{arm}/F/s{seed} record.json: " + "; ".join(shape)
+        raise InputError(msg)
     bad: list[str] = []
-    study = doc.get("study")
-    binding = next((b for b in LEGACY_F_BINDINGS if b.study == study and b.commit == commit), None)
-    if binding is None:
-        bad.append(f"record study {study!r} is not bound for commit {commit[:12]} (no LegacyBinding)")
+    if doc.get("study") != binding.study:
+        bad.append(f"record study {doc.get('study')!r} is not the study {binding.study!r} bound by {binding.name}")
     for key, want in (("platform", arm), ("seed", seed), ("commit", commit)):
         if doc.get(key) != want or isinstance(doc.get(key), bool):
             bad.append(f"record {key} {doc.get(key)!r}, expected {want!r}")
-    if doc.get("endpoint_status") != "ok":
-        bad.append(f"record endpoint_status {doc.get('endpoint_status')!r}, expected 'ok'")
-    if not isinstance(doc.get("metrics"), dict):
-        bad.append("record metrics is not an object")
-    elif doc.get("metrics_sha256") != metrics_digest(doc["metrics"]):
-        bad.append("record metrics_sha256 does not match its metrics")
-    hashes = doc.get("sha256")
-    hashes = hashes if isinstance(hashes, dict) else {}
-    if doc.get("cfg_sha256") is None or doc.get("cfg_sha256") != hashes.get("config"):
-        bad.append("record cfg_sha256 does not equal sha256.config")
-    binary = hashes.get("binary")
-    if not isinstance(binary, str) or not SHA256_HEX.match(binary):
-        bad.append(f"record sha256.binary {binary!r} is not a lowercase sha256")
-    elif run_json is not None and run_json.get("binary_sha256") != binary:
+    hashes: dict[str, object] = doc["sha256"]  # type: ignore[assignment]  # shape checked
+    if run_json is not None and run_json.get("binary_sha256") != hashes["binary"]:
         bad.append("record sha256.binary differs from run.json binary_sha256")
-    return bad, binding.name if binding is not None else None
+    if binding.schema.endpoint_status:
+        if doc["endpoint_status"] != "ok":
+            bad.append(f"record endpoint_status {doc['endpoint_status']!r}, expected 'ok'")
+        elif doc.get("metrics_sha256") != metrics_digest(doc["metrics"]):
+            bad.append("record metrics_sha256 does not match its metrics")
+        if doc.get("cfg_sha256") != hashes["config"]:
+            bad.append("record cfg_sha256 does not equal sha256.config")
+    return bad, binding.name
 
 
 def load_run(
@@ -503,14 +655,14 @@ def load_run(
         if status != TRANSPORT_OK:
             problems.append(f"transport_status {status!r}")
     rec: dict[str, object] | None = None
-    legacy: str | None = None
+    binding: str | None = None
     try:
         doc = _endpoint_document(run_dir / ("endpoints.json" if case == "P" else "record.json"), case, ledger)
         if case == "P":
             provenance += _reconcile_p(doc, arm, seed, energy)
             rec = doc
         else:
-            bad, legacy = _reconcile_f(doc, run_json, arm, seed, commit)
+            bad, binding = _reconcile_f(doc, run_json, arm, seed, commit)
             provenance += bad
             metrics = doc.get("metrics")
             rec = metrics if isinstance(metrics, dict) else None
@@ -528,7 +680,7 @@ def load_run(
         label, seed, energy, usable=not problems, problems=problems, provenance=provenance,
         mode=mode if isinstance(mode, str) else None, commit=run_commit if isinstance(run_commit, str) else None,
         binary=binary if isinstance(binary, str) and SHA256_HEX.match(binary) else None,
-        host=host if isinstance(host, str) else None, legacy=legacy, raw=raw,
+        host=host if isinstance(host, str) else None, binding=binding, raw=raw,
     )
 
 
@@ -719,6 +871,36 @@ def _ne_files(entry: dict[str, object]) -> dict[str, str]:
     return files if isinstance(files, dict) else {}
 
 
+def check_manifest_identity(manifest: dict[str, object], commit: str, parts: tuple[str, ...]) -> None:
+    """Refuse, BEFORE any run is read, a manifest that does not attest THIS analysis: an unsupported `schema`, an
+    `acquisition_commit` other than the frozen commit in use, `parts` that do not cover the parts being analysed, or a
+    case-F record binding other than the one this analysis applies to the commit."""
+    schema = manifest.get("schema")
+    if _int(schema) is None or schema not in SUPPORTED_MANIFEST_SCHEMAS:
+        msg = f"collection manifest: schema {schema!r} is not supported (supported: {list(SUPPORTED_MANIFEST_SCHEMAS)})"
+        raise InputError(msg)
+    if manifest.get("acquisition_commit") != commit:
+        msg = (f"collection manifest: acquisition_commit {manifest.get('acquisition_commit')!r} is not the frozen commit "
+               f"in use, {commit}")
+        raise InputError(msg)
+    mparts = manifest.get("parts")
+    if not isinstance(mparts, list) or not all(isinstance(p, str) and p in PART_ARMS for p in mparts) \
+            or len(set(mparts)) != len(mparts):
+        msg = f"collection manifest: parts {mparts!r} is not a list of distinct parts from {sorted(PART_ARMS)}"
+        raise InputError(msg)
+    uncovered = sorted(set(parts) - set(mparts))
+    if uncovered:
+        msg = f"collection manifest: parts {mparts} do not cover the analysed part(s) {uncovered}"
+        raise InputError(msg)
+    binding = record_binding(commit)
+    declared = manifest.get("f_record_binding")
+    want = None if binding is None else {"name": binding.name, "schema": binding.schema.name}
+    got = {k: declared.get(k) for k in ("name", "schema")} if isinstance(declared, dict) else declared
+    if binding is None or got != want:
+        msg = f"collection manifest: f_record_binding {got!r} is not this analysis's binding for {commit[:12]}, {want!r}"
+        raise InputError(msg)
+
+
 def verify_manifest(
     root: Path, ledger: Ledger, manifest: dict[str, object] | None,
     listed: dict[tuple[str, str], dict[int, dict[str, object]]],
@@ -730,7 +912,8 @@ def verify_manifest(
     ledger, so the dataset fingerprint covers them. Returns the report entry; raises InputError on a mismatch.
     """
     if manifest is None:
-        return {"present": False, "note": "no collection manifest: the provenance of this copy is not attested"}
+        return {"present": False, "note": "no collection manifest: the provenance of this copy is not attested; "
+                "confirmatory claims are withheld for every contrast"}
     files = _file_entries(manifest.get("files"), "files")
     ne_files = {p: h for cell in listed.values() for entry in cell.values() for p, h in _ne_files(entry).items()}
     for rel, want in sorted({**files, **ne_files}.items()):
@@ -748,7 +931,9 @@ def verify_manifest(
         msg = "collection manifest does not list file(s) the analysis read: " + ", ".join(unlisted[:3])
         raise InputError(msg)
     return {"present": True, "files_verified": len(files) + len(ne_files),
-            "not_established_files_verified": len(ne_files), "acquisition_commit": manifest.get("acquisition_commit")}
+            "not_established_files_verified": len(ne_files), "acquisition_commit": manifest.get("acquisition_commit"),
+            "schema": manifest.get("schema"), "parts": manifest.get("parts"),
+            "f_record_binding": manifest.get("f_record_binding")}
 
 
 # ----------------------------------------------------------------------------------------------- statistics
@@ -847,10 +1032,12 @@ def analyse_contrast(
     *,
     confirmatory: bool,
     issues: dict[tuple[str, str], list[str]],
+    collection: list[str] | None = None,
 ) -> dict[str, object]:
-    """One contrast. A confirmatory contrast whose population is not exactly the frozen one is PARTIAL: it is analysed
-    descriptively (estimates and intervals, nothing classified) and emits no joint claim and no Holm decision."""
-    partial = partial_reasons(issues, (arm, ref))
+    """One contrast. A confirmatory contrast whose population is not exactly the frozen one, or whose collection is not
+    verified (`collection`: reasons that apply to every contrast, e.g. no collection manifest), is PARTIAL: it is
+    analysed descriptively (estimates and intervals, nothing classified) and emits no joint claim and no Holm decision."""
+    partial = [*(collection or []), *partial_reasons(issues, (arm, ref))]
     withheld = confirmatory and bool(partial)
     descriptive = not confirmatory or withheld
     results = [evaluate(s, data[(arm, s.case)], data[(ref, s.case)], descriptive=descriptive) for s in specs]
@@ -943,7 +1130,7 @@ def markdown_table(name: str, confirmatory: bool, analysed: dict[str, object]) -
     if partial:
         lines += [
             "**PARTIAL**: the population is not exactly the frozen one (" + str(RUNS_PER_CELL) + " runs per arm, case "
-            "and energy planned)." + (" Confirmatory claims WITHHELD: no joint claim, no Holm decision, no equivalence "
+            "and energy planned), or the collection is not verified." + (" Confirmatory claims WITHHELD: no joint claim, no Holm decision, no equivalence "
                                       "classification; the estimates below are descriptive only." if withheld else ""),
             "",
             *[f"- {reason}" for reason in partial],
@@ -999,11 +1186,15 @@ def run_analysis(
         msg = f"{root} is not a directory"
         raise InputError(msg)
     manifest_doc = read_manifest(root, ledger)
+    if manifest_doc is not None:
+        check_manifest_identity(manifest_doc, commit, parts)  # before any run is read or any inference is made
     listed = listed_not_established(manifest_doc, frozen)
     data, issues = load_root(root, parts, frozen, ledger, listed, attested=manifest_doc is not None)
     manifest = verify_manifest(root, ledger, manifest_doc, listed)
+    collection = [] if manifest["present"] else [NO_MANIFEST_REASON]
     fingerprint = ledger.fingerprint()
     specs = all_specs()
+    binding = record_binding(commit)
     md = ["# Same-host comparison: parts " + ", ".join(parts), "", IDENTITY_SOURCE, ""]
     md.append(f"Acquisition commit (frozen run lists): {commit}")
     md.append(f"Dataset fingerprint: sha256 {fingerprint['sha256']} over {fingerprint['n_files']} input file(s)")
@@ -1011,12 +1202,23 @@ def run_analysis(
         f"Collection manifest: verified, {manifest['files_verified']} file(s)" if manifest["present"]
         else f"Collection manifest: {manifest['note']}"
     )
+    if collection:
+        md.append("Confirmatory claims: WITHHELD for every contrast (descriptive only): " + "; ".join(collection))
+    if binding is not None:
+        md.append(f"Case-F record schema: {binding.schema.name} (binding {binding.name}). Verified: "
+                  + "; ".join(binding.schema.verified) + "."
+                  + (" Not verifiable: " + "; ".join(binding.schema.not_verifiable) + "." if binding.schema.not_verifiable else ""))
     md.append("")
     doc: dict[str, object] = {"parts": list(parts), "alpha": ALPHA, "family_size": FAMILY_SIZE,
                            "identity_source": IDENTITY_SOURCE, "runs_per_cell": RUNS_PER_CELL,
                            "acquisition_commit": commit, "dataset_fingerprint": fingerprint,
                            "collection_manifest": manifest,
-                           "legacy_bindings": [b.name for b in LEGACY_F_BINDINGS], "contrasts": []}
+                           "confirmatory_claims_possible": not collection, "claims_withheld_for_all": collection,
+                           "f_record_binding": None if binding is None else {
+                               "name": binding.name, "commit": binding.commit, "study": binding.study,
+                               "schema": binding.schema.name, "verified": list(binding.schema.verified),
+                               "not_verifiable": list(binding.schema.not_verifiable)},
+                           "contrasts": []}
     md.append("Runs per arm and case (unusable runs stay in the population):")
     md.append("")
     runs_doc: dict[str, object] = {}
@@ -1025,18 +1227,18 @@ def run_analysis(
         modes = sorted({r.mode or "unknown" for r in runs})
         commits = sorted({r.commit or "unknown" for r in runs})
         counts = cell_counts(runs, case)
-        legacy = sorted({r.legacy for r in runs if r.legacy})
+        bound = sorted({r.binding for r in runs if r.binding})
         runs_doc[f"{arm}/{case}"] = {
             "n": len(runs), "expected": len(frozen.seeds[(arm, case)]), "unusable": bad, "modes": modes,
             "commits": commits, "per_energy": counts, "issues": issues[(arm, case)],
             "binary_sha256": sorted({r.binary for r in runs if r.binary}),
-            "hosts": sorted({r.host for r in runs if r.host}), "legacy_bindings_used": legacy,
+            "hosts": sorted({r.host for r in runs if r.host}), "record_bindings_used": bound,
         }
         md.append(
             f"- {arm}/{case}: {len(runs)} of {len(frozen.seeds[(arm, case)])} expected runs "
             f"({', '.join(f'{e} MeV: {n}' for e, n in counts.items())}), {len(bad)} unusable; "
             f"mode {'/'.join(modes)}, commit {'/'.join(c[:12] for c in commits)}"
-            + (f", legacy binding {'/'.join(legacy)}" if legacy else "")
+            + (f", record binding {'/'.join(bound)}" if bound else "")
             + "".join(f"\n  - {b}" for b in bad)
         )
     md.append("")
@@ -1054,7 +1256,8 @@ def run_analysis(
     contrasts_doc: list[object] = []
     for part in parts:
         for name, arm, ref, confirmatory in CONTRASTS_BY_PART[part]:
-            analysed = analyse_contrast(data, arm, ref, specs, confirmatory=confirmatory, issues=issues)
+            analysed = analyse_contrast(data, arm, ref, specs, confirmatory=confirmatory, issues=issues,
+                                        collection=collection)
             md += markdown_table(name, confirmatory, analysed)
             results: list[Result] = analysed["results"]  # type: ignore[assignment]
             contrasts_doc.append(

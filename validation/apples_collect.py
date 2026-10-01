@@ -26,7 +26,12 @@ seed) is classified as one of:
     failed     (interrupted) a seed directory with no run.json: the job was cancelled or the host died mid-run;
                (transport) run.json transport_status != ok: write_run wrote it and exited the job;
                (endpoint) transport ok, but case p endpoints.json missing, empty or not one ENDPOINTS line, or case f
-               record.json missing, unparseable or endpoint_status != ok;
+               record.json missing or unparseable (the 2f9dab40 writer's only failure shape: it raises before
+               writing), or, for a writer whose schema has it, endpoint_status != ok.
+A case-F record.json is read through the record binding of the commit (apples_analyse.F_RECORD_BINDINGS): 2f9dab40 is
+bound to the schema its writer emits (no cfg_sha256, metrics_sha256 or endpoint_status), so a present, well-formed
+record of that schema is `collected`, never an endpoint failure for lacking endpoint_status. A record that mixes the
+schemas, has the other schema, lacks or adds a field, or disagrees with its files is an integrity failure and refuses.
     absent     no seed directory, and every seed of the job's frozen loop after it has none either (the job exited).
 A failed run's diagnostic files (run.json, the endpoint record, the config, the log and out/sha256.txt, whichever exist)
 are copied to <DIR>/.not_established/<arm>/<case>/s<seed>/, never to the <arm>/<case>/s<seed>/ path the analysis reads
@@ -46,13 +51,19 @@ __pycache__, which the runs themselves create after the hashes are taken, are to
 snapshot/binary_sha256.txt equals every run's binary_sha256; the case-input hash lists match the files; each seed
 directory sits under the energy the frozen list gives it; run.json agrees with the directory, with the config
 (threads, primaries, seed) and with the log's primaries count (when run.json simulated is set); the Dose files hash as out/sha256.txt (and as record.json
-for case f) says; record.json's config, cube/plan and binary hashes agree with the files and snapshot.
+for case f) says; record.json is the bound schema and is verified with what that schema carries
+(apples_analyse.RecordSchema.verified): study, platform, seed and commit; sha256.config against cfg.txt; sha256.binary
+against run.json and the snapshot; the Dose hashes against the out_seed files; plan, cube, BDL and HU hashes against the
+run directory's files and the fcase/snapshot lists; materials recomputed from the run directory's Materials/ with the
+writer's own digest formula. The 2f9dab40 schema carries no metrics hash, so its metrics are not verifiable; the
+manifest's f_record_binding lists what was verified and what was not.
 
 What it copies, per collected run: run.json, the endpoint record, the config, the log and out/sha256.txt (as out_sha256.txt);
 per arm and case, under .provenance/: run_root.txt, the *_sha256.txt lists and the snapshot's build.txt and
 binary_sha256.txt. The Dose files, case inputs and the rest of the snapshot are verified in place and not copied.
-collection_manifest.json records the source path and sha256 of every copied file, the roots, the commit, and what was
-verified or tolerated; apples_analyse.py verifies it again when it reads the tree.
+collection_manifest.json (schema 3) records the source path and sha256 of every copied file, the roots, the commit, the
+parts, the case-F record binding (schema, verified fields, not-verifiable fields, records read) and what was verified or
+tolerated; apples_analyse.py validates it before inference and verifies the files again when it reads the tree.
 
 Prints `collected N, failed N, absent N`. Exit status: 0 collected (whatever the outcomes); 2 refused (reasons on stderr).
 """
@@ -87,6 +98,7 @@ F_CASE_FILES = ("cube.mhd", "cube.raw", "E200_S150.txt")
 DOSE_FILES = ("Dose.raw", "Dose.mhd")
 WINDOWS_SNAPSHOT_TAR = "inputs.tar"
 SNAPSHOT_ADDED_FILES = frozenset({"build.txt", "binary_sha256.txt"})
+WINDOWS_ARMS = frozenset(aa.PART_ARMS["A"])  # apples-a-windows.yml runs the record writer under Windows Python
 
 
 class CollectionError(Exception):
@@ -105,6 +117,7 @@ class Collection:
     # failed and absent runs: arm, case, seed, energy, outcome, reason and `copies` (source, path under .not_established/)
     not_established: list[dict[str, object]] = field(default_factory=list)
     verified: dict[str, int] = field(default_factory=lambda: {"runs": 0, "hash_lists": 0, "files_hashed": 0})
+    f_records: int = 0  # case-F records of the bound schema read as usable endpoint records
 
     def bad(self, where: object, what: str) -> None:
         self.problems.append(f"{where}: {what}")
@@ -338,14 +351,23 @@ def check_seed_dir(
     elif shape == "ok":
         record, why = read_f_record(d / rec_name)
         if why is not None:
+            # 2f9dab40's writer has no failure record: an endpoint failure raises before record.json is opened
             reason = f"endpoint failure: {why}"
-        elif record is not None and record.get("endpoint_status") != "ok":
-            error = record.get("endpoint_error")
-            reason = f"endpoint failure: record.json endpoint_status {record.get('endpoint_status')!r}" + (
-                f" ({error})" if error else ""
-            )
+        elif record is not None:
+            binding, shape_problems = aa.f_record_shape(record, col.commit)
+            for problem in shape_problems:
+                col.bad(d / rec_name, problem)
+            if shape_problems:
+                record = None  # not a record of the bound writer: its hashes are not checked against anything
+            elif binding is not None and binding.schema.endpoint_status and record["endpoint_status"] != "ok":
+                error = record.get("endpoint_error")
+                reason = f"endpoint failure: record.json endpoint_status {record.get('endpoint_status')!r}" + (
+                    f" ({error})" if error else ""
+                )
+            else:
+                col.f_records += 1
     if case == "F":
-        check_f_files(col, d, run, cfg_name, dose, fcase, snap, record)
+        check_f_files(col, arm, seed, d, run, cfg_name, dose, fcase, snap, binary, record)
     col.verified["runs"] += 1
     outcome = "failed" if reason else "collected"
     if outcome == "collected":
@@ -364,31 +386,48 @@ def check_seed_dir(
     return outcome, reason
 
 
+# record.json sha256 key -> the run directory file it hashes (the writer's cwd is the run directory)
+F_RECORD_FILES = {
+    "plan E200_S150.txt": "E200_S150.txt", "cube.mhd": "cube.mhd", "cube.raw": "cube.raw",
+    "BDL": "BDL/BDL_default_DN_RangeShifter.txt", "HU_Density": "Scanners/default/HU_Density_Conversion.txt",
+    "HU_Material": "Scanners/default/HU_Material_Conversion.txt",
+}
+
+
+def writer_materials_digest(run_dir: Path, *, windows: bool) -> dict[str, object]:
+    """`materials` as platform_study_record.tree_digest("Materials/**/*") computes it with the run directory as cwd:
+    every regular file under Materials/ that glob reaches (no path component starting with a dot), keyed by its
+    relative path with forward slashes, in the order sorted() gives glob's NATIVE paths (backslash-separated on the
+    Windows hosts, which can order differently from forward slashes), then sha256 over the "<path> <sha256>" lines, each newline-terminated.
+    For the 2f9dab40 Materials tree the two orders coincide; the native order is used regardless."""
+    rels = []
+    for f in (run_dir / "Materials").rglob("*"):
+        rel = f.relative_to(run_dir).as_posix()
+        if f.is_file() and not any(part.startswith(".") for part in rel.split("/")):
+            rels.append(rel)
+    rels.sort(key=(lambda r: r.replace("/", "\\")) if windows else None)
+    lines = "".join(f"{rel} {sha256_file(run_dir / rel)}\n" for rel in rels)
+    return {"files": len(rels), "combined_sha256": hashlib.sha256(lines.encode()).hexdigest()}
+
+
 def check_f_files(
-    col: Collection, d: Path, run: dict[str, object], cfg_name: str, dose: dict[str, str], fcase: dict[str, str],
-    snap: dict[str, str], record: dict[str, object] | None,
+    col: Collection, arm: str, seed: int, d: Path, run: dict[str, object], cfg_name: str, dose: dict[str, str],
+    fcase: dict[str, str], snap: dict[str, str], binary: str | None, record: dict[str, object] | None,
 ) -> None:
     """Case f: the case files copied into the run directory against the fcase list and the snapshot (every shape: the
-    workflow copies them before the run starts), and, when there is a parsable record.json, its hashes against them."""
-    rec_name = d / "record.json"
-    raw_hashes = record.get("sha256") if record is not None else None
-    hashes: dict[str, object] = raw_hashes if isinstance(raw_hashes, dict) else {}
-    if record is not None:
-        if (d / cfg_name).is_file():
-            cfg_hash = sha256_file(d / cfg_name)
-            for key, got in (("cfg_sha256", record.get("cfg_sha256")), ("sha256.config", hashes.get("config"))):
-                if got != cfg_hash:
-                    col.bad(rec_name, f"{key} does not match cfg.txt")
-        if hashes.get("binary") != run.get("binary_sha256"):
-            col.bad(rec_name, "sha256.binary differs from run.json binary_sha256")
-        for name in DOSE_FILES:
-            if name in dose and hashes.get(name) != dose[name]:
-                col.bad(rec_name, f"sha256.{name} differs from the Dose file")
+    workflow copies them before the run starts), and, when there is a record.json of the bound schema, the record
+    against them, verified with what that schema carries (aa.RecordSchema.verified):
+      study is the binding's; platform, seed and commit are this run's (directory, run.json, binding);
+      sha256.config = cfg.txt; sha256.binary = run.json binary_sha256 = snapshot/binary_sha256.txt;
+      sha256.Dose.raw/Dose.mhd = the out_seed files (themselves checked against out_seed/sha256.txt);
+      plan and cube = the run directory's files = fcase_sha256.txt; BDL and HU_* = the run directory's files = snapshot;
+      materials = writer_materials_digest of the run directory (the arm's host decides the path order);
+      v2 schema only: cfg_sha256 = sha256.config (metrics_sha256 is checked by the analysis).
+    The 2f9dab40 schema has no metrics hash, so the metrics cannot be verified here (recorded in the manifest)."""
+    where = d / "record.json"
     for key, name in (("cube.mhd", "cube.mhd"), ("cube.raw", "cube.raw"), ("plan E200_S150.txt", "E200_S150.txt")):
-        if (d / name).is_file():
-            got = sha256_file(d / name)
-            if got != fcase.get(name) or (record is not None and hashes.get(key) != got):
-                col.bad(d, f"{name} differs from fcase_sha256.txt or from record.json sha256[{key!r}]")
+        if (d / name).is_file() and sha256_file(d / name) != fcase.get(name):
+            col.bad(d, f"{name} differs from fcase_sha256.txt")
     for sub, prefix in (("Materials", "Materials/"), ("Scanners/default", "Scanners/default/")):
         if (d / sub).is_dir():
             want = {r: h for r, h in snap.items() if r.startswith(prefix)}
@@ -399,6 +438,39 @@ def check_f_files(
     for sub, names in (("Scanners", {"default"}), ("BDL", {"BDL_default_DN_RangeShifter.txt"})):
         if (d / sub).is_dir():
             check_entries(col, d / sub, names, names)
+    if record is None:
+        return
+    binding = aa.record_binding(col.commit)
+    if binding is None:  # f_record_shape has already refused it
+        return
+    for key, want in (("study", binding.study), ("platform", arm), ("seed", seed), ("commit", col.commit)):
+        if record.get(key) != want or isinstance(record.get(key), bool):
+            col.bad(where, f"{key} is {record.get(key)!r}, expected {want!r} ({binding.name})")
+    if run and run.get("commit") != col.commit:
+        col.bad(d / "run.json", f"commit is {run.get('commit')!r}, expected {col.commit!r}")
+    hashes: dict[str, object] = record["sha256"]  # type: ignore[assignment]  # shape checked by f_record_shape
+    if (d / cfg_name).is_file():
+        cfg_hash = sha256_file(d / cfg_name)
+        if hashes["config"] != cfg_hash:
+            col.bad(where, "sha256.config does not match cfg.txt")
+        if binding.schema.endpoint_status and record.get("cfg_sha256") != cfg_hash:
+            col.bad(where, "cfg_sha256 does not match cfg.txt")
+    else:
+        col.bad(where, f"sha256.config cannot be verified: {cfg_name} is missing")
+    if hashes["binary"] != run.get("binary_sha256") or hashes["binary"] != binary:
+        col.bad(where, "sha256.binary differs from run.json binary_sha256 or snapshot/binary_sha256.txt")
+    for name in DOSE_FILES:
+        if dose.get(name) is None or hashes[name] != dose[name]:
+            col.bad(where, f"sha256.{name} differs from the Dose file (or it is missing)")
+    for key, rel in F_RECORD_FILES.items():
+        reference = fcase.get(rel) if key in ("plan E200_S150.txt", "cube.mhd", "cube.raw") else snap.get(rel)
+        got = sha256_file(d / rel) if (d / rel).is_file() else None
+        if got is None or hashes[key] != got or hashes[key] != reference:
+            col.bad(where, f"sha256[{key!r}] differs from {rel} in the run directory or its reference list (or it is missing)")
+    if not (d / "Materials").is_dir():
+        col.bad(where, "materials cannot be verified: the run directory has no Materials/")
+    elif record["materials"] != writer_materials_digest(d, windows=arm in WINDOWS_ARMS):
+        col.bad(where, "materials does not match the run directory's Materials/ (the writer's tree_digest)")
 
 
 def check_snapshot_tar(col: Collection, tar_path: Path, snap: dict[str, str]) -> None:
@@ -608,6 +680,10 @@ def collect(sources: list[Path], out: Path, parts: tuple[str, ...] = ("A", "B"),
         frozen = aa.expected_population(commit)
     except aa.InputError as e:
         raise CollectionError(str(e)) from e
+    binding = aa.record_binding(commit)
+    if binding is None:
+        msg = f"no case-F record binding for commit {commit}: no record.json from it can be verified"
+        raise CollectionError(msg)
     if out.exists():
         msg = f"{out} exists: the output directory must not exist"
         raise CollectionError(msg)
@@ -625,8 +701,13 @@ def collect(sources: list[Path], out: Path, parts: tuple[str, ...] = ("A", "B"),
         not_established.append({**{k: v for k, v in ne.items() if k != "copies"}, "files": files})
     counts = {k: sum(1 for ne in not_established if ne["outcome"] == k) for k in ("failed", "absent")}
     manifest: dict[str, object] = {
-        "schema": 2,
+        "schema": aa.MANIFEST_SCHEMA,
         "acquisition_commit": commit,
+        "f_record_binding": {
+            "name": binding.name, "commit": binding.commit, "study": binding.study, "schema": binding.schema.name,
+            "verified": list(binding.schema.verified), "not_verifiable": list(binding.schema.not_verifiable),
+            "records": col.f_records,
+        },
         "parts": list(parts),
         "sources": [str(s) for s in sources],
         "files": entries,

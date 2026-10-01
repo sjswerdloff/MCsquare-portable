@@ -5,7 +5,6 @@ Run: uv run --no-project --with numpy --with scipy --with pytest pytest validati
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import random
@@ -26,21 +25,27 @@ from apples_fixtures import (  # noqa: F401 - the autouse fixture must be in thi
     ALL_ARMS,
     N_RUNS,
     SOURCES,
+    V2_BINDING,
+    V2_COMMIT,
     Mutate,
     RunMutate,
     _frozen_from_the_working_tree,
+    attest,
     binary_of,
     build,
     cells,
-    f_document,
     f_record,
     p_record,
     run_json_of,
 )
 
 
-def analyse(root: Path, parts: tuple[str, ...] = ("A",)) -> dict:
-    return aa.run_analysis(root, parts)[1]
+def analyse(root: Path, parts: tuple[str, ...] = ("A",), *, attested: bool = True, commit: str = ACQ) -> dict:
+    """The analysis of a flat tree. `attested` (default) first writes a collection manifest over the tree as it stands,
+    standing in for apples_collect.py, unless one exists; without it every contrast is descriptive only."""
+    if attested and not (root / aa.MANIFEST_NAME).exists():
+        attest(root, parts, commit=commit)
+    return aa.run_analysis(root, parts, commit=commit)[1]
 
 
 def contrast(doc: dict, name: str) -> dict:
@@ -400,7 +405,7 @@ def test_f_r20_ambiguous_not_established_as_in_31(tmp_path: Path) -> None:
 
 def test_fewer_than_two_runs_in_an_arm_is_not_established_and_the_contrast_is_partial(tmp_path: Path) -> None:
     root = build(tmp_path, ("A-up", "A-port"), n=1)
-    doc = analyse(root)
+    doc = analyse(root, attested=False)
     c = contrast(doc, A_CONTRAST)
     assert ep(doc, A_CONTRAST, "P150/R80")["outcome"] == "not_established"
     assert_no_confirmatory_claims(c)
@@ -480,6 +485,7 @@ def test_cli_outputs_markdown_tables_and_strict_json(tmp_path: Path, capsys: pyt
             rec["R80"] = 77.5  # zero variance in both arms: df is infinite, which JSON must carry as null
 
     root = build(tmp_path / "in", ("A-up", "A-port"), identical=True, mutate=constant)
+    attest(root)
     out = tmp_path / "result.json"
     rc = aa.main([str(root), "--json", str(out), "--parts", "A"])
     assert rc == 0
@@ -580,9 +586,12 @@ def test_exit_2_when_root_is_not_a_directory(tmp_path: Path) -> None:
 
 def test_report_header_says_where_identity_comes_from(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    attest(root)
     assert aa.main([str(root), "--parts", "A"]) == 0
     out = capsys.readouterr().out
-    assert "frozen workflow run lists at the acquisition commit" in out and "named legacy binding" in out
+    assert "frozen workflow run lists at the acquisition commit" in out and "record binding" in out
+    assert "Case-F record schema: platform_study_record@2f9dab40 (binding pe1-at-acquisition-2f9dab40)" in out
+    assert "this schema carries no metrics hash" in out
     assert f"Acquisition commit (frozen run lists): {ACQ}" in out
 
 
@@ -599,28 +608,57 @@ def test_legacy_pe1_record_is_accepted_only_through_the_named_binding(tmp_path: 
     doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True))
     c = contrast(doc, A_CONTRAST)
     assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is True and not c["partial"]
-    assert doc["runs"]["A-up/F"]["legacy_bindings_used"] == ["pe1-at-acquisition-2f9dab40"]
-    assert doc["runs"]["A-up/P"]["legacy_bindings_used"] == []
-    assert doc["legacy_bindings"] == ["pe1-at-acquisition-2f9dab40"]
+    assert doc["runs"]["A-up/F"]["record_bindings_used"] == ["pe1-at-acquisition-2f9dab40"]
+    assert doc["runs"]["A-up/P"]["record_bindings_used"] == []
+    assert doc["f_record_binding"]["schema"] == "platform_study_record@2f9dab40"
+    assert any("no metrics hash" in x for x in doc["f_record_binding"]["not_verifiable"])
 
 
-@pytest.mark.parametrize("study", ["apples-a", "PE1", "garbage", "", None])
+def test_the_fixture_records_are_the_pinned_writers_and_carry_none_of_the_later_fields(tmp_path: Path) -> None:
+    """The F records the tests analyse come from running 2f9dab40's writer: exactly its ten fields, no endpoint status."""
+    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    for rec in root.glob("*/F/s*/record.json"):
+        body = json.loads(rec.read_text())
+        assert set(body) == aa.LEGACY_RECORD_FIELDS and set(body["sha256"]) == aa.F_RECORD_SHA256_KEYS
+        assert not set(body) & aa.V2_ENDPOINT_FIELDS and body["study"] == "pe1"
+
+
+@pytest.mark.parametrize("study", ["apples-a", "PE1", "garbage", ""])
 def test_any_other_study_id_is_a_provenance_failure(tmp_path: Path, study: object) -> None:
     root = build(tmp_path, ("A-up", "A-port"), identical=True)
     _set_study(root, study)
     c = contrast(analyse(root), A_CONTRAST)
     assert_no_confirmatory_claims(c)
-    assert any("no LegacyBinding" in r for r in c["partial_reasons"])
+    assert any("is not the study 'pe1' bound by pe1-at-acquisition-2f9dab40" in r for r in c["partial_reasons"])
 
 
-def test_legacy_binding_does_not_cover_another_commit() -> None:
-    doc = {"study": "pe1", "platform": "A-up", "seed": 1, "commit": "f" * 40, "endpoint_status": "ok", "metrics": {},
-           "metrics_sha256": aa.metrics_digest({}), "cfg_sha256": "a" * 64,
-           "sha256": {"config": "a" * 64, "binary": "b" * 64}}
-    problems, binding = aa._reconcile_f(doc, {"binary_sha256": "b" * 64}, "A-up", 1, "f" * 40)
-    assert binding is None and any("no LegacyBinding" in p for p in problems)
-    problems, binding = aa._reconcile_f(doc | {"commit": ACQ}, {"binary_sha256": "b" * 64}, "A-up", 1, ACQ)
+def test_a_record_without_a_study_field_refuses(tmp_path: Path) -> None:
+    root = build(tmp_path, ("A-up", "A-port"), identical=True)
+    _set_study(root, None)
+    with pytest.raises(aa.InputError, match="lacks field"):
+        analyse(root)
+
+
+def _legacy_doc(**over: object) -> dict:
+    doc: dict = {"study": "pe1", "platform": "A-up", "seed": 1, "host": "h", "machine": "m", "commit": ACQ,
+                 "compiler": "cc", "sha256": dict.fromkeys(aa.F_RECORD_SHA256_KEYS, "a" * 64),
+                 "materials": {"files": 1, "combined_sha256": "c" * 64}, "metrics": {}}
+    doc["sha256"]["binary"] = "b" * 64
+    doc.update(over)
+    return doc
+
+
+def test_a_legacy_record_under_a_commit_without_its_binding_refuses() -> None:
+    with pytest.raises(aa.InputError, match="no case-F record binding"):
+        aa._reconcile_f(_legacy_doc(commit="f" * 40), {"binary_sha256": "b" * 64}, "A-up", 1, "f" * 40)
+    problems, binding = aa._reconcile_f(_legacy_doc(), {"binary_sha256": "b" * 64}, "A-up", 1, ACQ)
     assert binding == "pe1-at-acquisition-2f9dab40" and problems == []
+
+
+def test_a_legacy_record_under_a_commit_bound_to_the_v2_schema_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(aa, "F_RECORD_BINDINGS", (*aa.F_RECORD_BINDINGS, V2_BINDING))
+    with pytest.raises(aa.InputError, match="bound to platform_study_record@0f5ef7c"):
+        aa._reconcile_f(_legacy_doc(commit=V2_COMMIT), {"binary_sha256": "b" * 64}, "A-up", 1, V2_COMMIT)
 
 
 def test_mode_and_commit_are_reported_from_run_json(tmp_path: Path) -> None:
@@ -693,10 +731,10 @@ def test_missing_seed_directory_makes_the_contrast_partial_and_withholds_every_c
 ) -> None:
     root = build(tmp_path, ("A-up", "A-port"), identical=True)
     _drop(root, "A-port", "P", 961011)
-    doc = analyse(root)
+    doc = analyse(root, attested=False)
     c = contrast(doc, A_CONTRAST)
     assert_no_confirmatory_claims(c)
-    assert c["partial_reasons"] == ["A-port P: 1 expected seed(s) missing: 961011"]
+    assert c["partial_reasons"] == [aa.NO_MANIFEST_REASON, "A-port P: 1 expected seed(s) missing: 961011"]
     assert doc["runs"]["A-port/P"]["n"] == 23 and doc["runs"]["A-port/P"]["expected"] == 24
     assert aa.main([str(root), "--parts", "A"]) == 0
     out = capsys.readouterr().out
@@ -707,9 +745,9 @@ def test_missing_seed_directory_makes_the_contrast_partial_and_withholds_every_c
 def test_missing_f_seed_makes_the_contrast_partial(tmp_path: Path) -> None:
     root = build(tmp_path, ("A-up", "A-port"), identical=True)
     _drop(root, "A-up", "F", 960031)
-    c = contrast(analyse(root), A_CONTRAST)
+    c = contrast(analyse(root, attested=False), A_CONTRAST)
     assert_no_confirmatory_claims(c)
-    assert "960031" in c["partial_reasons"][0]
+    assert "960031" in c["partial_reasons"][1]
 
 
 def test_missing_arm_or_case_directory_is_fatal(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -729,7 +767,7 @@ def test_same_count_substitution_with_an_unexpected_seed_is_partial(tmp_path: Pa
     _drop(root, "A-port", "F", 961031)
     _clone(root, "A-port", "F", 961032, "s999999")  # still 8 directories
     assert len(list((root / "A-port" / "F").iterdir())) == N_RUNS
-    doc = analyse(root)
+    doc = analyse(root, attested=False)
     c = contrast(doc, A_CONTRAST)
     assert_no_confirmatory_claims(c)
     text = " | ".join(c["partial_reasons"])
@@ -754,7 +792,7 @@ def test_leading_zero_alias_beside_the_real_seed_rejects_both_and_is_partial(tmp
     _drop(root, "A-port", "F", 961038)
     _clone(root, "A-port", "F", 961031, "s0961031")
     assert len(list((root / "A-port" / "F").iterdir())) == N_RUNS
-    doc = analyse(root)
+    doc = analyse(root, attested=False)
     c = contrast(doc, A_CONTRAST)
     assert_no_confirmatory_claims(c)
     text = " | ".join(c["partial_reasons"])
@@ -765,7 +803,7 @@ def test_leading_zero_alias_beside_the_real_seed_rejects_both_and_is_partial(tmp
 def test_leading_zero_alias_alone_is_not_the_workflows_directory_name(tmp_path: Path) -> None:
     root = build(tmp_path, ("A-up", "A-port"), identical=True)
     (root / "A-port" / "F" / "s961031").rename(root / "A-port" / "F" / "s0961031")
-    c = contrast(analyse(root), A_CONTRAST)
+    c = contrast(analyse(root, attested=False), A_CONTRAST)
     assert_no_confirmatory_claims(c)
     assert any("s0961031 (not written as s961031)" in r for r in c["partial_reasons"])
     assert any("961031" in r and "missing" in r for r in c["partial_reasons"])
@@ -778,7 +816,7 @@ def test_a_seed_expected_for_another_arm_is_unexpected_here(tmp_path: Path) -> N
     foreign.mkdir()
     for f in (root / "A-up" / "F" / "s960031").iterdir():
         (foreign / f.name).write_text(f.read_text())
-    c = contrast(analyse(root), A_CONTRAST)
+    c = contrast(analyse(root, attested=False), A_CONTRAST)
     assert_no_confirmatory_claims(c)
     assert any("s960031 (seed not in the frozen list)" in r for r in c["partial_reasons"])
 
@@ -786,6 +824,9 @@ def test_a_seed_expected_for_another_arm_is_unexpected_here(tmp_path: Path) -> N
 def test_only_the_contrasts_using_a_partial_arm_lose_their_claims(tmp_path: Path) -> None:
     root = build(tmp_path, ALL_ARMS, identical=True)
     _drop(root, "B-picc", "P", 964001)
+    absent = {"arm": "B-picc", "case": "P", "seed": 964001, "energy": aa.expected_population(ACQ).seeds[("B-picc", "P")][964001],
+              "outcome": "absent", "reason": "no directory: the job stopped", "files": []}
+    attest(root, ("A", "B"), not_established=[absent])
     doc = analyse(root, ("A", "B"))
     assert contrast(doc, A_CONTRAST)["partial"] is False
     assert contrast(doc, A_CONTRAST)["claims"]["joint_claim_equivalent_on_all_endpoints"] is True
@@ -926,14 +967,7 @@ def test_slab_depths_of_another_energy_do_not_move_the_run_to_that_energy(tmp_pa
         lambda d: d.update(platform="A-up"),
         lambda d: d.update(seed=1),
         lambda d: d.update(commit="1" * 40),
-        lambda d: d.update(endpoint_status="error"),
-        lambda d: d.pop("endpoint_status"),
-        lambda d: d.update(metrics_sha256="0" * 64),
-        lambda d: d.pop("metrics_sha256"),
-        lambda d: d.update(cfg_sha256="0" * 64),
         lambda d: d["sha256"].update(binary="0" * 64),
-        lambda d: d["sha256"].pop("binary"),
-        lambda d: d.pop("sha256"),
     ],
 )
 def test_f_record_top_level_is_reconciled_with_run_json(tmp_path: Path, edit: Callable[[dict], None]) -> None:
@@ -946,12 +980,90 @@ def test_f_record_top_level_is_reconciled_with_run_json(tmp_path: Path, edit: Ca
     assert ep(doc, A_CONTRAST, "F/cax_127")["outcome"] == "not_established"
 
 
-def test_f_record_with_failed_endpoints_and_null_metrics_is_unusable(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("label", "edit", "match"),
+    [
+        ("carries endpoint_status (mixed)", lambda d: d.update(endpoint_status="ok"), "mixes record schemas"),
+        ("carries metrics_sha256 (mixed)", lambda d: d.update(metrics_sha256=aa.metrics_digest(d["metrics"])), "mixes"),
+        ("carries cfg_sha256 (mixed)", lambda d: d.update(cfg_sha256=d["sha256"]["config"]), "mixes record schemas"),
+        ("all three v2 fields at 2f9dab40", lambda d: d.update(cfg_sha256=d["sha256"]["config"], endpoint_status="ok",
+                                                                metrics_sha256=aa.metrics_digest(d["metrics"])),
+         "is bound to platform_study_record@2f9dab40"),
+        ("metrics missing", lambda d: d.pop("metrics"), "lacks field"),
+        ("metrics null", lambda d: d.update(metrics=None), "metrics is not an object"),
+        ("a sha256 key missing", lambda d: d["sha256"].pop("binary"), "sha256 is not"),
+        ("a sha256 key missing (HU)", lambda d: d["sha256"].pop("HU_Material"), "sha256 is not"),
+        ("sha256 missing", lambda d: d.pop("sha256"), "lacks field"),
+        ("materials malformed", lambda d: d.update(materials={"files": 1}), "materials"),
+        ("an unexpected field", lambda d: d.update(note="x"), "does not write"),
+    ],
+)
+def test_malformed_or_mixed_schema_f_record_refuses(
+    tmp_path: Path, label: str, edit: Callable[[dict], None], match: str
+) -> None:
+    def go(arm: str, case: str, energy: int | None, i: int, d: dict) -> None:
+        if arm == "A-port" and case == "F" and i == 0:
+            edit(d)
+
+    root = build(tmp_path, ("A-up", "A-port"), identical=True, doc_mutate=go)
+    with pytest.raises(aa.InputError, match=match):
+        analyse(root)
+    assert aa.main([str(root), "--parts", "A"]) == 2, label
+
+
+# ------------------------------------------------------------------- the v2 record schema (writers that emit it)
+
+
+@pytest.fixture
+def v2_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A test-only binding of V2_COMMIT to the v2 schema (no acquisition is bound to it)."""
+    monkeypatch.setattr(aa, "F_RECORD_BINDINGS", (*aa.F_RECORD_BINDINGS, V2_BINDING))
+
+
+def test_v2_records_from_the_v2_writer_analyse_under_a_v2_binding(tmp_path: Path, v2_bound: None) -> None:
+    root = build(tmp_path, ("A-up", "A-port"), identical=True, commit=V2_COMMIT, writer="v2")
+    doc = analyse(root, commit=V2_COMMIT)
+    c = contrast(doc, A_CONTRAST)
+    assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is True
+    assert doc["runs"]["A-up/F"]["record_bindings_used"] == [V2_BINDING.name]
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda d: d["metrics"].update(cax_127=d["metrics"]["cax_127"] * 1.001),  # metrics no longer match their hash
+        lambda d: d.update(metrics_sha256="0" * 64),
+        lambda d: d.update(cfg_sha256="0" * 64),
+    ],
+)
+def test_v2_record_is_strict(tmp_path: Path, v2_bound: None, edit: Callable[[dict], None]) -> None:
+    def go(arm: str, case: str, energy: int | None, i: int, d: dict) -> None:
+        if arm == "A-port" and case == "F" and i == 0:
+            edit(d)
+
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, doc_mutate=go, commit=V2_COMMIT, writer="v2"),
+                  commit=V2_COMMIT)
+    assert_no_confirmatory_claims(contrast(doc, A_CONTRAST))
+
+
+@pytest.mark.parametrize("drop", sorted(aa.V2_ENDPOINT_FIELDS))
+def test_v2_record_lacking_one_v2_field_is_mixed_and_refuses(tmp_path: Path, v2_bound: None, drop: str) -> None:
+    def go(arm: str, case: str, energy: int | None, i: int, d: dict) -> None:
+        if arm == "A-port" and case == "F" and i == 0:
+            d.pop(drop)
+
+    root = build(tmp_path, ("A-up", "A-port"), identical=True, doc_mutate=go, commit=V2_COMMIT, writer="v2")
+    with pytest.raises(aa.InputError, match="mixes record schemas"):
+        analyse(root, commit=V2_COMMIT)
+
+
+def test_f_record_with_failed_endpoints_and_null_metrics_is_unusable(tmp_path: Path, v2_bound: None) -> None:
     def go(arm: str, case: str, energy: int | None, i: int, d: dict) -> None:
         if arm == "A-port" and case == "F" and i == 0:
             d.update(metrics=None, metrics_sha256=None, endpoint_status="error", endpoint_error="ValueError: x")
 
-    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, doc_mutate=go))
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, doc_mutate=go, commit=V2_COMMIT, writer="v2"),
+                  commit=V2_COMMIT)
     assert_no_confirmatory_claims(contrast(doc, A_CONTRAST))
 
 
@@ -987,24 +1099,24 @@ def test_fingerprint_is_deterministic_and_covers_exactly_the_files_read(a_identi
 
 
 def test_fingerprint_changes_with_any_byte_of_any_input(a_identical: Path) -> None:
-    before = analyse(a_identical)["dataset_fingerprint"]["sha256"]
+    before = analyse(a_identical, attested=False)["dataset_fingerprint"]["sha256"]
     target = a_identical / "A-port" / "P" / "s961011" / "endpoints.json"
     original = target.read_text()
     target.write_text(original.replace("R80", "R81", 1) if "R80" in original else original + " ")
-    changed = analyse(a_identical)["dataset_fingerprint"]["sha256"]
+    changed = analyse(a_identical, attested=False)["dataset_fingerprint"]["sha256"]
     assert changed != before
     target.write_text(original)
-    assert analyse(a_identical)["dataset_fingerprint"]["sha256"] == before
+    assert analyse(a_identical, attested=False)["dataset_fingerprint"]["sha256"] == before
 
 
 def test_fingerprint_depends_on_which_path_holds_the_bytes(tmp_path: Path) -> None:
     root = build(tmp_path / "x", ("A-up", "A-port"), identical=True)
-    before = analyse(root)["dataset_fingerprint"]["sha256"]
+    before = analyse(root, attested=False)["dataset_fingerprint"]["sha256"]
     a, b = root / "A-port" / "P" / "s961001", root / "A-port" / "P" / "s961002"
     ta, tb = (a / "endpoints.json").read_text(), (b / "endpoints.json").read_text()
     (a / "endpoints.json").write_text(tb)
     (b / "endpoints.json").write_text(ta)
-    assert analyse(root)["dataset_fingerprint"]["sha256"] != before
+    assert analyse(root, attested=False)["dataset_fingerprint"]["sha256"] != before
 
 
 # ------------------------------------------------------------------ domain bounds (item 3), unit and end to end
@@ -1085,17 +1197,15 @@ def test_values_exactly_at_the_bounds_in_both_arms_are_established(tmp_path: Pat
 # ------------------------------------------------------------------------------ collection manifest (analysis side)
 
 
-def _write_manifest(root: Path, *, skip: str | None = None, extra: dict | None = None) -> None:
-    files = []
-    for f in sorted(root.rglob("*")):
-        rel = f.relative_to(root).as_posix()
-        if f.is_file() and rel != aa.MANIFEST_NAME and rel != skip:
-            files.append({"path": rel, "sha256": hashlib.sha256(f.read_bytes()).hexdigest()})
-    (root / aa.MANIFEST_NAME).write_text(json.dumps({"acquisition_commit": ACQ, "files": files, **(extra or {})}))
+def _write_manifest(root: Path, *, skip: str | None = None, **override: object) -> None:
+    manifest = attest(root, ("A",))
+    manifest.update(override)
+    manifest["files"] = [f for f in manifest["files"] if f["path"] != skip]
+    (root / aa.MANIFEST_NAME).write_text(json.dumps(manifest))
 
 
 def test_report_says_when_there_is_no_manifest(a_identical: Path) -> None:
-    doc = analyse(a_identical)
+    doc = analyse(a_identical, attested=False)
     assert doc["collection_manifest"]["present"] is False and "not attested" in doc["collection_manifest"]["note"]
 
 
@@ -1103,7 +1213,8 @@ def test_manifest_is_verified_when_present(a_identical: Path, capsys: pytest.Cap
     _write_manifest(a_identical)
     assert aa.main([str(a_identical), "--parts", "A"]) == 0
     assert "Collection manifest: verified, 128 file(s)" in capsys.readouterr().out
-    assert analyse(a_identical)["collection_manifest"]["present"] is True
+    doc = analyse(a_identical)
+    assert doc["collection_manifest"]["present"] is True and doc["confirmatory_claims_possible"] is True
 
 
 def test_file_changed_since_collection_is_refused(a_identical: Path) -> None:
@@ -1127,3 +1238,77 @@ def test_manifest_listing_a_missing_file_is_refused(a_identical: Path) -> None:
 def test_unreadable_manifest_is_refused(a_identical: Path) -> None:
     (a_identical / aa.MANIFEST_NAME).write_text("{")
     assert aa.main([str(a_identical), "--parts", "A"]) == 2
+
+
+# ------------------------------------------- confirmatory claims need a verified collection (review 6935, item 2)
+
+
+def test_flat_tree_without_a_manifest_makes_no_confirmatory_claim_anywhere(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The reviewer's probe: a complete, internally consistent flat tree with no manifest said joint equivalence TRUE."""
+    root = build(tmp_path / "in", ALL_ARMS, identical=True)
+    out = tmp_path / "result.json"
+    assert aa.main([str(root), "--json", str(out), "--parts", "A,B"]) == 0
+    md = capsys.readouterr().out
+    doc = json.loads(out.read_text())
+    assert doc["confirmatory_claims_possible"] is False and doc["claims_withheld_for_all"] == [aa.NO_MANIFEST_REASON]
+    assert doc["collection_manifest"]["present"] is False
+    for c in doc["contrasts"]:
+        assert c["claims"] == {} and c["partial"] is True and aa.NO_MANIFEST_REASON in c["partial_reasons"]
+        if c["kind"] == "confirmatory":
+            assert_no_confirmatory_claims(c)
+        for e in c["endpoints"]:
+            assert e["outcome"] in ("descriptive", "not_established") and e["p_tost"] is None
+            assert e["holm_decision"] == "" and e["holm_adjusted_p"] is None
+    assert "Joint claim" not in md and "TRUE**" not in md and "equivalent after Holm" not in md
+    assert "| equivalent |" not in md and "| not_equivalent |" not in md and "| inconclusive |" not in md
+    assert "Confirmatory claims: WITHHELD for every contrast" in md
+    # the estimates are still there: a preview, never confirmatory
+    assert all(e["estimate"] is not None for c in doc["contrasts"] for e in c["endpoints"])
+
+
+def test_the_same_tree_attested_is_confirmatory(tmp_path: Path) -> None:
+    """Control for the test above: the only difference is the manifest."""
+    root = build(tmp_path, ALL_ARMS, identical=True)
+    doc = analyse(root, ("A", "B"))
+    assert doc["confirmatory_claims_possible"] is True
+    assert all(c["claims"]["joint_claim_equivalent_on_all_endpoints"] is True for c in doc["contrasts"] if c["kind"] == "confirmatory")
+
+
+@pytest.mark.parametrize(
+    ("label", "override", "match"),
+    [
+        ("another 40-hex acquisition commit", {"acquisition_commit": "1" * 40}, "is not the frozen commit in use"),
+        ("an abbreviated acquisition commit", {"acquisition_commit": ACQ[:12]}, "is not the frozen commit in use"),
+        ("no acquisition commit", {"acquisition_commit": None}, "is not the frozen commit in use"),
+        ("parts B only", {"parts": ["B"]}, "do not cover the analysed part"),
+        ("no parts", {"parts": []}, "do not cover the analysed part"),
+        ("parts not a list", {"parts": "A"}, "is not a list of distinct parts"),
+        ("schema 2", {"schema": 2}, "schema 2 is not supported"),
+        ("schema 4", {"schema": 4}, "is not supported"),
+        ("schema missing", {"schema": None}, "is not supported"),
+        ("schema true", {"schema": True}, "is not supported"),
+        ("another record binding", {"f_record_binding": {"name": "x", "schema": "platform_study_record@0f5ef7c"}},
+         "f_record_binding"),
+        ("no record binding", {"f_record_binding": None}, "f_record_binding"),
+    ],
+)
+def test_manifest_that_does_not_attest_this_analysis_refuses_before_inference(
+    a_identical: Path, label: str, override: dict, match: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_manifest(a_identical, **override)
+    read: list[str] = []
+    real_load_run = aa.load_run
+    monkeypatch.setattr(aa, "load_run", lambda *a, **k: read.append("run") or real_load_run(*a, **k))
+    with pytest.raises(aa.InputError, match=match):
+        aa.run_analysis(a_identical, ("A",))
+    assert read == [], f"{label}: a run was read before the manifest was validated"
+    assert aa.main([str(a_identical), "--parts", "A"]) == 2
+
+
+def test_manifest_covering_more_parts_than_analysed_is_accepted(tmp_path: Path) -> None:
+    root = build(tmp_path, ALL_ARMS, identical=True)
+    attest(root, ("A", "B"))
+    doc = analyse(root, ("A",))
+    assert contrast(doc, A_CONTRAST)["claims"]["joint_claim_equivalent_on_all_endpoints"] is True

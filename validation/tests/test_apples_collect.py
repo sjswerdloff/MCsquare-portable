@@ -24,11 +24,14 @@ from apples_fixtures import (  # noqa: F401 - the autouse fixture must be in thi
     ACQ,
     NATIVE_ARM,
     SOURCES,
+    V2_BINDING,
+    V2_COMMIT,
     _frozen_from_the_working_tree,
     edit_run_json,
     interrupted,
     make_native,
     native_seed_dir,
+    pinned_writer,
     sha,
     stop_job_after,
     transport_failure,
@@ -85,7 +88,13 @@ def test_acquisition_shaped_trees_collect_and_the_analysis_reads_the_result(nati
     assert doc["collection_manifest"]["present"] is True
     assert all(not c["partial"] for c in doc["contrasts"])
     assert all(c["claims"]["joint_claim_equivalent_on_all_endpoints"] is True for c in doc["contrasts"] if c["kind"] == "confirmatory")
-    assert doc["runs"]["A-port/F"]["legacy_bindings_used"] == ["pe1-at-acquisition-2f9dab40"]
+    assert doc["runs"]["A-port/F"]["record_bindings_used"] == ["pe1-at-acquisition-2f9dab40"]
+    manifest = json.loads((out / aa.MANIFEST_NAME).read_text())
+    assert manifest["outcomes"] == {"collected": 160, "failed": 0, "absent": 0}
+    binding = manifest["f_record_binding"]
+    assert binding["schema"] == "platform_study_record@2f9dab40" and binding["records"] == 5 * 8
+    assert any("no metrics hash" in x for x in binding["not_verifiable"])
+    assert any("materials recomputed" in x for x in binding["verified"])
 
 
 def test_output_layout_is_arm_case_seed_with_provenance_beside_the_runs(native: dict[str, Path], tmp_path: Path) -> None:
@@ -269,17 +278,100 @@ def test_dose_file_that_does_not_match_its_sha256_txt_is_refused(native: dict[st
     refuses(native, tmp_path, "Dose.raw", "hashes differently")
 
 
-def test_f_record_hashes_must_match_the_files(native: dict[str, Path], tmp_path: Path) -> None:
-    f = native["win"] / NATIVE_F / "s961031" / "record.json"
+def _edit_record(native: dict[str, Path], arm: str, seed: int, edit: object) -> Path:
+    f = native_seed_dir(native, arm, "F", seed) / "record.json"
     record = json.loads(f.read_text())
-    original = json.dumps(record)
-    for edit in (lambda r: r["sha256"].update({"Dose.raw": "0" * 64}), lambda r: r.update(cfg_sha256="0" * 64),
-                 lambda r: r["sha256"].update({"cube.raw": "0" * 64}), lambda r: r["sha256"].update({"binary": "0" * 64})):
-        r = json.loads(original)
-        edit(r)
-        f.write_text(json.dumps(r))
-        refuses(native, tmp_path, "record.json")
-    f.write_text(original)
+    edit(record)  # type: ignore[operator]
+    f.write_text(json.dumps(record))
+    return f
+
+
+def test_the_native_f_records_are_the_pinned_writers(native: dict[str, Path]) -> None:
+    """record.json in the native fixture was written by 2f9dab40's writer, run in the run directory: its exact fields."""
+    for arm in NATIVE_ARM:
+        for seed in aa.expected_population(ACQ).seeds[(arm, "F")]:
+            body = json.loads((native_seed_dir(native, arm, "F", seed) / "record.json").read_text())
+            assert set(body) == aa.LEGACY_RECORD_FIELDS and set(body["sha256"]) == aa.F_RECORD_SHA256_KEYS
+            assert body["materials"]["files"] == 2
+
+
+LEGACY_HASH_KEYS = sorted(aa.F_RECORD_SHA256_KEYS)
+
+
+@pytest.mark.parametrize("key", LEGACY_HASH_KEYS)
+@pytest.mark.parametrize(("arm", "seed"), [("A-port", 961031), ("B-up", 962031)])
+def test_each_legacy_record_hash_that_disagrees_refuses(
+    native: dict[str, Path], tmp_path: Path, arm: str, seed: int, key: str
+) -> None:
+    _edit_record(native, arm, seed, lambda r: r["sha256"].update({key: "0" * 64}))
+    refuses(native, tmp_path, "record.json", key if key != "config" else "sha256.config")
+
+
+@pytest.mark.parametrize("field", ["combined_sha256", "files"])
+def test_legacy_materials_that_disagree_refuse(native: dict[str, Path], tmp_path: Path, field: str) -> None:
+    _edit_record(native, "B-up", 962031, lambda r: r["materials"].update({field: "0" * 64 if field == "combined_sha256" else 3}))
+    refuses(native, tmp_path, "materials does not match")
+
+
+def test_materials_recomputed_from_a_changed_run_directory_refuses(native: dict[str, Path], tmp_path: Path) -> None:
+    """A Materials file added after the record was written: the writer's digest no longer matches."""
+    d = native_seed_dir(native, "A-up", "F", 960031)
+    (d / "Materials" / "Extra.txt").write_text("not in the record\n")
+    refuses(native, tmp_path, "materials does not match")
+
+
+def test_writer_materials_digest_is_the_pinned_writers_tree_digest(native: dict[str, Path]) -> None:
+    """The collector's formula against the writer's own tree_digest, run in the same run directory."""
+    import os
+
+    d = native_seed_dir(native, "B-up", "F", 962031)
+    old = os.getcwd()
+    os.chdir(d)
+    try:
+        theirs = pinned_writer().tree_digest("Materials/**/*")
+    finally:
+        os.chdir(old)
+    assert ac.writer_materials_digest(d, windows=False) == theirs
+    assert json.loads((d / "record.json").read_text())["materials"] == theirs
+
+
+def test_writer_materials_digest_orders_paths_as_the_hosts_glob_does(tmp_path: Path) -> None:
+    """On Windows glob returns backslash paths, which sort differently from forward slashes ('/' < 'B' < '\\')."""
+    for rel in ("Materials/AB.txt", "Materials/A/x.txt", "Materials/.hidden", "Materials/.d/y.txt"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(rel)
+
+    def digest(order: list[str]) -> str:
+        return hashlib.sha256("".join(f"{r} {sha((tmp_path / r).read_bytes())}\n" for r in order).encode()).hexdigest()
+
+    posix = ac.writer_materials_digest(tmp_path, windows=False)
+    windows = ac.writer_materials_digest(tmp_path, windows=True)
+    assert posix == {"files": 2, "combined_sha256": digest(["Materials/A/x.txt", "Materials/AB.txt"])}
+    assert windows == {"files": 2, "combined_sha256": digest(["Materials/AB.txt", "Materials/A/x.txt"])}
+
+
+@pytest.mark.parametrize(
+    ("label", "edit", "needle"),
+    [
+        ("endpoint_status added (mixed)", lambda r: r.update(endpoint_status="ok"), "mixes record schemas"),
+        ("cfg_sha256 added (mixed)", lambda r: r.update(cfg_sha256=r["sha256"]["config"]), "mixes record schemas"),
+        ("all three v2 fields", lambda r: r.update(endpoint_status="ok", cfg_sha256=r["sha256"]["config"],
+                                                    metrics_sha256=aa.metrics_digest(r["metrics"])), "is bound to"),
+        ("metrics missing", lambda r: r.pop("metrics"), "lacks field"),
+        ("metrics null", lambda r: r.update(metrics=None), "metrics is not an object"),
+        ("a sha256 key missing", lambda r: r["sha256"].pop("cube.raw"), "sha256 is not"),
+        ("materials missing", lambda r: r.pop("materials"), "lacks field"),
+        ("study other", lambda r: r.update(study="apples-a"), "study is 'apples-a'"),
+        ("platform other", lambda r: r.update(platform="A-up"), "platform is 'A-up'"),
+        ("seed other", lambda r: r.update(seed=961032), "seed is 961032"),
+        ("commit other", lambda r: r.update(commit="1" * 40), "commit is"),
+    ],
+)
+def test_malformed_mixed_or_misattributed_legacy_record_refuses(
+    native: dict[str, Path], tmp_path: Path, label: str, edit: object, needle: str
+) -> None:
+    _edit_record(native, "A-port", 961031, edit)
+    refuses(native, tmp_path, "s961031", needle)
 
 
 @pytest.mark.parametrize(
@@ -484,23 +576,82 @@ def test_p_endpoint_failure_after_transport_ok_is_failed(
     assert names == sorted(["config.txt", "log.txt", "run.json", "out_sha256.txt", *([] if content is None else ["endpoints.json"])])
 
 
-def test_f_endpoint_status_error_is_failed_and_the_job_continues(native: dict[str, Path], tmp_path: Path) -> None:
-    f = native_seed_dir(native, "B-pgcc", "F", 963032) / "record.json"
+def test_f_record_missing_after_transport_ok_is_the_legacy_endpoint_failure(native: dict[str, Path], tmp_path: Path) -> None:
+    """2f9dab40's writer raises before opening record.json and the job stops: a failed run, then absent seeds."""
+    from apples_fixtures import synthetic_f_record
+
+    assert synthetic_f_record(tmp_path / "w", "B-picc", 964034, ValueError("no dose")) is None  # the writer's shape
+    (native_seed_dir(native, "B-picc", "F", 964034) / "record.json").unlink()
+    absent = stop_job_after(native, "B-picc", "F", 964034)
+    manifest = run_collect(native, tmp_path / "out")
+    ne = ne_entries(manifest)
+    assert ne[("B-picc", "F", 964034)]["outcome"] == "failed"
+    assert ne[("B-picc", "F", 964034)]["reason"] == "endpoint failure: record.json is missing"
+    assert {s for (a, c, s), e in ne.items() if e["outcome"] == "absent"} == set(absent) and absent
+    _, doc = aa.run_analysis(tmp_path / "out", ("B",))
+    assert contrast(doc, "B-picc vs B-up")["partial"] is True and contrast(doc, "B-pgcc vs B-up")["partial"] is False
+
+
+def test_a_valid_legacy_record_is_never_an_endpoint_failure_for_lacking_endpoint_status(
+    native: dict[str, Path], tmp_path: Path
+) -> None:
+    manifest = run_collect(native, tmp_path / "out")
+    assert manifest["not_established"] == [] and manifest["outcomes"]["collected"] == 160  # type: ignore[index]
+
+
+# --------------------------------------------------------------- the v2 schema: strict, and only where it is bound
+
+
+@pytest.fixture
+def v2_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(aa, "F_RECORD_BINDINGS", (*aa.F_RECORD_BINDINGS, V2_BINDING))
+
+
+@pytest.fixture
+def native_v2(tmp_path: Path, v2_bound: None) -> dict[str, Path]:
+    """Part B only, written by the v2 writer at V2_COMMIT (a test-only binding)."""
+    return make_native(tmp_path / "v2", ("B-up", "B-pgcc", "B-picc"), commit=V2_COMMIT, writer="v2")
+
+
+def test_v2_records_collect_under_a_v2_binding(native_v2: dict[str, Path], tmp_path: Path) -> None:
+    manifest = ac.collect([native_v2["lin"]], tmp_path / "out", ("B",), V2_COMMIT)
+    assert manifest["f_record_binding"]["schema"] == "platform_study_record@0f5ef7c"  # type: ignore[index]
+    _, doc = aa.run_analysis(tmp_path / "out", ("B",), commit=V2_COMMIT)
+    assert contrast(doc, "B-pgcc vs B-up")["claims"]["joint_claim_equivalent_on_all_endpoints"] is True
+
+
+def test_f_endpoint_status_error_is_failed_and_the_job_continues(native_v2: dict[str, Path], tmp_path: Path) -> None:
+    f = native_seed_dir(native_v2, "B-pgcc", "F", 963032) / "record.json"
     record = json.loads(f.read_text())
     record.update(metrics=None, metrics_sha256=None, endpoint_status="error", endpoint_error="ValueError: no dose")
     f.write_text(json.dumps(record))
-    manifest = run_collect(native, tmp_path / "out")
+    manifest = ac.collect([native_v2["lin"]], tmp_path / "out", ("B",), V2_COMMIT)
     ne = ne_entries(manifest)
-    assert set(ne) == {("B-pgcc", "F", 963032)}  # platform_study_record exits 0 on an endpoint error: no absent seeds
+    assert set(ne) == {("B-pgcc", "F", 963032)}  # the v2 writer exits 0 on an endpoint error: no absent seeds
     assert ne[("B-pgcc", "F", 963032)]["reason"] == "endpoint failure: record.json endpoint_status 'error' (ValueError: no dose)"
-    _, doc = aa.run_analysis(tmp_path / "out", ("B",))
+    _, doc = aa.run_analysis(tmp_path / "out", ("B",), commit=V2_COMMIT)
     assert contrast(doc, "B-pgcc vs B-up")["partial"] is True and contrast(doc, "B-picc vs B-up")["partial"] is False
 
 
-def test_f_record_missing_after_transport_ok_is_failed(native: dict[str, Path], tmp_path: Path) -> None:
-    (native_seed_dir(native, "B-picc", "F", 964038) / "record.json").unlink()
-    manifest = run_collect(native, tmp_path / "out")
-    assert ne_entries(manifest)[("B-picc", "F", 964038)]["reason"] == "endpoint failure: record.json is missing"
+@pytest.mark.parametrize(
+    ("edit", "needle"),
+    [
+        (lambda r: r.update(cfg_sha256="0" * 64), "cfg_sha256 does not match"),
+        (lambda r: r.pop("endpoint_status"), "mixes record schemas"),
+        (lambda r: [r.pop(k) for k in sorted(aa.V2_ENDPOINT_FIELDS)], "is bound to platform_study_record@0f5ef7c"),
+        (lambda r: r.update(endpoint_status="maybe"), "endpoint_status 'maybe'"),
+    ],
+)
+def test_v2_record_stays_strict(native_v2: dict[str, Path], tmp_path: Path, edit: object, needle: str) -> None:
+    _edit_record(native_v2, "B-up", 962031, edit)
+    with pytest.raises(ac.CollectionError, match=needle):
+        ac.collect([native_v2["lin"]], tmp_path / "out", ("B",), V2_COMMIT)
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_commit_with_no_record_binding_refuses(native: dict[str, Path], tmp_path: Path) -> None:
+    with pytest.raises(ac.CollectionError, match="no case-F record binding"):
+        ac.collect([native["lin"]], tmp_path / "out", ("B",), "1" * 40)
 
 
 # ---------------------------------------------------------------- failed runs do not open a route around the checks
