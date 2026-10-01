@@ -59,6 +59,15 @@ jobs:
           test -f smoke_test_output/Dose.mhd
           echo "Smoke test passed - Dose.mhd created"
 
+      # The analysis and collection code of the same-host comparison (#48). The tests read the frozen run lists with
+      # `git show` at the acquisition commit, so they need the full history (fetch-depth: 0 above). scipy is not in
+      # validation/uv.lock, so it is added for the run.
+      - name: Validation tests (validation/tests)
+        run: |
+          command -v uv > /dev/null 2>&1 || export PATH="/opt/homebrew/bin:$PATH"
+          uv --version
+          uv run --project validation --frozen --with scipy python -m pytest validation/tests -q -p no:cacheprovider
+
       - name: Test summary
         if: always()
         run: echo "MCsquare ARM64 CI completed"
