@@ -113,8 +113,8 @@ hardware.
   across each contrast's endpoints (AP; analysis reviewed in #48).
 - **Random numbers:** Portable MCsquare uses PCG. Each thread `t` starts from state `RNG_Seed + 1e4·t + 1e5·c` on
   stream `t`, where `c` counts calls to the simulation loop in the process. With the default statistical-uncertainty
-  batching, that loop is called once per batch, so `c` runs from 1 up to at least 10 (MIN_NUM_BATCH) in every run here,
-  not just 1. Two runs start an identical generator only if, on the same thread, their seeds differ by a multiple of 1e5
+  batching, that loop is called once per batch, so `c` runs from 1 to exactly 10 (MIN_NUM_BATCH; no uncertainty target is set) in every run
+  here, not just 1. Two runs start an identical generator only if, on the same thread, their seeds differ by a multiple of 1e5
   that some pair of their batch counts can absorb. Within the confirmatory acquisition (§4), the seed assignments have
   been screened for calls 1–10 at the threads used and share no start (#48). That holds for that population only:
   earlier comparisons reused seeds across platforms (12345 and 67890 in the preliminary field-edge runs of §5.2). No
