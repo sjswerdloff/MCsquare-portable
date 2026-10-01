@@ -102,7 +102,9 @@ independently verified that. Later review-driven amendments, all before any full
 (#48 review 6932: seed checker, record identity, PARTIAL marking); `cf6880c8` (#48 review 6933: frozen-population
 binding, provenance validation, domain bounds, collector); `821c0769` (failed and absent runs are collected and listed
 as not established instead of refusing the collection, so any contrast touching one is PARTIAL; part A's
-`inputs.tar` is verified against its snapshot). Later amendments are added here with their commits.
+`inputs.tar` is verified against its snapshot); `802361e8` (#48 review 6935: case-F records are verified against the
+schema the 2f9dab40 writer actually produced, and confirmatory claims require a validated collection manifest). Later
+amendments are added here with their commits.
 
 ## Sizing (from planning variance, separate from timing)
 
