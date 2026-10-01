@@ -123,11 +123,7 @@ against these estimates. Part C per the frozen design; TOPAS is the long pole, s
 
 ## Seeds
 
-Seeds are **non-duplicated assignments**, not disjoint random streams. Portable seeds thread `t` with PCG stream `t` and
-state `RNG_Seed + 1e4·t` (report §7), so two portable runs reuse a state exactly when their seeds differ by a multiple
-of 1e4 within the thread count. Rule: **no two portable seeds that can enter the same contrast differ by a multiple of 1e4** (the earlier what-if 9500xx and nuclear-off 9400xx blocks already do, harmlessly, because they are never compared; report §7). Blocks:
-A upstream 960001+, A portable 961001+ (checked: no difference from any portable seed used so far is a multiple of 1e4); B, if
-authorised, 962001+ / 963001+ / 964001+; C per TD. The run-list commit includes a check that enforces the rule.
+Seeds are **non-duplicated assignments**, not disjoint random streams. Portable seeds thread `t` with PCG stream `t` and initial state `RNG_Seed + 1e4·t + 1e5·Num_call` (report §7), so for single-call runs two runs share a generator only if they share a seed. Rule: **every seed in the programme is unique, and none repeats an earlier portable seed.** Blocks: A upstream 960001+, A portable 961001+, B 962001+ / 963001+ / 964001+, C per TD. `validation/apples_seeds_check.py` enforces it over the committed run lists.
 
 ## How it runs unattended
 

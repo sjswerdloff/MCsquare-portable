@@ -177,14 +177,7 @@ local deposition of δ-electrons, and σ-window leakage. Solid-angle weighting i
 ## 7. Reproducibility
 
 Portable is seed-reproducible at 1 thread and **not** at more than one: primaries are handed out through a shared
-counter, and the simulated count can exceed N (#39). **How seeds map to random streams.** In `compute_simulation.c`
-each thread `t` seeds PCG with stream selector `t` and initial state `RNG_Seed + 1e4·t + 1e5·call`. So runs with
-different seeds use the same per-thread streams from different starting states; they are not disjoint streams, and two
-runs collide exactly when their seeds differ by a multiple of 1e4 within the thread count. Within each contrast reported
-here no two portable seeds differ by a multiple of 1e4, so no state is reused inside a contrast. Across contrasts
-there is reuse: the what-if seeds 950001–4 and the nuclear-off seeds 940001–4 differ by exactly 1e4, so thread t + 1
-of one run starts where thread t of the other does. Those runs are never compared with each other. Otherwise independence between runs is the usual assumption that
-different PCG starting states give effectively independent sequences. Upstream's MKL seeding was not inspected. Upstream + fix on the Lenovo, with the same binary, seed and
+counter, and the simulated count can exceed N (#39). **How seeds map to random streams.** In `compute_simulation.c` each thread `t` calls `pcg32_srandom_r(state, t)` with initial state `RNG_Seed + 1e4·t + 1e5·Num_call`, where `Num_call` counts simulation calls in the process (1 for every run here). The thread number also selects the PCG stream (the increment), so a generator is the pair (initial state, stream). Two runs start an identical generator only if, on the same thread, their states are equal, i.e. their seeds are equal for a single-call run. **No two runs reported here share a seed, so none shares a generator.** An earlier version of this section said the what-if (9500xx) and nuclear-off (9400xx) seeds reused states because they differ by 1e4. That was wrong: equal initial states on different threads belong to different streams (alden-ec2221c7, #48 review 6932). Independence between runs remains the usual assumption that distinct (state, stream) starts give effectively independent sequences; it is not proven. Upstream's MKL seeding was not inspected. Upstream + fix on the Lenovo, with the same binary, seed and
 4 threads, is not reproducible either (#39 c27678). TOPAS reproduced runs from their seeds in the configurations
 tested (OpenTOPAS 4.3.0, seed 101 at 8 and 16 threads, seed 900013 across three grids; TD), which is not shown in
 general. All comparisons here therefore use non-duplicated seed assignments per arm and statistics over runs, not
