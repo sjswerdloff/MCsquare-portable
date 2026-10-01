@@ -4,10 +4,12 @@ from any machine is read."""
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
 import random
 import sys
+import tarfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -175,6 +177,20 @@ def write_tree(root: Path, files: dict[str, bytes]) -> None:
         f.write_bytes(data)
 
 
+def write_git_archive(path: Path, files: dict[str, bytes], commit: str) -> None:
+    """A tar shaped like `git archive` output: a pax global header carrying the commit, directory entries, then files."""
+    with tarfile.open(path, "w", format=tarfile.PAX_FORMAT, pax_headers={"comment": commit}) as tf:
+        dirs = sorted({str(Path(rel).parent) for rel in files if "/" in rel})
+        for d in dirs:
+            info = tarfile.TarInfo(d + "/")
+            info.type = tarfile.DIRTYPE
+            tf.addfile(info)
+        for rel, data in sorted(files.items()):
+            info = tarfile.TarInfo(rel)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+
+
 def make_native(parent: Path, arms: tuple[str, ...] = tuple(NATIVE_ARM), *, commit: str = ACQ) -> dict[str, Path]:
     """Native workflow trees of the frozen full runs, one root per host (`<parent>/win/<sha12>`, `<parent>/lin/<sha12>`).
 
@@ -203,6 +219,9 @@ def make_native(parent: Path, arms: tuple[str, ...] = tuple(NATIVE_ARM), *, comm
             (case_dir / "run_root.txt").write_bytes(f"{arm} case {case} mode full, commit {commit}, run 12345\n".encode())
             write_tree(case_dir / "snapshot", snapshot)
             (case_dir / "snapshot_sha256.txt").write_bytes(hash_lines(snapshot, windows=windows))
+            if windows:  # apples-a-windows.yml extracts the snapshot from this git archive and leaves it in place
+                write_git_archive(case_dir / "inputs.tar", {k: v for k, v in snapshot.items()
+                                                            if k not in ("build.txt", "binary_sha256.txt")}, commit)
             # the runs themselves leave bytecode in the snapshot AFTER the hash list is written
             write_tree(case_dir / "snapshot", {"validation/__pycache__/x.pyc": b"pyc"})
             seeds = frozen.seeds[(arm, case)]
@@ -252,3 +271,70 @@ def make_native(parent: Path, arms: tuple[str, ...] = tuple(NATIVE_ARM), *, comm
                                "log.txt": f"Nbr primaries simulated: {run['simulated']}\n".encode(), **extra})
                 write_tree(d / out_name, {**dose, "sha256.txt": hash_lines(dose, windows=windows)})
     return roots
+
+
+# ------------------------------------------------------------- failure shapes, as the two workflows leave them on disk
+
+
+def native_case_dir(native: dict[str, Path], arm: str, case: str) -> Path:
+    return native["win" if arm in WINDOWS_ARMS else "lin"] / NATIVE_ARM[arm] / case.lower()
+
+
+def native_seed_dir(native: dict[str, Path], arm: str, case: str, seed: int) -> Path:
+    case_dir = native_case_dir(native, arm, case)
+    if case == "F":
+        return case_dir / f"s{seed}"
+    return case_dir / f"e{aa.expected_population(ACQ).seeds[(arm, case)][seed]}" / f"s{seed}"
+
+
+def stop_job_after(native: dict[str, Path], arm: str, case: str, seed: int | None) -> list[int]:
+    """The job exited at `seed` (None: before its first run): remove every LATER seed directory of its frozen loop, and
+    (case P) every energy directory the loop never reached, with its inputs list. Returns the removed (absent) seeds."""
+    import shutil
+
+    seeds = aa.expected_population(ACQ).seeds[(arm, case)]
+    order = list(seeds)
+    later = order if seed is None else order[order.index(seed) + 1 :]
+    for s in later:
+        shutil.rmtree(native_seed_dir(native, arm, case, s))
+    if case == "P":
+        reached = {seeds[s] for s in order if s not in later}
+        for energy in sorted(set(seeds.values()) - reached):
+            case_dir = native_case_dir(native, arm, case)
+            shutil.rmtree(case_dir / f"e{energy}")
+            (case_dir / f"e{energy}_inputs_sha256.txt").unlink()
+    return later
+
+
+def edit_run_json(d: Path, **changes: object) -> None:
+    run = json.loads((d / "run.json").read_text())
+    run.update(changes)
+    (d / "run.json").write_text(json.dumps(run))
+
+
+def transport_failure(native: dict[str, Path], arm: str, case: str, seed: int, status: str, *, simulated: int | None = None,
+                      keep_dose: bool = False) -> Path:
+    """write_run <status>: run.json with that status (simulated null unless the log line had been read), no
+    out/sha256.txt and no endpoint record (both written only after ok), Dose possibly absent."""
+    d = native_seed_dir(native, arm, case, seed)
+    edit_run_json(d, transport_status=status, simulated=simulated, overshoot=None)
+    out = d / ("out" if case == "P" else "out_seed")
+    (out / "sha256.txt").unlink()
+    (d / ("endpoints.json" if case == "P" else "record.json")).unlink()
+    if not keep_dose:
+        (out / "Dose.raw").unlink()
+        (out / "Dose.mhd").unlink()
+    (d / "log.txt").write_text("MCsquare started\nSegmentation fault\n")
+    return d
+
+
+def interrupted(native: dict[str, Path], arm: str, case: str, seed: int) -> Path:
+    """Cancelled mid-simulation: config written, log partial, out empty, no run.json and no endpoint record."""
+    d = native_seed_dir(native, arm, case, seed)
+    (d / "run.json").unlink()
+    (d / ("endpoints.json" if case == "P" else "record.json")).unlink()
+    (d / "log.txt").write_text("MCsquare started\n")
+    out = d / ("out" if case == "P" else "out_seed")
+    for f in out.iterdir():
+        f.unlink()
+    return d

@@ -46,10 +46,21 @@ explicit LegacyBinding (only "pe1", only at the acquisition commit, whose record
 Domain bounds on case P: sigma_d in [1, 20] mm (the fit contract in pencil_endpoints.py) and ring fractions in (0, 1]
 (0 is inside the energy-fraction domain but has no logarithm); otherwise that endpoint is not_established.
 
-Every file read (run.json and the endpoint record of each accepted seed directory, and collection_manifest.json when
-present) enters the DATASET FINGERPRINT, the sha256 of the sorted "<sha256>  <path relative to the root>" lines, written
+Every file read (run.json and the endpoint record of each accepted seed directory, collection_manifest.json when
+present and the not_established entries' copied files) enters the DATASET FINGERPRINT, the sha256 of the sorted "<sha256>  <path relative to the root>" lines, written
 to the report and the JSON. collection_manifest.json, written by apples_collect.py, is verified when present (every
 file it lists must hash as recorded; every file read must be listed); without it the report says the copy is unattested.
+
+Runs that were not established (apples_collect.py, manifest schema 2): the collector lists every frozen run it did not
+collect in the manifest's `not_established` list, outcome `failed` (interrupted, transport failure, endpoint failure;
+its diagnostic files copied under .not_established/<arm>/<case>/s<seed>/, which is never read as a run) or `absent` (the
+job stopped before reaching it), with a reason. Each entry is re-verified (its copied files hash as recorded and enter
+the dataset fingerprint; it is a frozen arm, case, seed at its frozen energy; no seed is listed twice; no listed seed is
+also a collected run) and then makes its contrasts PARTIAL by the rule above: it is a population issue, so descriptive
+estimates only, no joint claim, no Holm decision, no TOST classification. With a manifest present every frozen seed
+must be accounted for exactly once, as a collected run or a not_established entry; a seed that is neither refuses.
+Without a manifest a missing seed is a population issue as before. The report and the JSON list each not-established
+run (arm, case, seed, energy, outcome, reason).
 
 Design completeness: the plan has 8 runs per arm, case and energy (case F: 8 at 200 MeV); the frozen population
 carries exactly that.
@@ -112,6 +123,8 @@ REQUESTED = {"P": 10_000_000, "F": 30_000_000}
 P_LABEL = "{arm}_P_E{energy}_N1e7_seed{seed}"  # the --label the workflows pass to pencil_endpoints.py
 MANIFEST_NAME = "collection_manifest.json"
 PROVENANCE_DIR = ".provenance"  # apples_collect.py puts run_root.txt and the *_sha256.txt files here; skipped (hidden)
+NOT_ESTABLISHED_DIR = ".not_established"  # apples_collect.py copies a failed run's diagnostics here, never as a run
+NE_OUTCOMES = ("failed", "absent")
 
 IDENTITY_SOURCE = (
     "Run identity comes from the frozen workflow run lists at the acquisition commit and is validated against "
@@ -271,10 +284,13 @@ class Ledger:
         self.root = root
         self.files: dict[str, str] = {}
 
-    def read_text(self, path: Path) -> str:
+    def read_bytes(self, path: Path) -> bytes:
         data = path.read_bytes()
         self.files[path.relative_to(self.root).as_posix()] = hashlib.sha256(data).hexdigest()
-        return data.decode("utf-8")
+        return data
+
+    def read_text(self, path: Path) -> str:
+        return self.read_bytes(path).decode("utf-8")
 
     def fingerprint(self) -> dict[str, object]:
         lines = [f"{h}  {p}\n" for p, h in sorted(self.files.items())]
@@ -517,14 +533,21 @@ def load_run(
 
 
 def load_arm_case(
-    root: Path, arm: str, case: str, frozen: Frozen, ledger: Ledger
+    root: Path, arm: str, case: str, frozen: Frozen, ledger: Ledger,
+    listed: dict[int, dict[str, object]] | None = None, *, attested: bool = False,
 ) -> tuple[list[Run], list[str]]:
-    """Accepted runs of one arm and case, and the population issues (missing, rejected, provenance failures).
+    """Accepted runs of one arm and case, and the population issues (missing, rejected, not established, provenance
+    failures).
 
     Only `s<seed>` directories whose seed is expected for this arm and case, written exactly as the workflow writes it
     and not repeated by numeric identity, are opened. Everything else that looks like a seed directory is rejected
-    and listed; anything that does not look like one is fatal.
+    and listed; anything that does not look like one is fatal. `listed` holds the collection manifest's
+    not_established entries for this arm and case (seed -> entry): each becomes a population issue (so the contrast is
+    PARTIAL), and a seed both collected and listed is fatal. With a manifest (`attested`), every frozen seed must be a
+    collected run or listed, else fatal: the collector lists every seed it did not collect. Without one, a missing
+    seed is a population issue.
     """
+    listed = listed or {}
     case_dir = root / arm / case
     if not case_dir.is_dir():
         msg = f"missing {case_dir}"
@@ -539,7 +562,7 @@ def load_arm_case(
             msg = f"unexpected entry {entry} (expected s<seed> directories)"
             raise InputError(msg)
         by_identity.setdefault(int(m.group(1)), []).append(entry.name)
-    if not by_identity:
+    if not by_identity and not listed:
         msg = f"no s<seed> directories under {case_dir}"
         raise InputError(msg)
     runs: list[Run] = []
@@ -555,7 +578,17 @@ def load_arm_case(
         else:
             runs.append(load_run(arm, case, case_dir / names[0], ident, expected[ident], frozen.commit, ledger))
     accepted = {r.seed for r in runs}
-    missing = sorted(set(expected) - accepted)
+    both = sorted(accepted & set(listed))
+    if both:
+        msg = f"{arm} {case}: seed(s) {', '.join(map(str, both))} both collected as runs and listed as not established"
+        raise InputError(msg)
+    missing = sorted(set(expected) - accepted - set(listed))
+    if missing and attested:
+        msg = (f"{arm} {case}: frozen seed(s) {', '.join(map(str, missing))} neither collected nor listed as not "
+               "established in the collection manifest")
+        raise InputError(msg)
+    for seed, ne in sorted(listed.items()):
+        issues.append(f"{arm}/{case}/s{seed} ({ne['energy']} MeV): not established, {ne['outcome']}: {ne['reason']}")
     if missing:
         issues.append(f"{arm} {case}: {len(missing)} expected seed(s) missing: {', '.join(map(str, missing))}")
     if rejected:
@@ -584,7 +617,8 @@ def check_arm_binary(data: dict[tuple[str, str], list[Run]], issues: dict[tuple[
 
 
 def load_root(
-    root: Path, parts: tuple[str, ...], frozen: Frozen, ledger: Ledger
+    root: Path, parts: tuple[str, ...], frozen: Frozen, ledger: Ledger,
+    listed: dict[tuple[str, str], dict[int, dict[str, object]]] | None = None, *, attested: bool = False,
 ) -> tuple[dict[tuple[str, str], list[Run]], dict[tuple[str, str], list[str]]]:
     if not root.is_dir():
         msg = f"{root} is not a directory"
@@ -597,37 +631,124 @@ def load_root(
                 msg = f"missing arm directory {root / arm}"
                 raise InputError(msg)
             for case in CASES:
-                data[(arm, case)], issues[(arm, case)] = load_arm_case(root, arm, case, frozen, ledger)
+                data[(arm, case)], issues[(arm, case)] = load_arm_case(
+                    root, arm, case, frozen, ledger, (listed or {}).get((arm, case)), attested=attested
+                )
     check_arm_binary(data, issues)
     return data, issues
 
 
-def verify_manifest(root: Path, ledger: Ledger) -> dict[str, object]:
-    """Check collection_manifest.json (written by apples_collect.py) against the tree, when present.
-
-    Every file it lists must exist and hash as recorded, and every file the analysis read must be listed. Returns the
-    report entry; raises InputError on a mismatch.
-    """
+def read_manifest(root: Path, ledger: Ledger) -> dict[str, object] | None:
+    """collection_manifest.json (written by apples_collect.py) as a JSON object, or None when there is none."""
     path = root / MANIFEST_NAME
     if not path.is_file():
-        return {"present": False, "note": "no collection manifest: the provenance of this copy is not attested"}
+        return None
     try:
         manifest = json.loads(ledger.read_text(path))
-        listed = {e["path"]: e["sha256"] for e in manifest["files"]}
-    except (OSError, ValueError, KeyError, TypeError) as e:
+    except (OSError, ValueError) as e:
         msg = f"{path} is unusable: {type(e).__name__}: {e}"
         raise InputError(msg) from e
-    for rel, want in sorted(listed.items()):
+    if not isinstance(manifest, dict):
+        msg = f"{path} is not a JSON object"
+        raise InputError(msg)
+    return manifest
+
+
+def _file_entries(entries: object, where: str) -> dict[str, str]:
+    """A manifest file list ([{path, source, sha256}]) as {path: sha256}; refuses an entry without a path and a sha256,
+    or a repeated path (`source` is a record of where the copy came from and is not checked here)."""
+    if not isinstance(entries, list):
+        msg = f"collection manifest: {where} is not a list"
+        raise InputError(msg)
+    out: dict[str, str] = {}
+    for e in entries:
+        if not isinstance(e, dict) or not isinstance(e.get("path"), str) or not isinstance(e.get("sha256"), str) \
+                or not SHA256_HEX.match(e["sha256"]):
+            msg = f"collection manifest: {where} has an entry without a path and a sha256: {e!r}"
+            raise InputError(msg)
+        if e["path"] in out:
+            msg = f"collection manifest: {e['path']} is listed twice"
+            raise InputError(msg)
+        out[e["path"]] = e["sha256"]
+    return out
+
+
+def listed_not_established(
+    manifest: dict[str, object] | None, frozen: Frozen
+) -> dict[tuple[str, str], dict[int, dict[str, object]]]:
+    """The manifest's not_established entries, (arm, case) -> {seed: entry}, each checked against the frozen population:
+    a frozen (arm, case, seed) at its frozen energy, outcome failed or absent, a reason, files only under
+    .not_established/<arm>/<case>/s<seed>/ (none for absent), and no seed listed twice. Raises InputError otherwise."""
+    raw = [] if manifest is None else manifest.get("not_established", [])
+    if not isinstance(raw, list):
+        msg = "collection manifest: not_established is not a list"
+        raise InputError(msg)
+    out: dict[tuple[str, str], dict[int, dict[str, object]]] = {}
+    for e in raw:
+        if not isinstance(e, dict):
+            msg = f"collection manifest: not_established entry {e!r} is not an object"
+            raise InputError(msg)
+        arm, case, seed, energy = e.get("arm"), e.get("case"), e.get("seed"), e.get("energy")
+        expected = frozen.seeds.get((arm, case)) if isinstance(arm, str) and isinstance(case, str) else None
+        if expected is None or _int(seed) is None or seed not in expected:
+            msg = f"collection manifest: not_established {arm}/{case}/s{seed} is not in the frozen population"
+            raise InputError(msg)
+        if _int(energy) is None or energy != expected[seed]:
+            msg = f"collection manifest: not_established {arm}/{case}/s{seed} energy {energy!r}, frozen {expected[seed]}"
+            raise InputError(msg)
+        if e.get("outcome") not in NE_OUTCOMES or not isinstance(e.get("reason"), str) or not e["reason"]:
+            msg = f"collection manifest: not_established {arm}/{case}/s{seed} needs an outcome in {NE_OUTCOMES} and a reason"
+            raise InputError(msg)
+        files = _file_entries(e.get("files"), f"not_established {arm}/{case}/s{seed} files")
+        prefix = f"{NOT_ESTABLISHED_DIR}/{arm}/{case}/s{seed}/"
+        stray = [p for p in files if not p.startswith(prefix) or ".." in p.split("/")]
+        if stray or (e["outcome"] == "absent" and files):
+            msg = f"collection manifest: not_established {arm}/{case}/s{seed} lists file(s) outside {prefix} or for an absent run"
+            raise InputError(msg)
+        cell = out.setdefault((str(arm), str(case)), {})
+        if seed in cell:
+            msg = f"collection manifest: {arm}/{case}/s{seed} is listed as not established twice"
+            raise InputError(msg)
+        cell[seed] = {**e, "files_by_path": files}
+    return out
+
+
+def _ne_files(entry: dict[str, object]) -> dict[str, str]:
+    """{path: sha256} of one not_established entry, as listed_not_established stored it."""
+    files = entry["files_by_path"]
+    return files if isinstance(files, dict) else {}
+
+
+def verify_manifest(
+    root: Path, ledger: Ledger, manifest: dict[str, object] | None,
+    listed: dict[tuple[str, str], dict[int, dict[str, object]]],
+) -> dict[str, object]:
+    """Check collection_manifest.json against the tree, when present.
+
+    Every file it lists (the runs' and provenance `files`, and each not_established entry's diagnostics) must exist and
+    hash as recorded, and every file the analysis read must be listed. The not_established files are read through the
+    ledger, so the dataset fingerprint covers them. Returns the report entry; raises InputError on a mismatch.
+    """
+    if manifest is None:
+        return {"present": False, "note": "no collection manifest: the provenance of this copy is not attested"}
+    files = _file_entries(manifest.get("files"), "files")
+    ne_files = {p: h for cell in listed.values() for entry in cell.values() for p, h in _ne_files(entry).items()}
+    for rel, want in sorted({**files, **ne_files}.items()):
         target = root / rel
-        got = hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else None
+        if target.is_file():
+            data = ledger.read_bytes(target) if rel in ne_files else target.read_bytes()
+            got: str | None = hashlib.sha256(data).hexdigest()
+        else:
+            got = None
         if got != want:
             msg = f"collection manifest: {rel} is {'missing' if got is None else 'changed'} since collection"
             raise InputError(msg)
-    unlisted = sorted(set(ledger.files) - set(listed) - {MANIFEST_NAME})
+    unlisted = sorted(set(ledger.files) - set(files) - set(ne_files) - {MANIFEST_NAME})
     if unlisted:
         msg = "collection manifest does not list file(s) the analysis read: " + ", ".join(unlisted[:3])
         raise InputError(msg)
-    return {"present": True, "files_verified": len(listed), "acquisition_commit": manifest.get("acquisition_commit")}
+    return {"present": True, "files_verified": len(files) + len(ne_files),
+            "not_established_files_verified": len(ne_files), "acquisition_commit": manifest.get("acquisition_commit")}
 
 
 # ----------------------------------------------------------------------------------------------- statistics
@@ -874,8 +995,13 @@ def run_analysis(
     """
     frozen = expected_population(commit, sources=sources)
     ledger = Ledger(root)
-    data, issues = load_root(root, parts, frozen, ledger)
-    manifest = verify_manifest(root, ledger)
+    if not root.is_dir():
+        msg = f"{root} is not a directory"
+        raise InputError(msg)
+    manifest_doc = read_manifest(root, ledger)
+    listed = listed_not_established(manifest_doc, frozen)
+    data, issues = load_root(root, parts, frozen, ledger, listed, attested=manifest_doc is not None)
+    manifest = verify_manifest(root, ledger, manifest_doc, listed)
     fingerprint = ledger.fingerprint()
     specs = all_specs()
     md = ["# Same-host comparison: parts " + ", ".join(parts), "", IDENTITY_SOURCE, ""]
@@ -914,7 +1040,17 @@ def run_analysis(
             + "".join(f"\n  - {b}" for b in bad)
         )
     md.append("")
+    analysed_arms = {arm for part in parts for arm in PART_ARMS[part]}
+    ne_doc = [
+        {"arm": arm, "case": case, "seed": seed, "energy_mev": e["energy"], "outcome": e["outcome"], "reason": e["reason"],
+         "files": sorted(_ne_files(e))}
+        for (arm, case), cell in sorted(listed.items()) if arm in analysed_arms for seed, e in sorted(cell.items())
+    ]
+    md.append(f"Runs not established (listed by the collector, never read as runs; their contrasts are PARTIAL): {len(ne_doc)}")
+    md += [f"- {n['arm']}/{n['case']}/s{n['seed']} ({n['energy_mev']} MeV): {n['outcome']}: {n['reason']}" for n in ne_doc]
+    md.append("")
     doc["runs"] = runs_doc
+    doc["not_established"] = ne_doc
     contrasts_doc: list[object] = []
     for part in parts:
         for name, arm, ref, confirmatory in CONTRASTS_BY_PART[part]:
