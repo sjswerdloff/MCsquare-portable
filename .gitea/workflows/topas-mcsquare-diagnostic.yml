@@ -1,0 +1,143 @@
+# PLANNING-DIAGNOSTIC runs for the portable MCsquare arm: the nuclear-off discriminator for the R80 gap (#32 comment
+# 27679, estimand by alden-ec2221c7; authorised by sjswerdloff 2026-10-01, #32 comment 27702). NEVER in the main
+# estimates and never an arm. Seeds 9400xx only; its own run root under diagnostic/. The TOPAS side (941xxx) is
+# clement-7074f29f's and runs separately.
+#
+# Cells, H = 1e6, 4 runs each:  200 MeV nuclear ON 940001-4 · 200 MeV nuclear OFF 940011-4 · 70 MeV nuclear ON 940021-4.
+# "Nuclear OFF" is the existing run-time switch Simulate_Nuclear_Interactions False (data_config.c:51): no code
+# change. MCsquare does not echo parsed config (main.c leaves display_config commented out), but its parser warns
+# "Unknown tag" for any key it does not recognise and exits on an invalid bool, so each run refuses on either. The
+# switch's EFFECT is checked in the analysis (the far halo collapses with nuclear off), not here.
+#
+# BUILD and RUN are separate jobs (sjswerdloff), exactly as in topas-mcsquare-planning.yml.
+
+name: TOPAS comparison, MCsquare nuclear-off diagnostic (portable, Studio)
+
+# THIS FILE IS THE REQUEST. It runs on a push that changes this file.
+on:
+  push:
+    branches: ['connor/topas-mcsquare-*']
+    paths: [.gitea/workflows/topas-mcsquare-diagnostic.yml]
+
+env:
+  TARGET: arm64-mcpu-native
+  EXTRA_CFLAGS: -mcpu=native
+  # ENERGY:NUCLEAR:N:SEED:GRID. Empty = build only. GRID: ct = the CT grid (pencil_endpoints.py);
+  # idd10 / idd01 = an independent depth-only scoring grid, whole plane laterally, 1.0 / 0.1 mm in depth over the 70 mm
+  # below the entrance face (idd_r80.py). The 70 MeV R80 at 1 mm is grid-limited (clement-7074f29f, #32): idd01 measures
+  # it, and idd10 is its control, which must reproduce the ct-grid IDD before idd01 is used.
+  # History: the 12 ct-grid cells 940001-940024 ran at 64c9c2b (run 280); not repeated here.
+  RUNS: >-
+    70:ON:1e6:940041:idd10 70:ON:1e6:940042:idd10 70:ON:1e6:940043:idd10 70:ON:1e6:940044:idd10
+    70:ON:1e6:940031:idd01 70:ON:1e6:940032:idd01 70:ON:1e6:940033:idd01 70:ON:1e6:940034:idd01
+  # System disk, for THIS diagnostic only (sjswerdloff 2026-10-01, relayed by clement-7074f29f: "write to the system
+  # drive, especially if the output is only a few gb"; 12 x 224 MB). The first trigger (a3a8fcd, task 10500) targeted
+  # the T7 and failed before creating a run root; the runner has never written to the T7, an unanswered question for main acquisition.
+  STUDY_ROOT: /Users/gitearunner/topas-study
+  THREADS: "24"
+
+jobs:
+  build:
+    name: Build (write-once)
+    runs-on: stuart-m3ultra-canary
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build into builds/<commit>/<target>
+        run: |
+          set -euo pipefail
+          B="$HOME/mcsq-builds/$GITHUB_SHA/$TARGET"
+          if [ -e "$B/sha256.txt" ]; then echo "already built: $B"; cat "$B/build.txt" "$B/sha256.txt"; exit 0; fi
+          if [ -e "$B" ]; then echo "$B exists without sha256.txt (interrupted build): refusing"; exit 1; fi
+          make -B MCsquare_arm64 EXTRA_CFLAGS="$EXTRA_CFLAGS"
+          mkdir -p "$(dirname "$B")"; mkdir "$B"   # no -p on the leaf: a concurrent builder fails here
+          cp MCsquare_arm64 "$B/MCsquare"
+          { echo "commit $GITHUB_SHA"; echo "host $(hostname)"; echo "cpu $(sysctl -n machdep.cpu.brand_string)";
+            echo "compiler $(clang --version | head -1)"; echo "target MCsquare_arm64 EXTRA_CFLAGS=$EXTRA_CFLAGS"; } > "$B/build.txt"
+          (cd "$B" && shasum -a 256 MCsquare > sha256.txt)
+          chmod a-w "$B/MCsquare" "$B/build.txt" "$B/sha256.txt"
+          cat "$B/build.txt" "$B/sha256.txt"
+
+  diagnostic:
+    name: Diagnostic runs (nuclear on/off, 200 and 70 MeV)
+    needs: build
+    runs-on: stuart-m3ultra-canary
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify binary, generate the cases, run, record
+        run: |
+          set -euo pipefail
+          UV="$(command -v uv || true)"; [ -n "$UV" ] || UV="$HOME/.local/bin/uv"
+          [ -x "$UV" ] || { echo "no uv on this runner"; exit 1; }
+          if [ -z "$RUNS" ]; then echo "no runs requested (RUNS empty): nothing to do"; exit 0; fi
+          B="$HOME/mcsq-builds/$GITHUB_SHA/$TARGET"
+          (cd "$B" && shasum -a 256 -c sha256.txt)   # never compile here; the recorded binary or nothing
+          cat "$B/build.txt"
+          [ -d "$STUDY_ROOT" ] || { echo "$STUDY_ROOT not present: refusing"; exit 1; }
+          ROOT="$STUDY_ROOT/diagnostic/mcsquare-portable-$TARGET/$GITHUB_SHA/run${GITHUB_RUN_NUMBER}"
+          FREE_GB=$(df -g "$STUDY_ROOT" | awk 'NR==2 {print $4}')
+          [ "$FREE_GB" -ge 20 ] || { echo "only ${FREE_GB} GB free under $STUDY_ROOT: refusing"; exit 1; }
+          mkdir -p "$(dirname "$ROOT")"
+          mkdir "$ROOT" || { echo "cannot create $ROOT (exists, or not writable): refusing"; exit 1; }
+          mkdir "$ROOT/snapshot"
+          cp validation/mcsquare_pencil_case.py validation/pencil_endpoints.py validation/idd_r80.py Scanners/Water_Phantom/HU_*.txt "$ROOT/snapshot/"
+          cp "$B/build.txt" "$ROOT/snapshot/build.txt"; cp "$B/sha256.txt" "$ROOT/snapshot/binary_sha256.txt"
+          (cd "$ROOT/snapshot" && shasum -a 256 *.py *.txt > sha256.txt)
+          cp -R Materials "$ROOT/snapshot/Materials"
+          (cd "$ROOT/snapshot" && find Materials -type f -print0 | sort -z | xargs -0 shasum -a 256 > materials_sha256.txt)
+          SNAP="$ROOT/snapshot"
+          fail_run() { printf '{"seed": %s, "requested": "%s", "nuclear": "%s", "transport_status": "%s"}\n' "$SEED" "$N" "$NUC" "$1" > "$D/run.json"; echo "$1: refusing"; exit 1; }
+          for spec in $RUNS; do
+            IFS=: read -r ENERGY NUC N SEED GRID <<< "$spec"
+            # Each vector value ends with a SPACE: after the first value Parse_Config tokenises on " \t" only, so a
+            # third value followed by the newline reads as "0.0\n" and fails isFloat (seen at 75fcd06, run 283).
+            # Scoring grid in MCsquare's internal cm (Scoring_* keys are not converted from mm): corner at y = 28 cm,
+            # i.e. 70 mm below the entrance face at y = 35 cm; one 40 cm voxel in x and z covers the whole plane.
+            case "$GRID" in
+              ct) SCORING=();;
+              idd10) SCORING=("Independent_scoring_grid True" "Scoring_origin 0.0 28.0 0.0 " "Scoring_grid_size 1 70 1 " "Scoring_voxel_spacing 40.0 0.1 40.0 ");;
+              idd01) SCORING=("Independent_scoring_grid True" "Scoring_origin 0.0 28.0 0.0 " "Scoring_grid_size 1 700 1 " "Scoring_voxel_spacing 40.0 0.01 40.0 ");;
+              *) echo "grid must be ct, idd10 or idd01: $spec"; exit 1;;
+            esac
+            [ "$GRID" = ct ] || [ "$ENERGY" = 70 ] || { echo "depth-only grids are laid out for 70 MeV only: $spec"; exit 1; }
+            case "$SEED" in 9400[0-9][0-9]) ;; *) echo "diagnostic seeds are 9400xx only: $spec"; exit 1;; esac
+            case "$NUC" in ON) FLAG=True;; OFF) FLAG=False;; *) echo "nuclear must be ON or OFF: $spec"; exit 1;; esac
+            CASE="$ROOT/case_E$ENERGY"
+            if [ ! -d "$CASE" ]; then
+              mkdir "$CASE"
+              (cd "$CASE" && "$UV" run --no-project --with numpy python "$SNAP/mcsquare_pencil_case.py" \
+                "$ENERGY" --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1)
+              (cd "$CASE" && shasum -a 256 water.raw water.mhd "bdl_E$ENERGY.txt" "plan_E$ENERGY.txt" > inputs_sha256.txt)
+            fi
+            D="$ROOT/E${ENERGY}_nuc${NUC}_${GRID}_N${N}_seed${SEED}"
+            mkdir "$D" "$D/out"
+            # Relative paths only: MCsquare's config parser splits on whitespace and the T7 path has a space (#40).
+            printf '%s\n' "Num_Threads $THREADS" "Num_Primaries $N" "RNG_Seed $SEED" "CT_File ../case_E$ENERGY/water.mhd" \
+              "HU_Density_Conversion_File ../snapshot/HU_Density_Conversion.txt" \
+              "HU_Material_Conversion_File ../snapshot/HU_Material_Conversion.txt" \
+              "BDL_Machine_Parameter_File ../case_E$ENERGY/bdl_E$ENERGY.txt" "BDL_Plan_File ../case_E$ENERGY/plan_E$ENERGY.txt" \
+              "Simulate_Nuclear_Interactions $FLAG" \
+              "Output_Directory out" "Dose_MHD_Output True" ${SCORING[@]+"${SCORING[@]}"} > "$D/config.txt"
+            awk '($1 ~ /^Scoring_(origin|grid_size|voxel_spacing)$/ && NF == 4) || NF == 2 {next} {bad=1; print "config line is not KEY VALUE(S): " $0} END {exit bad}' "$D/config.txt"
+            start=$(date +%s); START_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            (cd "$D" && MCsquare_Materials_Dir="$SNAP/Materials/" "$B/MCsquare" config.txt) > "$D/log.txt" 2>&1 || { tail -20 "$D/log.txt"; fail_run "mcsquare_exit_nonzero"; }
+            WALL=$(( $(date +%s) - start ))
+            if grep -q 'Unknown tag' "$D/log.txt"; then grep 'Unknown tag' "$D/log.txt"; fail_run "config_tag_not_recognised"; fi
+            SIM=$(grep -o 'Nbr primaries simulated: [0-9]*' "$D/log.txt" | awk '{print $4}' || true)
+            [ -n "$SIM" ] && [ "$SIM" -ge "$(printf '%.0f' "$N")" ] || fail_run "simulated_count_below_requested"
+            if grep -q 'generated outside the geometry' "$D/log.txt"; then fail_run "primaries_outside_geometry"; fi
+            (cd "$D/out" && shasum -a 256 Dose.raw Dose.mhd > sha256.txt)
+            REQ=$(printf '%.0f' "$N")
+            printf '{"seed": %s, "requested": %s, "simulated": %s, "overshoot": %s, "threads": %s, "energy_mev": %s, "nuclear": "%s", "grid": "%s", "binary_sha256": "%s", "start_utc": "%s", "end_utc": "%s", "wall_s": %s, "transport_status": "ok"}\n' \
+              "$SEED" "$REQ" "$SIM" "$((SIM - REQ))" "$THREADS" "$ENERGY" "$NUC" "$GRID" "$(awk '{print $1}' "$B/sha256.txt")" "$START_UTC" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$WALL" > "$D/run.json"
+            cat "$D/run.json"
+            if [ "$GRID" = ct ]; then
+              "$UV" run --no-project --with numpy --with scipy python "$SNAP/pencil_endpoints.py" \
+                mcsquare "$D/out/Dose.mhd" --label "diag_portable_${TARGET}_E${ENERGY}_nuc${NUC}_N${N}_seed${SEED}" | tee "$D/endpoints.json"
+            else
+              "$UV" run --no-project --with numpy python "$SNAP/idd_r80.py" "$D/out/Dose.mhd" --entrance-mm 350 \
+                --label "diag_portable_${TARGET}_E${ENERGY}_nuc${NUC}_${GRID}_N${N}_seed${SEED}" | tee "$D/endpoints.json"
+            fi
+          done
+          echo "outputs: $ROOT"
