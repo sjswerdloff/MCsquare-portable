@@ -129,18 +129,89 @@ before any result was read (#48). Its results will fill §5.1 and §5.2.
 
 ## 5. Results
 
-### 5.1 Depth dose (PENDING §4)
+Placeholders: `·` = value pending the confirmatory acquisition (§4); `[Fig n]` = figure to be generated from the
+collected dose files. Every pending cell is filled by the analysis code reviewed in #48 or by the figure and gamma
+scripts listed in §8, never by hand.
 
-Per energy: IDD curves of each pair of arms overlaid, with their difference; a table of R90, R80, R20 and fall-off
-differences (mm) with intervals; gamma pass rates.
+**Contrasts (same host, both code lines with the upstream fix):** A = upstream (A-up) against Portable (A-port),
+Lenovo, Windows; B1 = upstream (B-up) against Portable gcc (B-pgcc), HP, Linux; B2 = upstream (B-up) against Portable
+icc (B-picc), HP, Linux. Differences are upstream − Portable; ratios are upstream / Portable. Each cell is the point
+estimate with its 95% interval; **E** marks a TOST equivalence result within the margin (§3.4), **NE** not
+equivalent, **I** inconclusive.
+
+### 5.1 Depth dose
+
+[Fig 1] Integrated depth dose at 100, 150 and 200 MeV: mean over 8 runs per arm, the two arms of each contrast
+overlaid, normalised to the upstream maximum, with the difference curve beneath (% of maximum).
+
+**Table 1. Range and fall-off differences (mm).**
+
+| energy | contrast | R90 | R80 | R20 | fall-off (R80 − R20) |
+|---|---|---|---|---|---|
+| 100 MeV | A | · | · | · | · |
+| | B1 | · | · | · | · |
+| | B2 | · | · | · | · |
+| 150 MeV | A | · | · | · | · |
+| | B1 | · | · | · | · |
+| | B2 | · | · | · | · |
+| 200 MeV | A | · | · | · | · |
+| | B1 | · | · | · | · |
+| | B2 | · | · | · | · |
+
+**Table 2. Gamma pass rates, integrated depth dose and 3D dose (% of points passing).**
+
+| energy | contrast | 2%/2 mm, 10% | 1%/1 mm, 10% |
+|---|---|---|---|
+| 100 MeV | A / B1 / B2 | · / · / · | · / · / · |
+| 150 MeV | A / B1 / B2 | · / · / · | · / · / · |
+| 200 MeV | A / B1 / B2 | · / · / · | · / · / · |
+
+Text to be written from the tables: the largest range difference, whether every R80 lies within ±0.05 mm, and any
+energy dependence.
+
+### 5.2 Off-axis dose
+
+**Pencil beam.** [Fig 2] Lateral profiles in x and y through the axis at each energy's two depths (100 MeV: 40 and
+60 mm; 150 MeV: 80 and 125 mm; 200 MeV: 100 and 200 mm), log dose axis so that the halo is visible, arms overlaid.
+
+**Table 3. Spot σ difference (mm) and annulus energy-fraction ratios.**
+
+| energy, depth | contrast | σ | 5–10 mm | 10–20 | 20–40 | 40–80 | 80–200 |
+|---|---|---|---|---|---|---|---|
+| 100 MeV, 40 mm | A / B1 / B2 | · | · | · | · | · | · |
+| 100 MeV, 60 mm | A / B1 / B2 | · | · | · | · | · | · |
+| 150 MeV, 80 mm | A / B1 / B2 | · | · | · | · | · | · |
+| 150 MeV, 125 mm | A / B1 / B2 | · | · | · | · | · | · |
+| 200 MeV, 100 mm | A / B1 / B2 | · | · | · | · | · | · |
+| 200 MeV, 200 mm | A / B1 / B2 | · | · | · | · | · | · |
+
+**Broad field.** [Fig 3] Lateral profiles across the field edge at mid-range depth (127 mm), arms overlaid, log dose
+axis; inset: dose 0–30 mm outside the edge. [Fig 4] Gamma maps (1%/1 mm and low-dose) on the plane at 127 mm.
+
+**Table 4. Broad field: dose outside the field edge (percentage points of central-axis dose), central-axis dose,
+range.**
+
+| contrast | 5 mm outside | 10 mm | 20 mm | 30 mm | central axis (%) | R80 (mm) | R20 (mm) |
+|---|---|---|---|---|---|---|---|
+| A | · | · | · | · | · | · | · |
+| B1 | · | · | · | · | · | · | · |
+| B2 | · | · | · | · | · | · | · |
+
+**Table 5. Gamma pass rates on the broad-field planes (% passing).**
+
+| contrast | 2%/2 mm, 10% | 1%/1 mm, 10% | low-dose (2%/2 mm, ~1% threshold) | local 2%/2 mm, ~1% threshold |
+|---|---|---|---|---|
+| A | · | · | · | · |
+| B1 | · | · | · | · |
+| B2 | · | · | · | · |
+
+Text to be written from the tables: agreement in the halo region next to the field edge, where upstream as
+distributed underdoses (§2), and whether the 10%-threshold and low-dose gammas tell different stories.
+
+### 5.1–5.2 preliminary data (superseded when §4 completes)
 
 **PRELIMINARY (different hosts):** at 200 MeV, upstream + fix (icl, Lenovo, 4 threads) against Portable (Mac Studio,
 24 threads), 4 × 1e7 each, R80 differs by +0.0008 mm (SE 0.0038; 95% [−0.0084, +0.0101]).
-
-### 5.2 Off-axis dose (PENDING §4)
-
-Per energy and depth: lateral profiles overlaid, σ differences and annulus ratios with intervals; gamma pass rates
-on the planes; for the broad field, the profiles across the field edge.
 
 **PRELIMINARY, broad field, both code lines with the fix** (mean of 2 runs × 3e7, 3 threads; dose in % of central
 axis at 127 mm depth):
@@ -155,7 +226,7 @@ axis at 127 mm depth):
 Three rows agree within about 0.05 points in every column; the Lenovo 20 mm cell is about 0.08 lower, more than its
 own two-run difference (0.04). With n = 2 this is descriptive only (#16, #28).
 
-**PRELIMINARY, pencil beam, 200 MeV, different hosts** (as in §5.1; difference upstream − Portable, ratio
+**PRELIMINARY, pencil beam, 200 MeV, different hosts** (the configuration above; difference upstream − Portable, ratio
 upstream/Portable; 95% intervals):
 
 | depth | σ difference | annulus 20–40 mm | 40–80 mm | 80–200 mm |
@@ -204,9 +275,17 @@ codes (−0.56 mm; #32). Annuli far from the axis carry 10–20% less energy in 
 
 ## 6. Discussion
 
-To be written with the confirmatory results. Points it will address: whether the two code lines, with the upstream
-fix applied to both, agree within the stated margins on the same host; the size and clinical relevance of upstream's
-field-edge underdose; and the open range and halo differences against TOPAS.
+To be completed from §5. Planned structure:
+
+1. **Agreement between the code lines.** Whether upstream and Portable MCsquare, both with the fix, agree within the
+   stated margins on the same host, per contrast (A, B1, B2), and whether the compiler matters (B1 against B2).
+2. **The upstream defect in clinical terms.** The size of upstream's field-edge underdose as distributed (§2) against
+   the agreement found in §5, and why it matters next to organs at risk.
+3. **Portability.** Portable MCsquare gives equivalent results on Linux, Windows and macOS (§5.3), so treatment-planning
+   research need not depend on Intel compilers.
+4. **The TOPAS differences.** The open 0.5 mm range offset and the halo deficit (§5.4) and what the next stage tests.
+5. **Speed.** Run time per 1e7 histories by arm and host (from the run records), stated as resource information, not
+   as a performance claim.
 
 ## 7. Limitations
 
