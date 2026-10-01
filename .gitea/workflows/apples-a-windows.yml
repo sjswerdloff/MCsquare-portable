@@ -1,0 +1,330 @@
+# Same-host comparison, PART A: Intel, Windows 10, on the Lenovo only (docs/apples_to_apples_plan.md, part A).
+#   A-up    OpenMCsquare 85bf2911 + validation/topas/openmcsquare/fix_secondary_angle_energy.patch, icl 2021.1
+#           (build job as in topas-openmcsquare-planning.yml, same write-once build dir, which already exists here)
+#   A-port  portable at this commit, MSYS2 UCRT64 gcc, make -B MCsquare_win_portable (as in platform-study.yml)
+# Cases, identical for both arms, 4 threads:
+#   P  pencil, mcsquare_pencil_case.py <E> --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1, Scanners/Water_Phantom,
+#      E = 100/150/200 MeV, 1e7 histories, 8 runs per energy; endpoints pencil_endpoints.py --depths per energy
+#   F  the #31 field-edge case (field_edge_make_cases.py 200 150, platform-study.yml config), 3e7 histories, 8 runs,
+#      recorded with platform_study_record.py
+#
+# THIS FILE IS THE RUN REQUEST: it runs on a push to connor/apples-run that changes this file. MODE below:
+#   smoke  1 run per energy + 1 F run, 1e5 histories, seeds +900 in the same blocks, under a smoke\ subdirectory
+#   full   the full run lists
+# Seeds: A-up 9600xx, A-port 9610xx (E100 xx001-8, E150 xx011-8, E200 xx021-8, F xx031-8); checked against part B and
+# every earlier portable seed by validation/apples_seeds_check.py before anything runs.
+#
+# BUILD and RUN are separate jobs (sjswerdloff). Builds are write-once under C:\mcsq-win\builds with the exe's sha256;
+# run jobs never compile and refuse on a hash mismatch. Every run gets a new directory; nothing is overwritten or
+# deleted. Upstream 85bf2911 reads the MHD ElementDataFile and Materials\ relative to the WORKING directory and has
+# short fixed path buffers (task 10453, 0xC0000409): case files sit in the run root, which is the cwd, every config
+# path is relative and short, and run roots are C:\mcsq-win\ts\<sha12>\... with short leaf names.
+
+name: Same-host comparison, part A (Windows, Lenovo)
+
+on:
+  push:
+    branches: [connor/apples-run]
+    paths: [.gitea/workflows/apples-a-windows.yml]
+
+env:
+  MODE: smoke
+  UPSTREAM: 85bf2911ddadbb40bd41b1a18b4b247536bb33ab
+  PATCH: validation/topas/openmcsquare/fix_secondary_angle_energy.patch
+  PATCH_SHA256: e22990c96942286304f538b844ed2697a917c4e8b235f970731824b90ae8e347
+  TARGET: icl-avx2
+  PORT_TARGET: msys2-gcc
+  THREADS: "4"
+  MSYS: C:\mcsq-win\msys64-20260927
+
+jobs:
+  build-up:
+    name: Build A-up, OpenMCsquare + fix, icl (write-once)
+    runs-on: lenovo-windows-canary
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Build into C:\mcsq-win\builds
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Copied from topas-openmcsquare-planning.yml (main cc38f8e). Same build dir: if it exists this job only reports it.
+          # The committed bytes, not the checkout's (autocrlf may rewrite line endings); cmd redirection keeps them.
+          # Run-specific names, created exclusively: nothing that already exists is removed or overwritten.
+          $tag = "$env:GITHUB_RUN_ID"; $fixp = "fix_$tag.patch"; $tarp = "up_$tag.tar"; $upd = "up_fix_$tag"
+          foreach ($x in $fixp, $tarp, $upd) { if (Test-Path $x) { throw "$x already exists: refusing" } }
+          cmd /c "git -c core.autocrlf=false show HEAD:$env:PATCH > $fixp"
+          if ($LASTEXITCODE) { throw "could not write $fixp" }
+          if ((Get-FileHash $fixp -Algorithm SHA256).Hash.ToLower() -ne $env:PATCH_SHA256) { throw "patch sha256 mismatch" }
+          $B = "C:\mcsq-win\builds\$($env:UPSTREAM.Substring(0,12))+$($env:PATCH_SHA256.Substring(0,12))\$env:TARGET"
+          if (Test-Path "$B\sha256.txt") { "already built: $B"; Get-Content "$B\build.txt","$B\sha256.txt"; exit 0 }
+          if (Test-Path $B) { throw "$B exists without sha256.txt (interrupted build): refusing" }
+          "$env:COMPUTERNAME  $((Get-CimInstance Win32_Processor).Name)"
+          if (-not (Get-ChildItem C:\mcsq-win\oneapi -Recurse -Filter icl.exe -ErrorAction SilentlyContinue)) { throw "no icl on this box" }
+          if (-not (Test-Path C:\mcsq-win\mkl\.complete)) { throw "no MKL on this box" }
+          $vc = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+          cmd /c "`"$vc`" >NUL && set" | ForEach-Object { if ($_ -match '^([^=]+)=(.*)$') { Set-Item -Path "env:$($matches[1])" -Value $matches[2] } }
+          $icl    = (Get-ChildItem C:\mcsq-win\oneapi -Recurse -Filter icl.exe | Where-Object FullName -match '\\bin\\intel64\\' | Select-Object -First 1).FullName
+          $ompinc = Split-Path (Get-ChildItem C:\mcsq-win\oneapi -Recurse -Filter omp.h | Where-Object FullName -match '\\compiler\\include' | Select-Object -First 1).FullName
+          $cmplib = Split-Path (Get-ChildItem C:\mcsq-win\oneapi -Recurse -Filter libiomp5md.lib | Where-Object FullName -match '\\intel64_win\\' | Select-Object -First 1).FullName
+          $mkllib = Split-Path (Get-ChildItem C:\mcsq-win\mkl -Recurse -Filter mkl_core_dll.lib | Select-Object -First 1).FullName
+          $mklinc = Split-Path (Get-ChildItem C:\mcsq-win\mkl -Recurse -Filter mkl.h | Select-Object -First 1).FullName
+          $env:INCLUDE = "$ompinc;$mklinc;$env:INCLUDE"; $env:LIB = "$cmplib;$mkllib;$env:LIB"; $env:PATH = "$(Split-Path $icl);$env:PATH"
+          git -c core.autocrlf=false archive -o $tarp $env:UPSTREAM
+          New-Item -ItemType Directory $upd | Out-Null
+          tar -xf $tarp -C $upd; if ($LASTEXITCODE) { throw "tar failed" }
+          $ErrorActionPreference = 'Continue'
+          git apply --verbose --directory=$upd $fixp 2>&1 | ForEach-Object { "$_" }
+          $ok = ($LASTEXITCODE -eq 0); $ErrorActionPreference = 'Stop'
+          if (-not $ok) { throw "patch did not apply" }
+          Push-Location $upd
+          Set-Content -Encoding Ascii version.h "#define VERSION `"85bf2911 + fix patch $($env:PATCH_SHA256.Substring(0,12)), icl 2021.1 (Windows) + MKL 2021.1.1 (NuGet DLL)`""
+          $src = (Get-ChildItem src\*.c).FullName
+          $flags = @('-Qopenmp','-Qstd=c99','-MT','-Qdiag-disable:10441','/O3','/QxCORE-AVX2')
+          $ErrorActionPreference = 'Continue'
+          & $icl $src @flags /FI version.h '/Fe:MCsquare_win_avx2.exe' /nologo /link mkl_intel_lp64_dll.lib mkl_intel_thread_dll.lib mkl_core_dll.lib 2>&1 | Select-Object -Last 15
+          $ok = ($LASTEXITCODE -eq 0); $ErrorActionPreference = 'Stop'
+          if (-not $ok) { throw "icl failed" }
+          Pop-Location
+          New-Item -ItemType Directory -Force (Split-Path $B) | Out-Null
+          New-Item -ItemType Directory $B | Out-Null   # fails if a concurrent build created it
+          Copy-Item "$upd\MCsquare_win_avx2.exe" "$B\MCsquare.exe"
+          @("upstream $env:UPSTREAM", "patch sha256 $env:PATCH_SHA256", "commit $env:GITHUB_SHA", "host $env:COMPUTERNAME",
+            "cpu $((Get-CimInstance Win32_Processor).Name)", "compiler $icl", "flags $($flags -join ' ') + MKL DLL import libs") |
+            Set-Content -Encoding Ascii "$B\build.txt"
+          "$((Get-FileHash "$B\MCsquare.exe" -Algorithm SHA256).Hash.ToLower())  MCsquare.exe" | Set-Content -Encoding Ascii "$B\sha256.txt"
+          Get-ChildItem $B | ForEach-Object { $_.IsReadOnly = $true }
+          Get-Content "$B\build.txt","$B\sha256.txt"
+
+  build-port:
+    name: Build A-port, portable, MSYS2 UCRT64 gcc (write-once)
+    runs-on: lenovo-windows-canary
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: MSYS2 + UCRT64 GCC (verified, once per box)
+        shell: powershell
+        run: |
+          & .\.gitea\scripts\ensure-msys2.ps1
+      - name: Build into C:\mcsq-win\builds\portable-<commit12>
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Recipe: platform-study.yml windows job (main cc38f8e): make -B MCsquare_win_portable in MSYS2 UCRT64.
+          $B = "C:\mcsq-win\builds\portable-$($env:GITHUB_SHA.Substring(0,12))\$env:PORT_TARGET"
+          if (Test-Path "$B\sha256.txt") { "already built: $B"; Get-Content "$B\build.txt","$B\sha256.txt"; exit 0 }
+          if (Test-Path $B) { throw "$B exists without sha256.txt (interrupted build): refusing" }
+          $m = $env:MSYS
+          $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
+          "$env:COMPUTERNAME  $((Get-CimInstance Win32_Processor).Name)"
+          $cc = (& "$m\ucrt64\bin\gcc.exe" --version | Select-Object -First 1)
+          $cc
+          $ErrorActionPreference = 'Continue'
+          $cmd = (& "$m\usr\bin\bash.exe" -lc 'make -B -n MCsquare_win_portable' 2>&1 | Select-Object -Last 1)
+          & "$m\usr\bin\bash.exe" -lc 'make -B MCsquare_win_portable' 2>&1 | Select-Object -Last 3
+          $rc = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
+          if ($rc -ne 0) { throw "build failed: make exit $rc" }
+          if (-not (Test-Path MCsquare_win_portable.exe)) { throw "build failed: no binary" }
+          New-Item -ItemType Directory -Force (Split-Path $B) | Out-Null
+          New-Item -ItemType Directory $B | Out-Null   # fails if a concurrent build created it
+          Copy-Item MCsquare_win_portable.exe "$B\MCsquare.exe"
+          @("portable commit $env:GITHUB_SHA", "commit $env:GITHUB_SHA", "host $env:COMPUTERNAME",
+            "cpu $((Get-CimInstance Win32_Processor).Name)", "compiler $cc", "target make -B MCsquare_win_portable (MSYS2 UCRT64 $m)",
+            "command $cmd", "runtime $m\ucrt64\bin (libgomp)") | Set-Content -Encoding Ascii "$B\build.txt"
+          "$((Get-FileHash "$B\MCsquare.exe" -Algorithm SHA256).Hash.ToLower())  MCsquare.exe" | Set-Content -Encoding Ascii "$B\sha256.txt"
+          Get-ChildItem $B | ForEach-Object { $_.IsReadOnly = $true }
+          Get-Content "$B\build.txt","$B\sha256.txt"
+
+  run:
+    name: Run ${{ matrix.arm }} case ${{ matrix.case }}
+    needs: [build-up, build-port]
+    runs-on: lenovo-windows-canary
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        # ENERGY:SEED. One line per arm x case: validation/apples_seeds_check.py reads the seeds from these lines.
+        include:
+          - {arm: A-up, case: P, full: "100:960001 100:960002 100:960003 100:960004 100:960005 100:960006 100:960007 100:960008 150:960011 150:960012 150:960013 150:960014 150:960015 150:960016 150:960017 150:960018 200:960021 200:960022 200:960023 200:960024 200:960025 200:960026 200:960027 200:960028", smoke: "100:960901 150:960911 200:960921"}
+          - {arm: A-up, case: F, full: "200:960031 200:960032 200:960033 200:960034 200:960035 200:960036 200:960037 200:960038", smoke: "200:960931"}
+          - {arm: A-port, case: P, full: "100:961001 100:961002 100:961003 100:961004 100:961005 100:961006 100:961007 100:961008 150:961011 150:961012 150:961013 150:961014 150:961015 150:961016 150:961017 150:961018 200:961021 200:961022 200:961023 200:961024 200:961025 200:961026 200:961027 200:961028", smoke: "100:961901 150:961911 200:961921"}
+          - {arm: A-port, case: F, full: "200:961031 200:961032 200:961033 200:961034 200:961035 200:961036 200:961037 200:961038", smoke: "200:961931"}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: MSYS2 + UCRT64 (verified, once per box)
+        shell: powershell
+        run: |
+          & .\.gitea\scripts\ensure-msys2.ps1
+      - name: Verify binary, generate the case, run, record
+        shell: powershell
+        env:
+          ARM: ${{ matrix.arm }}
+          CASE: ${{ matrix.case }}
+          SPECS_FULL: ${{ matrix.full }}
+          SPECS_SMOKE: ${{ matrix.smoke }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          switch ($env:MODE) {
+            'full'  { $specs = $env:SPECS_FULL;  $N = if ($env:CASE -eq 'P') { '1e7' } else { '3e7' }; $hund = '0'; $sub = '' }
+            'smoke' { $specs = $env:SPECS_SMOKE; $N = '1e5'; $hund = '9'; $sub = 'smoke\' }
+            default { throw "MODE must be smoke or full, got '$env:MODE'" }
+          }
+          if ($env:CASE -notin 'P','F') { throw "case must be P or F, got '$env:CASE'" }
+          $sha12 = $env:GITHUB_SHA.Substring(0,12)
+          switch ($env:ARM) {
+            'A-up'   { $B = "C:\mcsq-win\builds\$($env:UPSTREAM.Substring(0,12))+$($env:PATCH_SHA256.Substring(0,12))\$env:TARGET"; $block = '960'; $ad = 'aup' }
+            'A-port' { $B = "C:\mcsq-win\builds\portable-$sha12\$env:PORT_TARGET"; $block = '961'; $ad = 'apt' }
+            default  { throw "unknown arm '$env:ARM'" }
+          }
+          # The recorded binary or nothing: never compile here.
+          $want = ((Get-Content "$B\sha256.txt") -split '\s+')[0]
+          $have = (Get-FileHash "$B\MCsquare.exe" -Algorithm SHA256).Hash.ToLower()
+          if ($want -ne $have) { throw "binary sha256 $have does not match recorded $want" }
+          Get-Content "$B\build.txt"
+          $bhost = ((Get-Content "$B\build.txt") | Where-Object { $_ -like 'host *' } | Select-Object -First 1) -replace '^host ', ''
+          if ($bhost -ne $env:COMPUTERNAME) { throw "binary was built on '$bhost', this is '$env:COMPUTERNAME': refusing" }
+          $compiler = ((Get-Content "$B\build.txt") | Where-Object { $_ -like 'compiler *' } | Select-Object -First 1) -replace '^compiler ', ''
+          $cpu = (Get-CimInstance Win32_Processor | Select-Object -First 1).Name.Trim()
+          $m = $env:MSYS
+          $ErrorActionPreference = 'Continue'
+          & "$m\usr\bin\bash.exe" -lc 'pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-numpy mingw-w64-ucrt-x86_64-python-scipy' 2>&1 | Select-Object -Last 3
+          $rc = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
+          if ($rc) { throw "pacman install failed ($rc)" }
+          $py = "$m\ucrt64\bin\python.exe"
+          & $py -c "import numpy, scipy, sys; print('python', sys.version.split()[0], 'numpy', numpy.__version__, 'scipy', scipy.__version__)"
+          if ($LASTEXITCODE) { throw "numpy/scipy not importable" }
+          & $py validation\apples_seeds_check.py
+          if ($LASTEXITCODE) { throw "seed check failed: refusing" }
+          # Both arms use this commit's data; it must equal upstream's for every file a case reads (checked, and asserted).
+          git diff --quiet $env:UPSTREAM HEAD -- Materials Scanners/Water_Phantom Scanners/default BDL/BDL_default_DN_RangeShifter.txt
+          if ($LASTEXITCODE) { throw "Materials/Scanners/BDL differ from upstream $($env:UPSTREAM.Substring(0,12)): refusing" }
+          $free = [int]((Get-PSDrive C).Free / 1GB)
+          if ($free -lt 20) { throw "only $free GB free on C: refusing" }
+          $ROOT = "C:\mcsq-win\ts\$sha12\$sub$ad\$($env:CASE.ToLower())"
+          New-Item -ItemType Directory -Force (Split-Path $ROOT) | Out-Null
+          New-Item -ItemType Directory $ROOT | Out-Null   # a second run of this arm x case at this commit fails here
+          "$env:ARM case $env:CASE mode $env:MODE, commit $env:GITHUB_SHA, run $env:GITHUB_RUN_ID" | Set-Content -Encoding Ascii "$ROOT\run_root.txt"
+          # Snapshot: the committed bytes of every script and data file the runs use, with sha256.
+          $SNAP = "$ROOT\snapshot"; New-Item -ItemType Directory $SNAP | Out-Null
+          git -c core.autocrlf=false archive -o "$ROOT\inputs.tar" HEAD Materials Scanners BDL validation/apples_seeds_check.py `
+            validation/mcsquare_pencil_case.py validation/pencil_endpoints.py validation/field_edge_make_cases.py `
+            validation/platform_study_record.py validation/platform_study_metrics.py validation/field_edge_analyse.py
+          if ($LASTEXITCODE) { throw "git archive failed" }
+          tar -xf "$ROOT\inputs.tar" -C $SNAP; if ($LASTEXITCODE) { throw "tar failed" }
+          Copy-Item "$B\build.txt" $SNAP; Copy-Item "$B\sha256.txt" "$SNAP\binary_sha256.txt"
+          $V = "$SNAP\validation"
+          Get-ChildItem $SNAP -Recurse -File | Sort-Object FullName | Get-FileHash -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $($_.Path.Substring($SNAP.Length + 1))" } | Set-Content -Encoding Ascii "$ROOT\snapshot_sha256.txt"
+          # Runtime DLLs for this arm, and MCsquare reads Materials\ relative to the cwd (no override).
+          if ($env:ARM -eq 'A-up') {
+            $rt  = Split-Path (Get-ChildItem C:\mcsq-win\oneapi -Recurse -Filter libiomp5md.dll | Where-Object FullName -match '\\intel64' | Select-Object -First 1).FullName
+            $mkr = Split-Path (Get-ChildItem C:\mcsq-win\mkl -Recurse -Filter 'mkl_core*.dll' | Select-Object -First 1).FullName
+            $env:PATH = "$rt;$mkr;$env:PATH"
+          } else {
+            $env:PATH = "$m\ucrt64\bin;$env:PATH"
+          }
+          $env:MCsquare_Materials_Dir = $null
+          $env:PYTHONPATH = $V
+          function Hash-Files($dir, $out) {
+            Get-ChildItem $dir -Recurse -File | Sort-Object FullName | Get-FileHash -Algorithm SHA256 |
+              ForEach-Object { "$($_.Hash.ToLower())  $($_.Path.Substring($dir.Length + 1))" } | Set-Content -Encoding Ascii $out
+          }
+          if ($env:CASE -eq 'F') {
+            # The #31 case, generated once; each run directory gets its own copy and is the cwd (platform-study layout).
+            $FC = "$ROOT\fcase"; New-Item -ItemType Directory $FC | Out-Null
+            Push-Location $FC
+            $names = & $py "$V\field_edge_make_cases.py" 200 150
+            if ($LASTEXITCODE) { throw "case generation failed" }
+            Pop-Location
+            if ("$names".Trim() -ne 'E200_S150') { throw "unexpected case name(s): $names" }
+            Hash-Files $FC "$ROOT\fcase_sha256.txt"
+          }
+          $binsha = $want
+          $req = [int64][double]$N
+          foreach ($spec in ($specs -split '\s+' | Where-Object { $_ })) {
+            $E, $SEED = $spec.Split(':')
+            if ($SEED.Length -ne 6 -or $SEED.Substring(0,3) -ne $block -or $SEED.Substring(3,1) -ne $hund) { throw "seed $SEED is outside $env:ARM's $env:MODE block: refusing" }
+            if ($env:CASE -eq 'P') {
+              $depths = @{ '100' = '40,60'; '150' = '80,125'; '200' = '100,200' }[$E]
+              if (-not $depths) { throw "no slab depths for $E MeV: refusing" }
+              # Case files in the per-energy run root, which is the cwd: upstream reads ElementDataFile and Materials\ there.
+              $C = "$ROOT\e$E"
+              if (-not (Test-Path $C)) {
+                New-Item -ItemType Directory $C, "$C\Scanners" | Out-Null
+                Copy-Item -Recurse "$SNAP\Materials" "$C\Materials"
+                Copy-Item -Recurse "$SNAP\Scanners\Water_Phantom" "$C\Scanners\Water_Phantom"
+                Push-Location $C
+                & $py "$V\mcsquare_pencil_case.py" $E --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1
+                if ($LASTEXITCODE) { throw "case generation failed" }
+                Pop-Location
+                Hash-Files $C "$ROOT\e$($E)_inputs_sha256.txt"
+              }
+              $CWD = $C; $D = "$C\s$SEED"; $rel = "s$SEED"
+              New-Item -ItemType Directory $D, "$D\out" | Out-Null   # fails if the run directory exists
+              @("Num_Threads $env:THREADS", "Num_Primaries $N", "RNG_Seed $SEED", "CT_File water.mhd",
+                "HU_Density_Conversion_File Scanners/Water_Phantom/HU_Density_Conversion.txt",
+                "HU_Material_Conversion_File Scanners/Water_Phantom/HU_Material_Conversion.txt",
+                "BDL_Machine_Parameter_File bdl_E$E.txt", "BDL_Plan_File plan_E$E.txt",
+                "Output_Directory $rel/out", "Dose_MHD_Output True") | Set-Content -Encoding Ascii "$D\config.txt"
+              $cfg = "$rel/config.txt"; $outd = "$D\out"
+            } else {
+              $D = "$ROOT\s$SEED"
+              New-Item -ItemType Directory $D, "$D\Scanners", "$D\BDL", "$D\out_seed" | Out-Null   # fails if it exists
+              Copy-Item "$FC\cube.mhd", "$FC\cube.raw", "$FC\E200_S150.txt" $D
+              Copy-Item -Recurse "$SNAP\Materials" "$D\Materials"
+              Copy-Item -Recurse "$SNAP\Scanners\default" "$D\Scanners\default"
+              Copy-Item "$SNAP\BDL\BDL_default_DN_RangeShifter.txt" "$D\BDL"
+              @("Num_Threads $env:THREADS", "Num_Primaries $N", "RNG_Seed $SEED", "CT_File cube.mhd",
+                "HU_Density_Conversion_File Scanners/default/HU_Density_Conversion.txt",
+                "HU_Material_Conversion_File Scanners/default/HU_Material_Conversion.txt",
+                "BDL_Machine_Parameter_File BDL/BDL_default_DN_RangeShifter.txt",
+                "BDL_Plan_File E200_S150.txt", "Output_Directory out_seed", "Dose_MHD_Output True") | Set-Content -Encoding Ascii "$D\cfg.txt"
+              $CWD = $D; $cfg = 'cfg.txt'; $outd = "$D\out_seed"
+            }
+            $rec = [ordered]@{ seed = [int64]$SEED; requested = $req; simulated = $null; overshoot = $null; threads = [int]$env:THREADS
+              energy_mev = [int]$E; case = $env:CASE; arm = $env:ARM; mode = $env:MODE; host = $env:COMPUTERNAME; cpu = $cpu
+              binary_sha256 = $binsha; commit = $env:GITHUB_SHA; start_utc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+              end_utc = $null; wall_s = $null; transport_status = $null }
+            function Write-Run($status) {
+              $rec.transport_status = $status
+              $rec | ConvertTo-Json -Compress | Set-Content -Encoding Ascii "$D\run.json"
+              Get-Content "$D\run.json"
+              if ($status -ne 'ok') { throw "run $SEED ${status}: refusing" }
+            }
+            $t = Get-Date
+            Push-Location $CWD
+            $ErrorActionPreference = 'Continue'
+            & "$B\MCsquare.exe" $cfg *> "$D\log.txt"
+            $rc = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
+            Pop-Location
+            $rec.end_utc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); $rec.wall_s = [int]((Get-Date) - $t).TotalSeconds
+            "RUN $env:ARM case=$env:CASE E=$E seed=$SEED N=$N rc=$rc wall_s=$($rec.wall_s)"
+            if ($rc -ne 0) { Get-Content "$D\log.txt" -Tail 30; Write-Run "mcsquare_exit_$rc" }
+            if (-not (Test-Path "$outd\Dose.raw") -or -not (Test-Path "$outd\Dose.mhd")) { Get-Content "$D\log.txt" -Tail 30; Write-Run "dose_missing" }
+            $hit = Select-String -Path "$D\log.txt" -Pattern 'Nbr primaries simulated: (\d+)' | Select-Object -First 1
+            if (-not $hit) { Write-Run "no_primaries_line" }
+            $rec.simulated = [int64]$hit.Matches[0].Groups[1].Value; $rec.overshoot = $rec.simulated - $req
+            if ($rec.simulated -lt $req) { Write-Run "simulated_count_below_requested" }
+            if (Select-String -Path "$D\log.txt" -Pattern 'Unknown tag' -Quiet) { Select-String -Path "$D\log.txt" -Pattern 'Unknown tag'; Write-Run "config_tag_not_recognised" }
+            if ($env:CASE -eq 'P' -and (Select-String -Path "$D\log.txt" -Pattern 'generated outside the geometry' -Quiet)) { Write-Run "primaries_outside_geometry" }
+            Get-ChildItem "$outd\Dose.raw", "$outd\Dose.mhd" | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content -Encoding Ascii "$outd\sha256.txt"
+            Write-Run "ok"
+            if ($env:CASE -eq 'P') {
+              $ep = & $py "$V\pencil_endpoints.py" mcsquare "$outd\Dose.mhd" --depths $depths --label "$($env:ARM)_P_E$($E)_N$($N)_seed$SEED"
+              if ($LASTEXITCODE) { throw "endpoints failed for $SEED" }
+              $ep | Set-Content -Encoding Ascii "$D\endpoints.json"; $ep
+            } else {
+              Push-Location $D   # platform_study_record.py reads cfg.txt, the case and the data relative to the cwd
+              & $py "$V\platform_study_record.py" $D out_seed $env:ARM $SEED "$B\MCsquare.exe" "$compiler" $env:GITHUB_SHA
+              $rc = $LASTEXITCODE; Pop-Location
+              if ($rc) { throw "record failed for $SEED" }
+            }
+          }
+          "outputs: $ROOT"

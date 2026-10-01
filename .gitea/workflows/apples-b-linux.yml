@@ -1,0 +1,312 @@
+# Same-host comparison, PART B: Intel, Linux (WSL2) on the HP only (docs/apples_to_apples_plan.md, part B).
+#   B-up    OpenMCsquare 85bf2911 + validation/topas/openmcsquare/fix_secondary_angle_energy.patch (the patch part A
+#           uses), icc 2021.1.2 + MKL 2021.1.1, upstream's MCsquare_linux_avx2 flags. Recipe: upstream-field-edge.yml
+#           at cee2a6f (branch connor/field-edge-matrix).
+#   B-pgcc  portable at this commit, host gcc 13, make -B MCsquare_portable (platform-study.yml linux job).
+#   B-picc  portable at this commit, icc 2021.1.2 with upstream's flags. Recipe: x86-benchmark.yml at 92c1840
+#           (branch connor/x86-benchmark, the "portable built with icc" step; #3 comment 26744).
+# Cases, identical for every arm, 3 threads:
+#   P  pencil, mcsquare_pencil_case.py <E> --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1, Scanners/Water_Phantom,
+#      E = 100/150/200 MeV, 1e7 histories, 8 runs per energy; endpoints pencil_endpoints.py --depths per energy
+#   F  the #31 field-edge case (field_edge_make_cases.py 200 150, platform-study.yml config), 3e7 histories, 8 runs,
+#      recorded with platform_study_record.py
+#
+# Host: `linux` is the HP's WSL2 runner (validation/win_linux_equivalence_design.md: "Linux on the HP (DESKTOP-5H86O9N,
+# i5-6500T, WSL2 Ubuntu), which has the only Linux runner"). upstream-field-edge.yml (29 Sep) says the label was then
+# shared by two HP boxes, so every run job also refuses unless it is on the host that built its binary.
+#
+# THIS FILE IS THE RUN REQUEST: it runs on a push to connor/apples-run that changes this file. MODE below:
+#   smoke  1 run per energy + 1 F run, 1e5 histories, seeds +900 in the same blocks, under a smoke/ subdirectory
+#   full   the full run lists
+# Seeds: B-up 9620xx, B-pgcc 9630xx, B-picc 9640xx (E100 xx001-8, E150 xx011-8, E200 xx021-8, F xx031-8); checked
+# against part A and every earlier portable seed by validation/apples_seeds_check.py before anything runs.
+#
+# BUILD and RUN are separate jobs (sjswerdloff). Builds are write-once under $HOME/mcsq-builds/<id>/<target> with
+# sha256; run jobs never compile and refuse on a hash mismatch. Every run gets a new directory; nothing is overwritten
+# or deleted. Upstream reads the MHD ElementDataFile and Materials/ relative to the WORKING directory and its path
+# buffers are short: case files sit in the run root, which is the cwd, and every config path is relative and short.
+
+name: Same-host comparison, part B (Linux, HP)
+
+on:
+  push:
+    branches: [connor/apples-run]
+    paths: [.gitea/workflows/apples-b-linux.yml]
+
+env:
+  MODE: smoke
+  UPSTREAM: 85bf2911ddadbb40bd41b1a18b4b247536bb33ab
+  PATCH: validation/topas/openmcsquare/fix_secondary_angle_energy.patch
+  PATCH_SHA256: e22990c96942286304f538b844ed2697a917c4e8b235f970731824b90ae8e347
+  THREADS: "3"
+  TOOLCHAIN: /var/lib/gitea-runner/.cache/mcsquare-gcc7-glibc217
+  ICC_ROOT: /var/lib/gitea-runner/.cache/intel-oneapi-2021.1
+
+jobs:
+  build-up:
+    name: Build B-up, OpenMCsquare + fix, icc (write-once)
+    runs-on: linux
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Build into $HOME/mcsq-builds
+        run: |
+          set -euo pipefail
+          B="$HOME/mcsq-builds/${UPSTREAM:0:12}+${PATCH_SHA256:0:12}/icc-avx2"
+          if [ -e "$B/sha256.txt" ]; then echo "already built: $B"; cat "$B/build.txt" "$B/sha256.txt"; exit 0; fi
+          if [ -e "$B" ]; then echo "$B exists without sha256.txt (interrupted build): refusing"; exit 1; fi
+          hostname; lscpu | grep -E 'Model name'
+          test -x "$TOOLCHAIN/bin/x86_64-conda-linux-gnu-g++" || { echo "no gcc7/glibc2.17 toolchain cache on this box"; exit 1; }
+          test -f "$ICC_ROOT/.complete" || { echo "no icc cache on this box"; exit 1; }
+          # Run-specific names, created exclusively: nothing that already exists is removed or overwritten.
+          FIXP="fix_$GITHUB_RUN_ID.patch"; UPD="up_fix_$GITHUB_RUN_ID"
+          for x in "$FIXP" "$UPD"; do [ ! -e "$x" ] || { echo "$x already exists: refusing"; exit 1; }; done
+          git show "HEAD:$PATCH" > "$FIXP"
+          [ "$(sha256sum "$FIXP" | awk '{print $1}')" = "$PATCH_SHA256" ] || { echo "patch sha256 mismatch"; exit 1; }
+          # Recipe: upstream-field-edge.yml at cee2a6f, unchanged apart from the patch path and the VERSION text.
+          ICC=$(find "$ICC_ROOT" -path '*/bin/intel64/icc' -type f | head -1)
+          CMP_LIB=$(dirname "$(find "$ICC_ROOT" -path '*compiler/lib/intel64_lin/libiomp5.so' | head -1)")
+          MKLROOT=$(dirname "$(dirname "$(dirname "$(find "$ICC_ROOT" -name libmkl_core.a | head -1)")")")
+          export MKLROOT
+          CC_TEXT="$("$ICC" --version | head -1)"; echo "$CC_TEXT"
+          mkdir "$UPD"
+          git archive "$UPSTREAM" | tar -x -C "$UPD"
+          ( cd "$UPD" && patch -p1 < "$GITHUB_WORKSPACE/$FIXP" )
+          FLAGS=(-lm -qopenmp -mkl -D_GNU_SOURCE -w -O3 -m64 -xcore-avx2)
+          ( cd "$UPD" && "$ICC" src/*.c "${FLAGS[@]}" \
+              -gcc-name="$TOOLCHAIN/bin/x86_64-conda-linux-gnu-gcc" -gxx-name="$TOOLCHAIN/bin/x86_64-conda-linux-gnu-g++" \
+              --sysroot="$TOOLCHAIN/x86_64-conda-linux-gnu/sysroot" \
+              -L"$MKLROOT/lib/intel64" -L"$CMP_LIB" -Wl,-rpath,"$MKLROOT/lib/intel64" -Wl,-rpath,"$CMP_LIB" \
+              -DVERSION="\"85bf2911 + fix patch ${PATCH_SHA256:0:12}, icc 2021.1.2 + MKL 2021.1.1\"" -o MCsquare_icc )
+          mkdir -p "$(dirname "$B")"; mkdir "$B"   # no -p on the leaf: a concurrent builder fails here
+          cp "$UPD/MCsquare_icc" "$B/MCsquare"
+          { echo "upstream $UPSTREAM"; echo "patch sha256 $PATCH_SHA256"; echo "commit $GITHUB_SHA"; echo "host $(hostname)"
+            echo "cpu $(lscpu | sed -n 's/^Model name: *//p' | head -1)"; echo "compiler $CC_TEXT ($ICC)"
+            echo "flags ${FLAGS[*]} against $TOOLCHAIN sysroot, MKL $MKLROOT, rpath $CMP_LIB"
+            echo "recipe upstream-field-edge.yml at cee2a6f"; } > "$B/build.txt"
+          (cd "$B" && sha256sum MCsquare > sha256.txt)
+          chmod a-w "$B/MCsquare" "$B/build.txt" "$B/sha256.txt"
+          cat "$B/build.txt" "$B/sha256.txt"
+
+  build-pgcc:
+    name: Build B-pgcc, portable, gcc 13 (write-once)
+    runs-on: linux
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build into $HOME/mcsq-builds/portable-<commit12>
+        run: |
+          set -euo pipefail
+          B="$HOME/mcsq-builds/portable-${GITHUB_SHA:0:12}/gcc13"
+          if [ -e "$B/sha256.txt" ]; then echo "already built: $B"; cat "$B/build.txt" "$B/sha256.txt"; exit 0; fi
+          if [ -e "$B" ]; then echo "$B exists without sha256.txt (interrupted build): refusing"; exit 1; fi
+          hostname; lscpu | grep -E 'Model name'
+          case "$(gcc -dumpfullversion)" in 13.*) ;; *) echo "gcc is $(gcc -dumpfullversion), not 13: refusing"; exit 1;; esac
+          CC_TEXT="$(gcc --version | head -1)"; echo "$CC_TEXT"
+          CMD="$(make -B -n MCsquare_portable | tail -1)"
+          make -B MCsquare_portable   # recipe: platform-study.yml linux job
+          test -x MCsquare_portable
+          mkdir -p "$(dirname "$B")"; mkdir "$B"   # no -p on the leaf: a concurrent builder fails here
+          cp MCsquare_portable "$B/MCsquare"
+          { echo "portable commit $GITHUB_SHA"; echo "commit $GITHUB_SHA"; echo "host $(hostname)"
+            echo "cpu $(lscpu | sed -n 's/^Model name: *//p' | head -1)"; echo "compiler $CC_TEXT"
+            echo "target make -B MCsquare_portable"; echo "command $CMD"; } > "$B/build.txt"
+          (cd "$B" && sha256sum MCsquare > sha256.txt)
+          chmod a-w "$B/MCsquare" "$B/build.txt" "$B/sha256.txt"
+          cat "$B/build.txt" "$B/sha256.txt"
+
+  build-picc:
+    name: Build B-picc, portable, icc with upstream's flags (write-once)
+    runs-on: linux
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build into $HOME/mcsq-builds/portable-<commit12>
+        run: |
+          set -euo pipefail
+          B="$HOME/mcsq-builds/portable-${GITHUB_SHA:0:12}/icc-avx2"
+          if [ -e "$B/sha256.txt" ]; then echo "already built: $B"; cat "$B/build.txt" "$B/sha256.txt"; exit 0; fi
+          if [ -e "$B" ]; then echo "$B exists without sha256.txt (interrupted build): refusing"; exit 1; fi
+          hostname; lscpu | grep -E 'Model name'
+          test -x "$TOOLCHAIN/bin/x86_64-conda-linux-gnu-g++" || { echo "no gcc7/glibc2.17 toolchain cache on this box"; exit 1; }
+          test -f "$ICC_ROOT/.complete" || { echo "no icc cache on this box"; exit 1; }
+          P="p_icc_$GITHUB_RUN_ID"; [ ! -e "$P" ] || { echo "$P already exists: refusing"; exit 1; }
+          # Recipe: x86-benchmark.yml at 92c1840, "Portable built with icc (upstream's flags)", VERSION text aside.
+          ICC=$(find "$ICC_ROOT" -path '*/bin/intel64/icc' -type f | head -1)
+          CMP_LIB=$(dirname "$(find "$ICC_ROOT" -path '*compiler/lib/intel64_lin/libiomp5.so' | head -1)")
+          CC_TEXT="$("$ICC" --version | head -1)"; echo "$CC_TEXT"
+          mkdir "$P" && git archive HEAD | tar -x -C "$P"
+          FLAGS=(-lm -qopenmp -D_GNU_SOURCE -std=gnu99 -w -O3 -m64 -xcore-avx2)
+          ( cd "$P" && "$ICC" src/*.c "${FLAGS[@]}" \
+              -gcc-name="$TOOLCHAIN/bin/x86_64-conda-linux-gnu-gcc" -gxx-name="$TOOLCHAIN/bin/x86_64-conda-linux-gnu-g++" \
+              --sysroot="$TOOLCHAIN/x86_64-conda-linux-gnu/sysroot" \
+              -L"$CMP_LIB" -Wl,-rpath,"$CMP_LIB" -DVERSION="\"portable ${GITHUB_SHA:0:12}, icc 2021.1.2\"" -o MCsquare_icc_portable )
+          mkdir -p "$(dirname "$B")"; mkdir "$B"   # no -p on the leaf: a concurrent builder fails here
+          cp "$P/MCsquare_icc_portable" "$B/MCsquare"
+          { echo "portable commit $GITHUB_SHA"; echo "commit $GITHUB_SHA"; echo "host $(hostname)"
+            echo "cpu $(lscpu | sed -n 's/^Model name: *//p' | head -1)"; echo "compiler $CC_TEXT ($ICC)"
+            echo "flags ${FLAGS[*]} against $TOOLCHAIN sysroot, rpath $CMP_LIB"
+            echo "recipe x86-benchmark.yml at 92c1840"; } > "$B/build.txt"
+          (cd "$B" && sha256sum MCsquare > sha256.txt)
+          chmod a-w "$B/MCsquare" "$B/build.txt" "$B/sha256.txt"
+          cat "$B/build.txt" "$B/sha256.txt"
+
+  run:
+    name: Run ${{ matrix.arm }} case ${{ matrix.case }}
+    needs: [build-up, build-pgcc, build-picc]
+    runs-on: linux
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        # ENERGY:SEED. One line per arm x case: validation/apples_seeds_check.py reads the seeds from these lines.
+        include:
+          - {arm: B-up, case: P, full: "100:962001 100:962002 100:962003 100:962004 100:962005 100:962006 100:962007 100:962008 150:962011 150:962012 150:962013 150:962014 150:962015 150:962016 150:962017 150:962018 200:962021 200:962022 200:962023 200:962024 200:962025 200:962026 200:962027 200:962028", smoke: "100:962901 150:962911 200:962921"}
+          - {arm: B-up, case: F, full: "200:962031 200:962032 200:962033 200:962034 200:962035 200:962036 200:962037 200:962038", smoke: "200:962931"}
+          - {arm: B-pgcc, case: P, full: "100:963001 100:963002 100:963003 100:963004 100:963005 100:963006 100:963007 100:963008 150:963011 150:963012 150:963013 150:963014 150:963015 150:963016 150:963017 150:963018 200:963021 200:963022 200:963023 200:963024 200:963025 200:963026 200:963027 200:963028", smoke: "100:963901 150:963911 200:963921"}
+          - {arm: B-pgcc, case: F, full: "200:963031 200:963032 200:963033 200:963034 200:963035 200:963036 200:963037 200:963038", smoke: "200:963931"}
+          - {arm: B-picc, case: P, full: "100:964001 100:964002 100:964003 100:964004 100:964005 100:964006 100:964007 100:964008 150:964011 150:964012 150:964013 150:964014 150:964015 150:964016 150:964017 150:964018 200:964021 200:964022 200:964023 200:964024 200:964025 200:964026 200:964027 200:964028", smoke: "100:964901 150:964911 200:964921"}
+          - {arm: B-picc, case: F, full: "200:964031 200:964032 200:964033 200:964034 200:964035 200:964036 200:964037 200:964038", smoke: "200:964931"}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Verify binary, generate the case, run, record
+        env:
+          ARM: ${{ matrix.arm }}
+          CASE: ${{ matrix.case }}
+          SPECS_FULL: ${{ matrix.full }}
+          SPECS_SMOKE: ${{ matrix.smoke }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            full)  SPECS="$SPECS_FULL"; HUND=0; SUB=""; if [ "$CASE" = P ]; then N=1e7; else N=3e7; fi;;
+            smoke) SPECS="$SPECS_SMOKE"; HUND=9; SUB="smoke/"; N=1e5;;
+            *) echo "MODE must be smoke or full, got '$MODE'"; exit 1;;
+          esac
+          case "$CASE" in P|F) ;; *) echo "case must be P or F, got '$CASE'"; exit 1;; esac
+          SHA12=${GITHUB_SHA:0:12}
+          case "$ARM" in
+            B-up)   B="$HOME/mcsq-builds/${UPSTREAM:0:12}+${PATCH_SHA256:0:12}/icc-avx2"; BLOCK=962; AD=bup;;
+            B-pgcc) B="$HOME/mcsq-builds/portable-$SHA12/gcc13"; BLOCK=963; AD=bpg;;
+            B-picc) B="$HOME/mcsq-builds/portable-$SHA12/icc-avx2"; BLOCK=964; AD=bpi;;
+            *) echo "unknown arm '$ARM'"; exit 1;;
+          esac
+          UV="$(command -v uv || true)"; [ -n "$UV" ] || UV="$HOME/.local/bin/uv"
+          [ -x "$UV" ] || { echo "no uv on this runner"; exit 1; }
+          py() { "$UV" run --no-project --with numpy --with scipy python "$@"; }
+          # The recorded binary or nothing: never compile here.
+          (cd "$B" && sha256sum -c sha256.txt)
+          cat "$B/build.txt"
+          BHOST=$(sed -n 's/^host //p' "$B/build.txt")
+          [ "$BHOST" = "$(hostname)" ] || { echo "binary was built on '$BHOST', this is '$(hostname)': refusing"; exit 1; }
+          COMPILER=$(sed -n 's/^compiler //p' "$B/build.txt")
+          CPU=$(lscpu | sed -n 's/^Model name: *//p' | head -1)
+          BINSHA=$(awk '{print $1}' "$B/sha256.txt")
+          py -c "import numpy, scipy, sys; print('python', sys.version.split()[0], 'numpy', numpy.__version__, 'scipy', scipy.__version__)"
+          py validation/apples_seeds_check.py || { echo "seed check failed: refusing"; exit 1; }
+          # Every arm uses this commit's data; it must equal upstream's for every file a case reads (checked, and asserted).
+          git diff --quiet "$UPSTREAM" HEAD -- Materials Scanners/Water_Phantom Scanners/default BDL/BDL_default_DN_RangeShifter.txt \
+            || { echo "Materials/Scanners/BDL differ from upstream ${UPSTREAM:0:12}: refusing"; exit 1; }
+          FREE_GB=$(df -Pk "$HOME" | awk 'NR==2 {print int($4 / 1048576)}')
+          [ "$FREE_GB" -ge 20 ] || { echo "only ${FREE_GB} GB free under $HOME: refusing"; exit 1; }
+          CASE_LC=$(printf '%s' "$CASE" | tr 'PF' 'pf')
+          ROOT="$HOME/fe-study/ap/$SHA12/$SUB$AD/$CASE_LC"
+          mkdir -p "$(dirname "$ROOT")"
+          mkdir "$ROOT" || { echo "cannot create $ROOT (exists, or not writable): refusing"; exit 1; }
+          echo "$ARM case $CASE mode $MODE, commit $GITHUB_SHA, run $GITHUB_RUN_ID" > "$ROOT/run_root.txt"
+          # Snapshot: the committed bytes of every script and data file the runs use, with sha256.
+          SNAP="$ROOT/snapshot"; mkdir "$SNAP"
+          git archive HEAD Materials Scanners BDL validation/apples_seeds_check.py \
+            validation/mcsquare_pencil_case.py validation/pencil_endpoints.py validation/field_edge_make_cases.py \
+            validation/platform_study_record.py validation/platform_study_metrics.py validation/field_edge_analyse.py | tar -x -C "$SNAP"
+          cp "$B/build.txt" "$SNAP/build.txt"; cp "$B/sha256.txt" "$SNAP/binary_sha256.txt"
+          V="$SNAP/validation"
+          (cd "$SNAP" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$ROOT/snapshot_sha256.txt"
+          unset MCsquare_Materials_Dir   # MCsquare reads Materials/ relative to the cwd
+          export PYTHONPATH="$V"
+          if [ "$CASE" = F ]; then
+            # The #31 case, generated once; each run directory gets its own copy and is the cwd (platform-study layout).
+            FC="$ROOT/fcase"; mkdir "$FC"
+            NAMES=$(cd "$FC" && py "$V/field_edge_make_cases.py" 200 150)
+            [ "$NAMES" = E200_S150 ] || { echo "unexpected case name(s): $NAMES"; exit 1; }
+            (cd "$FC" && sha256sum cube.mhd cube.raw E200_S150.txt) > "$ROOT/fcase_sha256.txt"
+          fi
+          REQ=$(printf '%.0f' "$N")
+          utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+          for spec in $SPECS; do
+            IFS=: read -r E SEED <<< "$spec"
+            [ "${#SEED}" -eq 6 ] && [ "${SEED:0:3}" = "$BLOCK" ] && [ "${SEED:3:1}" = "$HUND" ] \
+              || { echo "seed $SEED is outside $ARM's $MODE block: refusing"; exit 1; }
+            if [ "$CASE" = P ]; then
+              case "$E" in 100) DEPTHS=40,60;; 150) DEPTHS=80,125;; 200) DEPTHS=100,200;; *) echo "no slab depths for $E MeV: refusing"; exit 1;; esac
+              # Case files in the per-energy run root, which is the cwd: upstream reads ElementDataFile and Materials/ there.
+              C="$ROOT/e$E"
+              if [ ! -d "$C" ]; then
+                mkdir "$C" "$C/Scanners"
+                cp -R "$SNAP/Materials" "$C/Materials"
+                cp -R "$SNAP/Scanners/Water_Phantom" "$C/Scanners/Water_Phantom"
+                (cd "$C" && py "$V/mcsquare_pencil_case.py" "$E" --nx 400 --ny 350 --nz 400 --iso-y 350 --nozzle 1)
+                (cd "$C" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$ROOT/e${E}_inputs_sha256.txt"
+              fi
+              CWD="$C"; D="$C/s$SEED"; REL="s$SEED"
+              mkdir "$D" || { echo "$D exists: refusing"; exit 1; }
+              mkdir "$D/out"
+              printf '%s\n' "Num_Threads $THREADS" "Num_Primaries $N" "RNG_Seed $SEED" "CT_File water.mhd" \
+                "HU_Density_Conversion_File Scanners/Water_Phantom/HU_Density_Conversion.txt" \
+                "HU_Material_Conversion_File Scanners/Water_Phantom/HU_Material_Conversion.txt" \
+                "BDL_Machine_Parameter_File bdl_E$E.txt" "BDL_Plan_File plan_E$E.txt" \
+                "Output_Directory $REL/out" "Dose_MHD_Output True" > "$D/config.txt"
+              CFG="$REL/config.txt"; OUTD="$D/out"
+            else
+              D="$ROOT/s$SEED"
+              mkdir "$D" || { echo "$D exists: refusing"; exit 1; }
+              mkdir "$D/Scanners" "$D/BDL" "$D/out_seed"
+              cp "$FC/cube.mhd" "$FC/cube.raw" "$FC/E200_S150.txt" "$D/"
+              cp -R "$SNAP/Materials" "$D/Materials"
+              cp -R "$SNAP/Scanners/default" "$D/Scanners/default"
+              cp "$SNAP/BDL/BDL_default_DN_RangeShifter.txt" "$D/BDL/"
+              printf '%s\n' "Num_Threads $THREADS" "Num_Primaries $N" "RNG_Seed $SEED" "CT_File cube.mhd" \
+                "HU_Density_Conversion_File Scanners/default/HU_Density_Conversion.txt" \
+                "HU_Material_Conversion_File Scanners/default/HU_Material_Conversion.txt" \
+                "BDL_Machine_Parameter_File BDL/BDL_default_DN_RangeShifter.txt" \
+                "BDL_Plan_File E200_S150.txt" "Output_Directory out_seed" "Dose_MHD_Output True" > "$D/cfg.txt"
+              CWD="$D"; CFG=cfg.txt; OUTD="$D/out_seed"
+            fi
+            SIM=null; OVER=null; START_UTC=$(utc); start=$(date +%s)
+            write_run() {  # write_run <transport_status>; refuses unless ok
+              printf '{"seed": %s, "requested": %s, "simulated": %s, "overshoot": %s, "threads": %s, "energy_mev": %s, "case": "%s", "arm": "%s", "mode": "%s", "host": "%s", "cpu": "%s", "binary_sha256": "%s", "commit": "%s", "start_utc": "%s", "end_utc": "%s", "wall_s": %s, "transport_status": "%s"}\n' \
+                "$SEED" "$REQ" "$SIM" "$OVER" "$THREADS" "$E" "$CASE" "$ARM" "$MODE" "$(hostname)" "$CPU" "$BINSHA" "$GITHUB_SHA" \
+                "$START_UTC" "$END_UTC" "$WALL" "$1" > "$D/run.json"
+              cat "$D/run.json"
+              [ "$1" = ok ] || { echo "run $SEED $1: refusing"; exit 1; }
+            }
+            rc=0; (cd "$CWD" && "$B/MCsquare" "$CFG") > "$D/log.txt" 2>&1 || rc=$?
+            END_UTC=$(utc); WALL=$(( $(date +%s) - start ))
+            echo "RUN $ARM case=$CASE E=$E seed=$SEED N=$N rc=$rc wall_s=$WALL"
+            [ "$rc" -eq 0 ] || { tail -30 "$D/log.txt"; write_run "mcsquare_exit_$rc"; }
+            [ -s "$OUTD/Dose.raw" ] && [ -s "$OUTD/Dose.mhd" ] || { tail -30 "$D/log.txt"; write_run dose_missing; }
+            SIM=$(grep -o 'Nbr primaries simulated: [0-9]*' "$D/log.txt" | head -1 | awk '{print $4}' || true)
+            [ -n "$SIM" ] || { SIM=null; write_run no_primaries_line; }
+            OVER=$((SIM - REQ))
+            [ "$SIM" -ge "$REQ" ] || write_run simulated_count_below_requested
+            if grep -q 'Unknown tag' "$D/log.txt"; then grep 'Unknown tag' "$D/log.txt"; write_run config_tag_not_recognised; fi
+            if [ "$CASE" = P ] && grep -q 'generated outside the geometry' "$D/log.txt"; then write_run primaries_outside_geometry; fi
+            (cd "$OUTD" && sha256sum Dose.raw Dose.mhd > sha256.txt)
+            write_run ok
+            if [ "$CASE" = P ]; then
+              py "$V/pencil_endpoints.py" mcsquare "$OUTD/Dose.mhd" --depths "$DEPTHS" \
+                --label "${ARM}_P_E${E}_N${N}_seed${SEED}" > "$D/endpoints.json"
+              cat "$D/endpoints.json"
+            else
+              # platform_study_record.py reads cfg.txt, the case and the data relative to the cwd
+              (cd "$D" && py "$V/platform_study_record.py" "$D" out_seed "$ARM" "$SEED" "$B/MCsquare" "$COMPILER" "$GITHUB_SHA")
+            fi
+          done
+          echo "outputs: $ROOT"
