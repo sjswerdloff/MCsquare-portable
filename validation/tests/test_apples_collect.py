@@ -401,6 +401,22 @@ def test_log_primaries_must_agree_with_run_json(native: dict[str, Path], tmp_pat
     refuses(native, tmp_path, "primaries line")
 
 
+def test_a_windows_utf16_log_is_read(native: dict[str, Path], tmp_path: Path) -> None:
+    """PowerShell's redirection wrote every part A log.txt as UTF-16 LE with a BOM and CRLF; read as UTF-8 the
+    primaries line was not found and all 64 part A runs were refused."""
+    log = native["win"] / NATIVE_P / "e100" / "s961001" / "log.txt"
+    text = log.read_text()
+    log.write_bytes(b"\xff\xfe" + ("\r\n" + text.replace("\n", "\r\n")).encode("utf-16-le"))
+    manifest = ac.collect([native["win"], native["lin"]], tmp_path / "out")
+    assert manifest["not_established"] == []
+
+
+def test_a_windows_utf16_log_must_still_agree_with_run_json(native: dict[str, Path], tmp_path: Path) -> None:
+    log = native["win"] / NATIVE_P / "e100" / "s961001" / "log.txt"
+    log.write_bytes(b"\xff\xfe" + "Nbr primaries simulated: 5\r\n".encode("utf-16-le"))
+    refuses(native, tmp_path, "primaries line")
+
+
 def test_malformed_hash_list_is_refused_not_crashed(native: dict[str, Path], tmp_path: Path) -> None:
     (native["win"] / NATIVE_P / "snapshot_sha256.txt").write_text("not a hash list\n")
     refuses(native, tmp_path, "unusable hash list")

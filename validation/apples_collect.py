@@ -123,6 +123,16 @@ class Collection:
         self.problems.append(f"{where}: {what}")
 
 
+def read_log_text(path: Path) -> str:
+    """A run log as text. The Linux jobs write log.txt as plain bytes; Windows PowerShell's redirection writes UTF-16
+    with a byte-order mark (every part A log of the 2f9dab40 acquisition). A BOM selects UTF-16; anything else is read
+    as UTF-8, as before."""
+    data = path.read_bytes()
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return data.decode("utf-16", errors="replace")
+    return data.decode("utf-8", errors="replace")
+
+
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -327,7 +337,7 @@ def check_seed_dir(
         if primaries != requested:
             col.bad(d / cfg_name, f"Num_Primaries {cfg.get('Num_Primaries')!r} is not the requested {requested!r}")
     if (d / "log.txt").is_file() and run and (shape == "ok" or run.get("simulated") is not None):
-        hit = PRIMARIES.search((d / "log.txt").read_text(encoding="utf-8", errors="replace"))
+        hit = PRIMARIES.search(read_log_text(d / "log.txt"))
         if hit is None or int(hit.group(1)) != run.get("simulated"):
             col.bad(d / "log.txt", f"primaries line {hit.group(0) if hit else None!r} does not give run.json simulated")
     dose: dict[str, str] = {}
