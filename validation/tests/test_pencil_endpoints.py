@@ -14,6 +14,7 @@ from pencil_endpoints import (
     canonical_from_topas,
     endpoints,
     lateral_centres,
+    parse_depths,
     r80,
     read_mhd,
     read_topas_bin,
@@ -199,3 +200,39 @@ def test_topas_reader_rejects_anything_but_a_single_sum_report(tmp_path, report,
 def test_topas_reader_rejects_zero_bins(tmp_path):
     with pytest.raises(ValueError):
         read_topas_bin(_write_topas(tmp_path, np.zeros((2, 2, 2)), header_bins=(0, 2, 2)))
+
+
+def test_default_depths_unchanged_and_recorded():
+    e = endpoints(np.ones((210, 40, 40)))
+    assert e["slab_depths_mm"] == [3, 100, 200]
+    assert {"sigma_3", "sigma_100", "sigma_200", "ring_200_80_200"} <= set(e)
+
+
+def test_custom_depths_give_their_own_keys_and_no_others():
+    e = endpoints(np.ones((90, 40, 40)), (40, 60))
+    assert e["slab_depths_mm"] == [40, 60]
+    assert "ring_60_40_80" in e and "sigma_40" in e
+    assert not any(k.startswith(("sigma_100", "ring_100", "sigma_3", "ring_3_")) for k in e)
+
+
+@pytest.mark.parametrize("depth", [2, 88, 1000])
+def test_slab_outside_the_grid_is_refused(depth):
+    # 90 bins (0..89): a slab at d uses bins d-3..d+2, so 3 and 87 are the extreme valid depths.
+    with pytest.raises(ValueError):
+        endpoints(np.ones((90, 40, 40)), (depth,))
+
+
+@pytest.mark.parametrize("depth", [3, 87])
+def test_slab_at_the_grid_edges_is_accepted(depth):
+    assert endpoints(np.ones((90, 40, 40)), (depth,))["slab_depths_mm"] == [depth]
+
+
+@pytest.mark.parametrize("text, expected", [("3,100,200", (3, 100, 200)), (" 40, 60 ", (40, 60))])
+def test_parse_depths(text, expected):
+    assert parse_depths(text) == expected
+
+
+@pytest.mark.parametrize("text", ["", "40,", "4.5", "-3", "0", "40,40", "a,b"])
+def test_parse_depths_refuses(text):
+    with pytest.raises(ValueError):
+        parse_depths(text)
