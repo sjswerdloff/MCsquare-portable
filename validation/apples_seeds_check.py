@@ -16,13 +16,19 @@ Expected run counts, per arm in A-up, A-port, B-up, B-pgcc, B-picc:
 
 Generator model. src/compute_simulation.c, Simulation_loop, thread t calls
     pcg32_srandom_r(rng, RNG_Seed + 1e4 * t + 1e5 * Num_call, t)
-Num_call is a function-local static incremented once per call and each run is one process with one call, so
-Num_call = 1. A PCG32 generator is the pair (initstate, stream) = (RNG_Seed + 1e4 * t + 1e5, t). Two runs reuse a
-generator only if they share a pair for some thread t. The check computes those tuples over t in [0, threads) for
-every portable-PCG run (arms A-port, B-pgcc, B-picc and the earlier portable seeds) and refuses any shared pair. With
-Num_call fixed, two seeds that differ by a multiple of 1e4 share an initstate at DIFFERENT t, hence different
-streams, hence different generators, so only an identical seed collides. The upstream arms (A-up, B-up) use a
-different generator and are checked for duplicate seeds only.
+(2f9dab40: lines 396-397). Num_call is a function-local static incremented once per call (line 373-374). Run_simulation
+(compute_simulation.c:38-82) calls Simulation_loop once per batch whenever Compute_stat_uncertainty is true (default
+True, data_config.c:86), which is the case for these runs: MIN_NUM_BATCH = 10 (define.h:63). Num_batch only grows, and
+the batch counter only resets, in the branch taken when Stat_uncertainty != 0 (compute_simulation.c:55-83); its default
+is 0.0 (data_config.c:87) and the workflows do not set it, so the count is exactly K = 10 calls, Num_call = 1..10. A
+nonzero Stat_uncertainty would make K unbounded; this check does not model that. A PCG32 generator is the pair
+(initstate, stream) = (RNG_Seed + 1e4 * t + 1e5 * c, t). Two runs reuse a generator if they share a pair for some thread
+t and calls c1, c2 (possibly different calls: seeds 1e5 apart collide at c and c+1). The check computes those pairs over
+t in [0, threads) and c in [1, K] for every portable-PCG run (arms A-port, B-pgcc, B-picc and the earlier portable
+seeds) and refuses any shared pair, naming both runs, the thread and the calls. Seeds that differ by a multiple of 1e4
+but not of 1e5 share an initstate only at DIFFERENT t, hence different streams, so they are accepted. The upstream arms
+(A-up, B-up) use a different generator and are checked for duplicate seeds only. This is screening for identical
+generator starts across the batch calls, not proof of independence.
 
 Usage: python apples_seeds_check.py [workflow.yml ...]   (default: both apples workflows in this repository)
 """
@@ -54,7 +60,7 @@ EARLIER_PORTABLE = frozenset(
     + list(range(950001, 950005))
 )
 EARLIER_THREADS = 24  # those workflows run THREADS: "24"
-NUM_CALL = 1  # one Simulation_loop call per process (static counter)
+MAX_BATCH_CALLS = 10  # K: Simulation_loop calls per process = MIN_NUM_BATCH (define.h:63), Stat_uncertainty default 0.0
 STATE_STRIDE = 10000
 
 # Expected tokens per (case, mode) and energy.
@@ -71,9 +77,13 @@ FIELD = re.compile(r'(\w+):\s*("[^"]*"|[^,}"]*)')
 THREADS_ENV = re.compile(r'^\s*THREADS:\s*"?(\d+)"?\s*$', re.MULTILINE)
 
 
-def generator_pairs(seed: int, threads: int, num_call: int = NUM_CALL) -> set[tuple[int, int]]:
-    """The (initstate, stream) pairs passed to pcg32_srandom_r by the threads of one run."""
-    return {(seed + STATE_STRIDE * t + 10 * STATE_STRIDE * num_call, t) for t in range(threads)}
+def generator_pairs(seed: int, threads: int, batch_calls: int | None = None) -> dict[tuple[int, int], tuple[int, int]]:
+    """The (initstate, stream) pairs passed to pcg32_srandom_r by one run, mapped to (thread, call).
+
+    Threads are 0..threads-1 and calls 1..batch_calls (default MAX_BATCH_CALLS).
+    """
+    calls = MAX_BATCH_CALLS if batch_calls is None else batch_calls
+    return {(seed + STATE_STRIDE * t + 10 * STATE_STRIDE * c, t): (t, c) for t in range(threads) for c in range(1, calls + 1)}
 
 
 def parse(name: str, text: str) -> tuple[list[tuple[str, str, str, int, int, str]], list[str], int, int]:
@@ -181,22 +191,27 @@ def _check(sources: dict[str, str], required_arms: frozenset[str]) -> tuple[list
         else:
             seen[seed] = f"{arm} at {where}"
 
-    owner: dict[tuple[int, int], str] = {}
+    owner: dict[tuple[int, int], tuple[str, int, int]] = {}
     for seed in sorted(EARLIER_PORTABLE):
-        for pair in generator_pairs(seed, EARLIER_THREADS):
-            owner.setdefault(pair, f"earlier portable seed {seed}")
+        for pair, (t, c) in generator_pairs(seed, EARLIER_THREADS).items():
+            owner.setdefault(pair, (f"earlier portable seed {seed}", t, c))
     for arm, _case, _mode, _energy, seed, where in runs:
         if arm not in PORTABLE_ARMS or arm not in threads_of:
             continue
         label = f"{arm} seed {seed} at {where}"
-        collided = False
-        for pair in sorted(generator_pairs(seed, threads_of[arm])):
-            if pair in owner and not collided:
-                other = owner[pair]
-                what = "repeats an earlier portable seed" if other.startswith("earlier") else "shares a generator start"
-                errors.append(f"{label} {what}: (initstate, stream) {pair} also used by {other}")
-                collided = True
-            owner.setdefault(pair, label)
+        reported: set[str] = set()
+        for pair, (t, c) in sorted(generator_pairs(seed, threads_of[arm]).items()):
+            if pair in owner:
+                other, ot, oc = owner[pair]
+                if other not in reported:
+                    reported.add(other)
+                    what = "repeats an earlier portable seed" if other.startswith("earlier") else "shares a generator start"
+                    errors.append(
+                        f"{label} {what}: (initstate, stream) {pair} at thread {t} call {c} "
+                        f"also used by {other} at thread {ot} call {oc}"
+                    )
+            else:
+                owner[pair] = (label, t, c)
     return errors, runs, discovered, consumed, loose
 
 

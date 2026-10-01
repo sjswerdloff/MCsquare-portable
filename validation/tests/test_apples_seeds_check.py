@@ -17,7 +17,13 @@ from apples_seeds_check import (
     parse,
 )
 
-BASES = {"A-up": 960000, "A-port": 961000, "B-up": 962000, "B-pgcc": 963000, "B-picc": 964000}
+BASES = {
+    "A-up": 960000,
+    "A-port": 961000,
+    "B-up": 962000,
+    "B-pgcc": 963000,
+    "B-picc": 964000,
+}
 
 
 def full_p(base: int) -> str:
@@ -110,7 +116,10 @@ def test_duplicate_row_is_refused():
 
 
 def test_unknown_arm_is_refused():
-    assert has(check({**CLEAN, "a.yml": A_FILE + row("C-port", "P", "100:965001", "100:965901")}), "unknown arm")
+    assert has(
+        check({**CLEAN, "a.yml": A_FILE + row("C-port", "P", "100:965001", "100:965901")}),
+        "unknown arm",
+    )
 
 
 def test_spec_on_a_line_that_is_not_a_row_fails_closed():
@@ -138,7 +147,11 @@ def test_repeating_an_earlier_portable_seed_is_refused():
 @pytest.mark.parametrize("seed", [900111, 900114, 900121, 900122, 950004])
 def test_inventory_includes_the_planning_and_whatif_blocks(seed):
     assert seed in S.EARLIER_PORTABLE
-    assert has(check(mutate("b.yml", "100:963001", f"100:{seed}")), "repeats an earlier portable seed", str(seed))
+    assert has(
+        check(mutate("b.yml", "100:963001", f"100:{seed}")),
+        "repeats an earlier portable seed",
+        str(seed),
+    )
 
 
 def test_earlier_seed_with_upstream_arm_is_not_a_generator_collision():
@@ -153,17 +166,44 @@ def test_seeds_1e4_apart_are_different_generators_and_accepted():
     assert text_errors == []
     a, b = generator_pairs(961001, 4), generator_pairs(971001, 3)
     assert {i for i, _t in a} & {i for i, _t in b}  # the same initstate occurs...
-    assert not a & b  # ...never with the same stream
+    assert not a.keys() & b.keys()  # ...never with the same stream
 
 
 def test_generator_pairs_follow_the_c_constructor():
-    assert generator_pairs(961001, 4) == {(961001 + 100000 + 10000 * t, t) for t in range(4)}
+    assert set(generator_pairs(961001, 4)) == {
+        (961001 + 100000 * c + 10000 * t, t) for t in range(4) for c in range(1, S.MAX_BATCH_CALLS + 1)
+    }
+    assert S.MAX_BATCH_CALLS == 10  # MIN_NUM_BATCH, define.h:63 at 2f9dab40
+
+
+def test_seeds_1e5_apart_collide_across_batch_calls_on_the_same_thread():
+    """Alden's counterexample: 961001 at call 1 equals 861001 at call 2 (thread t, stream t)."""
+    errors = check(mutate("b.yml", "100:963001", "100:861001") | {"a.yml": A_FILE})
+    assert has(errors, "B-pgcc seed 861001", "shares a generator start", "A-port seed 961001")
+    assert has(errors, "thread 0 call 2", "thread 0 call 1") or has(errors, "thread 0 call 1", "thread 0 call 2")
+    assert has(errors, "(initstate, stream)")
+
+
+def test_collision_message_names_both_runs_thread_and_calls():
+    errors = check(mutate("b.yml", "100:963001", "100:861001"))
+    msg = next(e for e in errors if "861001" in e and "shares" in e)
+    assert "also used by A-port seed 961001" in msg
+    assert "thread" in msg and "call" in msg
+
+
+def test_collision_beyond_k_calls_is_not_screened():
+    """Seeds 11e5 apart would only meet at call 11; the model stops at K."""
+    assert generator_pairs(961001, 2, 10).keys().isdisjoint(generator_pairs(961001 - 11 * 100000, 2, 10))
 
 
 def test_a_shared_pair_would_be_refused(monkeypatch):
     """The pair model is what decides: make two distinct seeds map to the same pair and the check must refuse."""
     real = S.generator_pairs
-    monkeypatch.setattr(S, "generator_pairs", lambda seed, threads, num_call=1: real(961001 if seed == 963001 else seed, threads, num_call))
+    monkeypatch.setattr(
+        S,
+        "generator_pairs",
+        lambda seed, threads, batch_calls=None: real(961001 if seed == 963001 else seed, threads, batch_calls),
+    )
     assert has(check(CLEAN), "shares a generator start")
 
 
