@@ -76,15 +76,31 @@ R20 and the central-axis dose are **not** endpoints for case P: `pencil_endpoint
 - **Claims and multiplicity, kept separate:**
   1. **Joint claim** (primary): "equivalent on all endpoints of the part" holds only if every endpoint's TOST passes at
      unadjusted α = 0.05. This is an intersection–union test, so no multiplicity adjustment applies to it.
-  2. **Individual claims** (secondary): each endpoint's equivalence, with Holm across the part's whole family, one
-     family per part. Part A: 39 (P) + 13 (F) = 52 endpoints. D: 39 (P only).
+  2. **Individual claims** (secondary): each endpoint's equivalence, with Holm across **one family per confirmatory
+     contrast**, 52 endpoints each (39 P + 13 F): A-port vs A-up; B-pgcc vs B-up; B-picc vs B-up. So family-wise error
+     is controlled within each contrast, not across part B's two contrasts together (that would be one 104-test
+     family, which was not chosen). B-pgcc vs B-picc is descriptive only. D: 39 (P only).
   Holm is never applied to the joint claim.
+  3. An unadjusted "not equivalent" row (90% interval wholly outside the margin) is **pointwise** evidence, not
+     family-wise confirmatory non-equivalence.
+  4. **Only a complete, verified population gets confirmatory claims.** If any expected run is missing, duplicated,
+     unexpected or fails its provenance checks, the contrast is PARTIAL and gets labelled descriptive estimates only:
+     no joint claim and no Holm decisions.
 - **Invalid values:** a failed σ fit, an R80 with multiple crossings, a non-finite value or a zero ring fraction in any
   run makes that endpoint **not established** (it fails the joint claim). It is reported as such, never imputed, and no
   run is excluded. A run whose simulated count is below N fails the run.
 - **Three outcomes per endpoint:** equivalent (90% interval inside the margin); not equivalent (90% interval wholly
   outside); **inconclusive** (otherwise). Inconclusive is a legitimate result, not a failure to be rescued with more
   runs after the fact.
+
+## Chronology and amendments (recorded, not tidied)
+
+The plan promised the analysis would be fixed before the first full run. It wasn't: the full run was requested at
+`2f9dab40` (2026-10-01 ~18:00 NZDT), and `validation/apples_analyse.py` was first committed at `20c15d60` while the
+full jobs were running. As far as connor-227743e6 knows, nobody had read any full-run endpoint by then; nobody has
+independently verified that. Later review-driven amendments, all before any full-run endpoint is read: `0f5ef7c7`
+(#48 review 6932: seed checker, record identity, PARTIAL marking), and the fixes for #48 review 6933 (frozen-population
+binding, provenance validation, domain bounds, collector), recorded here with their commits when they land.
 
 ## Sizing (from planning variance, separate from timing)
 
