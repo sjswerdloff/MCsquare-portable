@@ -59,6 +59,29 @@ jobs:
           test -f smoke_test_output/Dose.mhd
           echo "Smoke test passed - Dose.mhd created"
 
+      # The validation code's own tests: validation/tests and the three root-level pytest modules
+      # (test_platform_study_analyse/manifest/record.py), then test_platform_study_metrics.py, which is a script that
+      # exits non-zero on failure, not a pytest module. The tests read the frozen run lists with `git show` at the
+      # acquisition commit, so they need the full history (fetch-depth: 0 above). scipy is not in validation/uv.lock,
+      # so it is pinned here.
+      # This is a persistent runner. pytest's default temporary root is shared per user and prunes older sessions, so
+      # the step makes its own fresh directory: --basetemp is a child that does not exist yet (pytest empties an
+      # existing basetemp), and TMPDIR points tempfile users inside it too. Nothing outside that directory is cleaned.
+      - name: Validation tests
+        shell: bash
+        run: |
+          command -v uv > /dev/null 2>&1 || export PATH="/opt/homebrew/bin:$PATH"
+          uv --version
+          JOB_TMP="$(mktemp -d)"
+          mkdir "$JOB_TMP/tmp"
+          export TMPDIR="$JOB_TMP/tmp"
+          echo "temporary root for this step: $JOB_TMP"
+          RUN=(uv run --project validation --frozen --with scipy==1.18.1 python)
+          "${RUN[@]}" -m pytest validation/tests validation/test_platform_study_analyse.py \
+            validation/test_platform_study_manifest.py validation/test_platform_study_record.py \
+            -q -p no:cacheprovider --basetemp "$JOB_TMP/pytest"
+          "${RUN[@]}" validation/test_platform_study_metrics.py
+
       - name: Test summary
         if: always()
         run: echo "MCsquare ARM64 CI completed"
