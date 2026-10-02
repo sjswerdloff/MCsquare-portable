@@ -504,7 +504,9 @@ are point estimates from 4 runs per code, without intervals, at 200 MeV only.
    need not depend on Intel compilers.
 4. **The TOPAS differences.** The 0.5 mm range offset and the lower far-halo fractions (§5.4) are open. By
    inference they are common to the two code lines and not introduced by the port; their cause is not established.
-   A pre-specified comparison with intervals at 100, 150 and 200 MeV is drafted (#54) and not authorised.
+   A pre-specified descriptive comparison with intervals at 100, 150 and 200 MeV (#54) was frozen on 2026-10-02
+   and amended once before analysis. Its 24 TOPAS runs were being acquired when this line was written, and no
+   endpoint had been read.
 5. **Speed.** Run time per 1e7 histories by arm and host is in the run records and will be tabulated as resource
    information, not as a performance claim.
 
@@ -532,8 +534,11 @@ are point estimates from 4 runs per code, without intervals, at 200 MeV only.
    values to them; for this collection a reviewer's recomputation on all 160 runs does (§4; #52). Each run's binary
    hash is checked against the snapshot of its own job, and the five arms carry five distinct binaries; nothing in
    the collection ties a hash to the build record.
-9. Published agreement figures (Huang 2018) are to be checked against the paper itself before any comparison with
-   them.
+9. Published agreement figures (Huang 2018): the four that the TOPAS design quotes were checked against the paper's
+   full text (PMC6123159) on 2026-10-02 and are as quoted. Three are TOPAS against measurement (R80 differences
+   generally under 0.1 mm on average; range within 0.6 mm; spot size 0.1 ± 0.1 mm). The fourth is MCsquare against
+   TOPAS on one lung plan: 99.2% of iCTV voxels within 3% of the prescription dose. No comparison with them is
+   made here.
 
 ## 8. Reproducibility and data
 

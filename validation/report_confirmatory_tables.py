@@ -316,7 +316,7 @@ def halo_bound_table(contrasts: dict[str, dict[str, object]], fractions: dict[st
     constrain the slab's absolute energy), the share's own uncertainty is not propagated, and an all-zero annulus has
     no interval (stated as such)."""
     out = [
-        "| endpoint | share of the slab's energy (upstream mean) | largest \|ratio − 1\| within the three 95% intervals | product (illustrative) |",
+        "| endpoint | share of the slab's energy (upstream mean) | largest \\|ratio − 1\\| within the three 95% intervals | product (illustrative) |",
         "|---|---|---|---|",
     ]
     order = list(next(iter(contrasts.values()))["rows"])
