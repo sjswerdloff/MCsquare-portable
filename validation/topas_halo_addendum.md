@@ -13,10 +13,12 @@ at all.
 
 ## What is already known (not confirmatory)
 
-- At 200 MeV (4 runs × 1e7 per code, planning data), Portable carries about 10–20% less energy than TOPAS opt0 in
-  the annuli far from the axis (report §5.4). These are point estimates without intervals.
+- At 200 MeV (4 runs × 1e7 per code, planning data), Portable's normalised energy fractions in the annuli far from
+  the axis are about 10–20% lower than TOPAS opt0's (report §5.4). These are fractions of each code's own slab
+  energy, not absolute deposited energy, and they are point estimates without intervals.
 - On the same host, Portable and upstream with the fix are equivalent in every annulus at 200 MeV (report §5.0,
-  Table 3). So that deficit is common to both MCsquare code lines. Its cause is not established.
+  Table 3). So, by inference, the lower fractions are common to both MCsquare code lines. Their cause (physics
+  models, scoring, estimators, geometry or source conditions) is not established.
 - At 100 and 150 MeV there is no comparison with TOPAS.
 
 ## Question
@@ -51,7 +53,7 @@ Each with pointwise 90% and 95% Welch intervals. TD's reference bands are shown 
 were set for 200 MeV and are not extended to the other energies.
 
 **An annulus with no scored energy.** In the same-host comparison the 80–200 mm annulus at 100 MeV was exactly zero
-in all 80 MCsquare runs at 1e7 histories. A log ratio is undefined there. For any annulus in which either code has a
+in all 40 MCsquare runs at both depths (80 values) at 1e7 histories. A log ratio is undefined there. For any annulus in which either code has a
 zero run, the report gives, per code, the number of runs with a non-zero value and the pooled fraction (energy in the
 annulus summed over runs, divided by the slab energy summed over runs), and no ratio. No pseudocount is added.
 
