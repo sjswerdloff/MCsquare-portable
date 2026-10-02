@@ -533,8 +533,8 @@ per arm. Descriptive: no margin, no outcome.**
 
 At 200 MeV, upstream with the fix and Portable are equivalent in every annulus, including the two outer ones
 (Table 3). So, by inference from two separate comparisons, the lower far-halo fractions against TOPAS are common
-to both MCsquare code lines and were not introduced by the port. At 100 and 150 MeV that inference is not available
-for the outer annuli, where the same-host comparison is inconclusive (§5.0). None of this says anything about the
+to both MCsquare code lines and were not introduced by the port. That inference is not available for the 40–80 mm
+annulus at 100 MeV and the 80–200 mm annulus at 150 MeV, where the same-host comparison is inconclusive (§5.0). None of this says anything about the
 cause: physics models, scoring, estimators, and geometry or source conditions all remain possible.
 
 ## 6. Discussion

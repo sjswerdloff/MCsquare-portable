@@ -400,3 +400,14 @@ def test_check_fails_when_a_table_6_cell_is_edited(tmp_path: Path) -> None:
 
 def test_render_without_the_topas_document_has_no_table_6() -> None:
     assert "table-6-topas-halo" not in rt.render(rt.load(rt.ANALYSIS_JSON))
+
+
+def test_check_names_the_block_that_is_out_of_date(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    text = rt.REPORT.read_text(encoding="utf-8")
+    edited = tmp_path / "report.md"
+    edited.write_text(text.replace("| −0.4253 [−0.4260, −0.4247] |", "| −0.0253 [−0.4260, −0.4247] |"), encoding="utf-8")
+    assert rt.main(["--check", "--report", str(edited)]) == 1
+    assert "(blocks: table-6-topas-halo)" in capsys.readouterr().err
+    edited.write_text(text.replace("| A | not established | 46 / 46 |", "| A | holds | 52 / 52 |"), encoding="utf-8")
+    assert rt.main(["--check", "--report", str(edited)]) == 1
+    assert "(blocks: confirmatory-summary)" in capsys.readouterr().err

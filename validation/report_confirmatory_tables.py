@@ -463,6 +463,11 @@ def splice(report: str, blocks: dict[str, list[str]]) -> str:
     return report
 
 
+def stale_blocks(report: str, blocks: dict[str, list[str]]) -> list[str]:
+    """The names of the blocks whose text in the report is not what was rendered."""
+    return [name for name, lines in blocks.items() if splice(report, {name: lines}) != report]
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     ap.add_argument("--json", type=Path, default=ANALYSIS_JSON, help="the analysis document")
@@ -491,7 +496,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.check:
         if wanted != current:
-            print(f"{args.report} is not what {args.json.name} renders; run with --write", file=sys.stderr)
+            stale = ", ".join(stale_blocks(current, blocks))
+            print(f"{args.report} is not what the committed documents render (blocks: {stale}); run with --write", file=sys.stderr)
             return 1
         return 0
     args.report.write_text(wanted, encoding="utf-8")
