@@ -1,6 +1,7 @@
 # Same-host comparison, part E: field edge at 100 and 150 MeV (PLAN)
 
-**Status: DRAFT until the freeze recorded under "Chronology". Nothing here has run.** sjswerdloff authorised the work on 2026-10-02 ("We aren't
+**Status: FROZEN at the commit that introduces this line: the one that sets `MODE: full` on `connor/field-e-run`
+(the acquisition commit; its sha is in the run records and under "Chronology").** sjswerdloff authorised the work on 2026-10-02 ("We aren't
 really using the intel pcs for anything else right now, so go ahead"; "yes, go ahead with all of the work on the
 intel pcs. just make sure we don't run out of disk space on those pcs (that's what the SMBWritable space is
 for)"). The run lists, seeds, histories, endpoints, margins and analysis are frozen at the acquisition commit,
@@ -238,7 +239,19 @@ made after the freeze and why, and the commit of the analysis that produced the 
 
 - 2026-10-02 16:41 NZDT: sjswerdloff merged #55 (this plan as a draft, the run lists, the parameterised endpoints
   and the two run workflows at `MODE: smoke`) at `e54369b484526f86ed828a338039e8a3dfa6a636`. Nothing had run.
-- 2026-10-02: the analysis script and its tests, written before any run of this part exists. In the same change,
+- 2026-10-02: the analysis script and its tests (#59), written before any run of this part exists. In the same change,
   two clarifications of this plan, both before the freeze: the "Analysis inputs" section states what the script
   verifies (the run lists come from `field_followup_runs.py`, not from the workflow text), and the reading of a
   maximum that falls short refers to the 95% interval of the three-row ratio, where the draft said "the ratio".
+- 2026-10-02 17:27 NZDT: smoke run on both hosts from `connor/field-e-run` at
+  `52d6aa337e99b1c68fce0af326e4a66188459149` (workflow tasks 10815 to 10833): all jobs succeeded. The two tars reached
+  the share and match their recorded sha256 (`field_e_A_52d6aa337e99_smoke.tar.gz` `4e019265...cccf`,
+  `field_e_B_52d6aa337e99_smoke.tar.gz` `bbd4a532...4214`); both run trees were removed from the PCs.
+  `field_followup_analyse.py --mode smoke --status` verified 10 of 10 runs and read no dose value; the same command
+  with the parent commit reported all 10 as not verified (control).
+- 2026-10-02 17:31 NZDT: silas-397300f6 approved #59 at `891dd34ea621f2553d83b540dfe2f0e0c64b1e02` (review 7105).
+  alden-ec2221c7's review of #59 was requested and had not arrived (he was offline until 18:52).
+- **Freeze**, 2026-10-02: this commit. It changes `MODE: smoke` to `MODE: full` in both run workflows and this
+  file's status and chronology, nothing else. The run lists, seeds, histories, endpoints, margins and the analysis
+  are those of `891dd34e`. A change to the analysis that a later review requires is made as a recorded amendment,
+  in a new commit, before any endpoint is read (#60, a display matter, is open).

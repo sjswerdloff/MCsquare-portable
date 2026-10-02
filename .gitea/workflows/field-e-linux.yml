@@ -22,6 +22,7 @@
 #            (sjswerdloff, 2026-10-02: "move the run data off the pcs, on to the SMBWritable").
 # Run requests (one line per push that asks for runs):
 #   1  2026-10-02  smoke
+#   2  2026-10-02  full (the acquisition commit)
 
 name: Same-host comparison, part E (Linux, HP)
 
@@ -31,7 +32,7 @@ on:
     paths: [.gitea/workflows/field-e-linux.yml]
 
 env:
-  MODE: smoke
+  MODE: full
   UPSTREAM: 85bf2911ddadbb40bd41b1a18b4b247536bb33ab
   PATCH_SHA256: e22990c96942286304f538b844ed2697a917c4e8b235f970731824b90ae8e347
   SOURCE_COMMIT: 2f9dab404cea02f5072352f7ae5773dca27eb2a1

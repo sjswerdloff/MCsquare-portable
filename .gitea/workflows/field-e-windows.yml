@@ -19,6 +19,7 @@
 # path buffers: each run directory is the cwd, every config path is relative and short (as part A).
 # Run requests (one line per push that asks for runs):
 #   1  2026-10-02  smoke
+#   2  2026-10-02  full (the acquisition commit)
 
 name: Same-host comparison, part E (Windows, Lenovo)
 
@@ -28,7 +29,7 @@ on:
     paths: [.gitea/workflows/field-e-windows.yml]
 
 env:
-  MODE: smoke
+  MODE: full
   UPSTREAM: 85bf2911ddadbb40bd41b1a18b4b247536bb33ab
   PATCH_SHA256: e22990c96942286304f538b844ed2697a917c4e8b235f970731824b90ae8e347
   TARGET: icl-avx2
