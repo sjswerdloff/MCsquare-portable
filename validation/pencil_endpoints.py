@@ -25,8 +25,10 @@ normalisation, not comparable across codes), and the entrance slab
 (d = 3 mm), whose sigma checks the sampled spot against the BDL on the real build.
 
 Usage:
-  python pencil_endpoints.py mcsquare <Dose.mhd> [--label TEXT]      prints one JSON line
-  python pencil_endpoints.py topas <dose.bin> [--label TEXT]         reads <dose>.binheader beside it
+  python pencil_endpoints.py mcsquare <Dose.mhd> [--label TEXT] [--depths 3,100,200]   prints one JSON line
+  python pencil_endpoints.py topas <dose.bin> [--label TEXT] [--depths ...]            reads <dose>.binheader beside it
+--depths sets the slab depths in whole mm (default 3,100,200, so earlier records are unchanged). Each slab must lie
+wholly inside the depth grid; the record carries the depths it used as slab_depths_mm.
 """
 
 import argparse
@@ -170,16 +172,33 @@ def fit_sigma(profile: np.ndarray, centres: np.ndarray) -> tuple[float | None, f
     return sigma, mu
 
 
-def endpoints(d: np.ndarray) -> dict:
-    """All endpoints and diagnostics of one canonical dose array D[k, a, b]."""
+def parse_depths(text: str) -> tuple[int, ...]:
+    """Comma-separated whole-mm slab depths, e.g. "3,40,60"; refuses empty, non-integer, non-positive or repeated."""
+    parts = [t.strip() for t in text.split(",")]
+    if not parts or any(not t.isdigit() for t in parts):
+        raise ValueError(f"--depths must be comma-separated whole millimetres, got {text!r}")
+    depths = tuple(int(t) for t in parts)
+    if any(x <= 0 for x in depths) or len(set(depths)) != len(depths):
+        raise ValueError(f"--depths must be positive and distinct, got {text!r}")
+    return depths
+
+
+def endpoints(d: np.ndarray, depths: tuple[int, ...] = SLAB_DEPTHS_MM) -> dict:
+    """All endpoints and diagnostics of one canonical dose array D[k, a, b], with slabs at the given depths."""
     if not np.all(np.isfinite(d)):
         raise ValueError("dose contains non-finite values")
+    for depth in depths:
+        idx = slab_indices(depth)
+        # A slab past either end would be silently wrapped or truncated by numpy indexing: refuse it instead.
+        if idx[0] < 0 or idx[-1] >= d.shape[0]:
+            raise ValueError(f"slab at {depth} mm needs depth bins {idx[0]}..{idx[-1]}, grid has 0..{d.shape[0] - 1}")
     ca, cb = lateral_centres(d.shape[1]), lateral_centres(d.shape[2])
     radius = np.sqrt(ca[:, None] ** 2 + cb[None, :] ** 2)
     idd = d.sum(axis=(1, 2))
     out: dict = {"idd_max_raw": float(idd.max())}
     out["R80"], out["R80_multiple_crossings"] = r80(idd)
-    for depth in SLAB_DEPTHS_MM:
+    out["slab_depths_mm"] = list(depths)
+    for depth in depths:
         slab = d[slab_indices(depth)].sum(axis=0)
         sa, mua = fit_sigma(slab.sum(axis=1), ca)
         sb, mub = fit_sigma(slab.sum(axis=0), cb)
@@ -208,7 +227,12 @@ def main() -> int:
     p.add_argument("layout", choices=["mcsquare", "topas"])
     p.add_argument("dose", type=Path)
     p.add_argument("--label", default="")
+    p.add_argument("--depths", default=",".join(str(x) for x in SLAB_DEPTHS_MM), help="slab depths, whole mm")
     a = p.parse_args()
+    try:
+        depths = parse_depths(a.depths)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
     if a.layout == "mcsquare":
         raw, dims, spacing = read_mhd(a.dose)
         canonical = canonical_from_mcsquare
@@ -222,7 +246,7 @@ def main() -> int:
         "layout": a.layout,
         "dims": dims,
         "normalisation": NORMALISATION[a.layout],
-        **endpoints(canonical(raw)),
+        **endpoints(canonical(raw), depths),
     }
     print("ENDPOINTS " + json.dumps(record, sort_keys=True))
     return 0

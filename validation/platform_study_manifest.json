@@ -1,0 +1,207 @@
+{
+ "assumptions": [
+  "LF variant = git blob bytes; CRLF variant = LF not preceded by CR -> CRLF, only for blobs without NUL",
+  "Linux/macOS accept LF only; Windows accepts LF or CRLF for text inputs and Materials (any autocrlf setting)",
+  "Windows Materials digest accepted in posix and in backslash-sorted order (os.sep of MSYS2 python unverifiable here)",
+  "generated plan/cube.mhd: POSIX python writes LF, Windows text mode CRLF; numpy formats identically everywhere",
+  "cube.raw: one exact hash on all platforms (little-endian float32 zeros)",
+  "cfg.txt: Linux/macOS LF after every line; Windows Set-Content -Encoding Ascii = CRLF after every line, no BOM",
+  "cfg.txt seeds cover both waves and assume wave 2 uses this same template (Output_Directory out_seed)",
+  "no expectation for the binary: one hash per platform is required and printed"
+ ],
+ "config": {
+  "linux": {
+   "2001": "8ee92dc0c2e5c15435284e20862b7bbff8c4cb5c60de1d86862ff9a4bcb530db",
+   "2002": "ab87ec4b9619aaeac95b477e91b145390262ebec91539a7a913857f41ebfd65c",
+   "2003": "1aaf5f8439609f199b2033bcc72050f0ee2b661b43afc8fbe9753db5f0e40d8d",
+   "2004": "777dad954cceb878d807dd824acb672e7d1095c0f325e081e90e397c6dab4e0d",
+   "2005": "9d9c94eb07179fc84ad5492cad17f76402eee80501a1cd9cf9789ed4f4594b82",
+   "2006": "396e946a71f9f51f29a622114f211b773688f026aba7021876e97a52d1a6665c",
+   "2007": "a09aa709d3309757d6ae43cef92b4bf3f90b1edf374f600cc2dc43f346b2d1a1",
+   "2008": "c29fc4baed1733f8f208e7aebbf3f468d3f4d3aed06e0f95523bd8b972f9a104",
+   "2009": "8165edb45fd24ee272f3da81048962e8388535162942e82589ca4829b9ab9c4d",
+   "2010": "a34d95ad6eefa16659f63d8c04d72d551ef9281b92f3ae6f45c46d32e2771e7a",
+   "2011": "a36fe732cd967fe884cd988ed2db168fb9d07e2ae970c33ca79405c6b1303066",
+   "2012": "99f513fc00e85b289058dfe040a3c0876ff897df06c1bbe9a2b1ba3efba297d6",
+   "2013": "cd2de5fd919fa51f31806f1612e95b62b5adcdf9b31fdd532131440d5311e911",
+   "2014": "ea716637adadfd741230a0241ddd1d85042bfbf00e00593e900888197b1b77e2",
+   "2015": "a97c7437503afa96074f4dc94f8f14b6f89796b669cba57bdec725f71c009d39",
+   "2016": "abe36920548ddfe103dabf4c7a65888fda92942aae48c3c23d95662f16042d73",
+   "2017": "8c63e14a34b75300459b56ae70a2a22036250c1e83eea517ed19dcfc145602b2",
+   "2018": "3bb74e1186641cdf840a04fd4afd5e700d7302c75b28dd5fb8407b4ad239b184",
+   "2019": "7efd53d7e8f35953ed89d909f88023f2cb368dbdd3ebbca73e1698f61ea1d107",
+   "2020": "2be4839e5d9d2e3c53846b1410abcbafc9c6c55913af710755fd07d9e71e35a5",
+   "2021": "438bbc307a6c97489b01087ce70e10eeb29e16106569f65d00f9599e0d1ff756",
+   "2022": "e16170d3fe8f66ab66bda2facaa1f61d4a5d567423059bb67965f0017853301c",
+   "2023": "12496eb4f18c710eba50addbcf44d9dd5b2145c9f4aa64a770ba560731c8f01d",
+   "2024": "47b4d4ab6756d42a100f54396515c57eb6000fe3a0f160e043b11bda59c48ba3",
+   "2025": "9c496b4dcce8394f8a416cde189b6c2c6251bffc0a14ce72c7d325caedf0ee99",
+   "2026": "e7037f0f91c885961081c4be3d359cf3e86c21200099864e2d595da032a1e0cc",
+   "2027": "0a2e8a94db6ec7e1ddb0e113efb98d675442c05a779e33c315c661e2c30b9754",
+   "2028": "25144020a89b97cadf2d0924733de8ce61eae58b6dcecc5f07e81d3f72dcf48d",
+   "2029": "f1ae77c6ff156777a4efcc18e08da1b2ea0273674095ca1c37bb3c20497be5a9",
+   "2030": "22b47de3d16e85efed4946efef98b76b3cb07ce29dc3a9db7415a0c4b590dcb5",
+   "2031": "0936aae4b032c33e2ef36ff97365bdc1a42b2456a1a5d7585a37812a8abdf34b",
+   "2032": "06875b87b894945410c1b5dc9ebb1aff31ec0456a37ec03d92248bb6f8c458a2"
+  },
+  "macos": {
+   "3001": "1e33f8c7ddbaff80cb917bbee0489f121ea0e72af49ff3cc9aa6b80c51f94253",
+   "3002": "c08ad1d774cc71d92f2670a5b5be4b1962660f041a077d591ebaf52cb59fbe07",
+   "3003": "9522b8c0168dade0980d80638bf55dafa83875eb42db8b39c8662147fe225260",
+   "3004": "164d7f8eca460eb77dc5ef3746206d588313a5d1cb11eeda497381d4ddc894f6",
+   "3005": "87923e6527678ec2a7d7590759343118949f6299f71274319a2249dd72004361",
+   "3006": "739c07902fe9419b21ea44e7814bd627144ff455de988c07f83a034024a14796",
+   "3007": "a2b6c9a2ae1391ef8c76ee7eaa3a6ddf77b9cfdc7f9e115c3a58a3133aba81eb",
+   "3008": "63eb6c2ec8c28b617ea7eeb4d50231fff541250e3695ca658f93e15dc42b015f",
+   "3009": "be0817cec33a847e033ca4d917215fcdee4f155e81759b136db180eb77e399b0",
+   "3010": "b2d8fcd1cadd61114269e5a63c3a64bca9c998b69bfedf57a3e767c278aa1761",
+   "3011": "e62ea2891f6a30c2e654798682253668d5ef606352899674dae8dc2a3bd3b1eb",
+   "3012": "9c46c497f1b3e348fa848a85118f375dd997ac3abd00c0133c7eebf84223c39c",
+   "3013": "e922dca710168f412d6da5046f567ecae0faa99ff91882eaeb3be4c3f32abe26",
+   "3014": "7ce93d634426b03c9f8c3420b31ecbfd91561c9ae35d2b947529d7ada8ff5260",
+   "3015": "38c98d79650dea29eb41c6ed3553f9ab9da999320f64370cae172f1ae77a90c1",
+   "3016": "377f04139855a9b4c5279041468b2d7b245ddb0735c472bdba608c398254be63",
+   "3017": "3f01e38a3090109b6cffb745e9263b057767658f78a0f2ab918ce54b0f7e3f00",
+   "3018": "b249dcc74525e5348bd8d433eede55df5bb67f54fd4adbdf50382b2e1cb8f58a",
+   "3019": "ae3cd6592d90dc425e161b2b15609fc8645bfb2c034a2a884d9b89c1f9534e54",
+   "3020": "69b70b4499e288173f7c4470538186521339d3e7bed9e76aea001dc987be31e2",
+   "3021": "10a47d06d4a01d37cb8f6b92a16f1fd42d58c46b98ae21f68768fa830afe4f77",
+   "3022": "b5fd3386fe2445a0fedba6373d8ed1882d168fcde3b3aded6d2c39dd82cfa03a",
+   "3023": "40ae6c485cf2116e7b2f78c72947a95d7a681e07a55388885813016f8ed63e07",
+   "3024": "4f0d804c08334a2eb77b4e4e512b099f71e47492a1e44d05d4df44bc68e33c95",
+   "3025": "0227ceb95eb9fac7b6bdcf4df244c6887dea3c459cf545c258334ab2a4e83eb7",
+   "3026": "02e7219a50cdf808c4d67a687ad602af8811937d6f07fd98ef5e4828ea25fa58",
+   "3027": "ae50a86d6f87c2749205dad6fd43c7d3bc52255dd6e71ae73e2d813badebb3f6",
+   "3028": "5bf3975ce29ea48e43b4c748e1f7852cf1d1416e0c5a0d789d82df91c785bcf1",
+   "3029": "02fa3fc00cf35b6beaeec774fdd078ccaecc2ba89b4ecd91a1ac6773fec49ad4",
+   "3030": "a8667ca6d40ab22762da09269fc78ec03f266bf28edc0b8fdc7e482ed31ca1d8",
+   "3031": "04823b5be74e695ba16505dfe8bbf76a5018856e3f96ec8dd0c192b333d837fa",
+   "3032": "e5a54b53c81d0cd0e72d8d0c9bf7dc7e60d6560e1ca5c11aefec6d21c5d68d84"
+  },
+  "windows": {
+   "1001": "5bf054fc31be58625237ea6d4cc9ac299bc2639ce735eab4152daab101e8b7e3",
+   "1002": "6ff522f5bdf5b9d7742e840ad05cac5cb16d9d9db511c1fb59c11e4732ac912d",
+   "1003": "5e7ae2e30585035e7bd463bb5564802b69b5eb1f19d14776e73e105e990b0dae",
+   "1004": "2964bb3e1f0455403e3dac3eda222993227ee9c74fa2af9ce6c4c7fb3d8446b0",
+   "1005": "7a99fa75cd82c7d6d6c80b51b2c8a85b873d5acefcad1cd0ccf38de4fbe1b9bd",
+   "1006": "f5514afd07447a287fcebde747739a8dc6fc90aa1d190b37cb7d3b68eb5e8f3f",
+   "1007": "d160bf408a9f95a42c022e397fbced859a36148ad773c52764a38b42409aedf1",
+   "1008": "e4abc6b344b4461cf68bf824c0768c57eb530c14ed51fc8d3b3a6ea867512604",
+   "1009": "52a0e4f423988ff63c57700ee47361af6dac863211e0d2920c55c095b83434e7",
+   "1010": "6af1a2c3d86c68343cafe7b4f44f4b316b429a8eda6ecbe5dde220908ed4015b",
+   "1011": "7812f4ccace094c9577fbbfabcca0613def04655f2047af51b47f1e1c4efa1f0",
+   "1012": "4272e494679045a2e8cef4f021ff1c1e13b89ad14b5d9ce4db865150802135ce",
+   "1013": "53e9d61f764282c32cbc8d1eea4dbc274441a76630f3c4987fdb6501b971dfe2",
+   "1014": "8fe44ebe917d0b6f7bb9d9c5c84c0ba2ad53aef8afd5ec4430d85e06da858eb8",
+   "1015": "6e25dc0fcb396798dbfc91df317e43499324016b4720b27e68f3f8f133095160",
+   "1016": "1b105bf80acf74cf9be82e4fb3c77a01da5d00533a34363f6797d7e31e05d1c9",
+   "1017": "fb9c94ae3a30f936f97f230bcb304f1c40e64a4e94f5ce279d7aa41a12d82dea",
+   "1018": "e9faebb03444e939d5061987b52f909b9cf6c38cae2f193e19383057912e6770",
+   "1019": "348d9bb6b7307d5805d3bf90322658eb08ca04544bd8a92d50da00f53fe40494",
+   "1020": "414e4d3eea05296a75678c1ed13bfa5e6d5f4b275df25895e34f180335634c86",
+   "1021": "dd3436a61d8c807113b8a55c06f0017ddb9928c03a5b020791880ea467770575",
+   "1022": "816ac8add278e2f572358a697b55aef7644bfe75f606a3b878ac9da3cb34822e",
+   "1023": "c7870989ada1dce019f5778fc6e504c5f7228539bc07c98f237e5fc64c1b34da",
+   "1024": "124fea936b54be0741897bb6fd42e178c6a1bade1602f444339f312c23ba9e18",
+   "1025": "f48658814e28b36c0dfae1aff7033571cbf23c0517155e9ee0d49f47e9bd20e6",
+   "1026": "ab57a42aff9c9fffc426b5379d273aab2deca60ba0501fabf691b68a49a5960c",
+   "1027": "85522bf7a08c5b30f18bb4f13b23e15e3d9937de7e7b6d1ecedc22b12e4556e2",
+   "1028": "3d3dcdca3214d07e7f20eaca15166bb7b66f2ff532d1c35c9698555723ca51e3",
+   "1029": "f0c4507bf001da03114442c606547daf456135742cddd82fdb2735d974e82b4f",
+   "1030": "e77591eabbb7192d4f288ca1b735b904a09319a1744572bf2f31f97fc0bc0547",
+   "1031": "7e699444392c49bfd1b2d158d8e540b1bfc27829f3916094bd758c314d686ec4",
+   "1032": "1450de4042a005c0fcb03a8591f98ff9a0997ea9bc326c540a45be18b640be6b"
+  }
+ },
+ "config_template": [
+  "Num_Threads 3",
+  "Num_Primaries 3e7",
+  "RNG_Seed {SEED}",
+  "CT_File cube.mhd",
+  "HU_Density_Conversion_File Scanners/default/HU_Density_Conversion.txt",
+  "HU_Material_Conversion_File Scanners/default/HU_Material_Conversion.txt",
+  "BDL_Machine_Parameter_File BDL/BDL_default_DN_RangeShifter.txt",
+  "BDL_Plan_File E200_S150.txt",
+  "Output_Directory out_seed",
+  "Dose_MHD_Output True"
+ ],
+ "counts": {
+  "BDL": {
+   "bytes": 6071,
+   "cr": 0,
+   "git_says_binary": false,
+   "lf": 49
+  },
+  "HU_Density": {
+   "bytes": 230,
+   "cr": 0,
+   "git_says_binary": false,
+   "lf": 18
+  },
+  "HU_Material": {
+   "bytes": 849,
+   "cr": 0,
+   "git_says_binary": false,
+   "lf": 29
+  },
+  "cube.mhd": {
+   "bytes": 210,
+   "lf": 8
+  },
+  "cube.raw": {
+   "bytes": 13500000
+  },
+  "materials": {
+   "already_holding_CR": 0,
+   "files": 288,
+   "git_binary_heuristic_disagrees_with_NUL_rule": 0,
+   "posix_order_equals_windows_order": true,
+   "with_NUL_left_unconverted": 0,
+   "with_any_LF_so_CRLF_differs": 288
+  },
+  "plan E200_S150.txt": {
+   "bytes": 27485,
+   "lf": 950
+  }
+ },
+ "cube.raw": "49e30c6477baf9ec1a51e50afa3b6a6553716b3e9909ed1bbf5513ab1706872d",
+ "generator": "validation/platform_study_manifest.py",
+ "materials": {
+  "CRLF": {
+   "posix": "3be6658d861f0165b40ef9f6c5bd2300bd36088a2de6f40bbe18752771178001",
+   "windows": "3be6658d861f0165b40ef9f6c5bd2300bd36088a2de6f40bbe18752771178001"
+  },
+  "LF": {
+   "posix": "e62bc5979f32b20484c4bba28b0b50779b6db1ed68f26e81adc49a7969c0f90b",
+   "windows": "e62bc5979f32b20484c4bba28b0b50779b6db1ed68f26e81adc49a7969c0f90b"
+  }
+ },
+ "not_reproducible": [
+  "Windows checkout eol behaviour and MSYS2 python os.sep are assumed, not observed",
+  "a cfg.txt whose Output_Directory embeds GITHUB_RUN_ID cannot be frozen"
+ ],
+ "rerun_commit": "600c66e0fe19adaaee49e51fa023edf89c47f299",
+ "study_commit": "7d07db0145671924428936d5a7fa896d8c3f8e22",
+ "text": {
+  "BDL": {
+   "CRLF": "5a16a53422aa02a8e526627f60b59632d5d615d9b59dd445c694b81fc06fb81c",
+   "LF": "f0de183ab20c71b357cb0aa167f8dae418a2c0d7a5f2609c6e17eaa13b5fd361"
+  },
+  "HU_Density": {
+   "CRLF": "cc15a0b10dc18d0ec0442bd1e0dd7ddecba95ec93ea648d1ac032578113a1f39",
+   "LF": "9592f9c0e18649349f6c13ce898c7d9556f322ae44360fcaef5c355720d9ff68"
+  },
+  "HU_Material": {
+   "CRLF": "165262d57c414dae718836d6e0b39a86b4a7faf6f3a0697035b0df25b2e15b16",
+   "LF": "d92df2153af5c47548adbdae6942a908a0f0e7c01193176ee5ccfc6e4fff3a84"
+  },
+  "cube.mhd": {
+   "CRLF": "3e92432679dae4c6c86496f9c340e19f308bf833ac9e99b9128b4436b6f0c045",
+   "LF": "82ea52c1e74791f362828dd023b4df0d03241004085451fbe0fb110dd91b2209"
+  },
+  "plan E200_S150.txt": {
+   "CRLF": "bec51a0aa9be4cef3aeb109e936e121aef31c4a9d9495d6dfde36212a364fcbc",
+   "LF": "5e503ed59e26517b9610771f0b94d777990c7459dc9e9d61629e60303008bdd0"
+  }
+ }
+}
