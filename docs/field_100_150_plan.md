@@ -77,7 +77,9 @@ offsets become arguments.
   comes from annuli at least that far from each spot, so the offsets up to 30 mm are fed mainly by the annuli that
   were already equivalent in the pencil-beam comparison; 50 and 70 mm are fed by the 40–80 and 80–200 mm annuli,
   which are the ones that fell short. 70 mm is the furthest this phantom allows (the voxel centred 145 mm from the
-  axis; the phantom ends at 150 mm).
+  axis; the phantom ends at 150 mm). That voxel is two from the phantom's face, so it lacks scatter from beyond
+  150 mm and is where a difference in boundary handling would land. Both arms have the same boundary, so the
+  comparison is valid; it is not the dose 70 mm outside a field in a patient.
 - **The maximum** replaces the 200 MeV case's fixed peak row (voxel index 23), which was chosen from a pilot. No
   pilot is run here.
 - **No value is read before the freeze.** The smoke runs (below) are checked for completion only.
@@ -107,15 +109,31 @@ TOST at one-sided α = 0.05; three outcomes (equivalent, not equivalent, inconcl
 - **Individual claims:** Holm within each confirmatory contrast, a family of 34.
 - **A complete, verified population only.** A missing, duplicated, unexpected or unverifiable run makes the
   contrast PARTIAL: descriptive estimates, no joint claim, no Holm decisions.
-- **Invalid values.** A non-finite or non-positive central-axis dose, or an R80 or R20 without exactly one
-  crossing, in any run makes that endpoint not established. No run is excluded and nothing is imputed.
+- **Invalid values.** A non-finite or non-positive central-axis dose, an R80 or R20 without exactly one crossing,
+  or a non-finite lateral value (it is a percentage of the same run's central-axis dose at that depth, so it is
+  undefined when that dose is not finite and positive) in any run makes that endpoint not established. No run is
+  excluded and nothing is imputed.
 - **A lateral value of zero is a valid value.** The lateral endpoints are differences on an absolute scale, so a
-  point where a run scores no dose contributes 0. If every run of both arms is exactly zero, the difference is 0
-  with zero standard error and the endpoint is equivalent; the table marks such a row "all runs zero in both
-  arms", because it says that neither code deposits dose there at this number of histories, not that a
-  difference was measured and found small.
+  point where a run scores no dose contributes 0. A zero is informative here. In two 200 MeV field runs (one per
+  Lenovo arm, 3e7 histories) the smallest non-zero voxel among the 400 that make a 50 or 70 mm value added between
+  6e-7 and 4e-5 points to it, and the median non-zero voxel under 0.001 points; at 6e7 histories each is half
+  that. So runs that are all zero bound both arms far inside ±0.20 points. A row where every run of both arms is exactly
+  zero is marked "all runs zero in both arms": it says that neither code deposits dose there at this number of
+  histories, not that a difference was measured and found small.
+- **Zero standard error.** When both arms have zero variance (all-zero rows included), Welch's degrees of freedom
+  are undefined. The outcome is then decided by the point difference against the margin: equivalent, with p = 0
+  entered into Holm, if it is inside; not equivalent, with p = 1, if it is not.
+- **What the lateral rows report.** Each arm's mean, in points, beside the difference and its intervals, so that
+  a reader can see when a row is equivalent because both doses are very small.
+- **Descriptive ratio at 50 and 70 mm.** For those rows the table also gives the ratio of the arm means (arm /
+  reference) with a 95% interval, when both means are positive: the interval is on the log of each mean (delta
+  method, standard error = SE of the mean / mean), with Welch–Satterthwaite degrees of freedom. It is descriptive
+  only and enters no claim.
 - **Named in advance.** In part B at 100 MeV, 40 mm, the 40–80 mm annulus, B-pgcc was 1.035 times B-up (95%
-  [1.004, 1.067]). The B-pgcc rows at 100 MeV, 50 and 70 mm are where that would show.
+  [1.004, 1.067]). The ±0.20-point margin cannot show a difference of that size: 3.5% of the dose is 0.20 points
+  only where the dose is about 5.7 points, and at 50 mm out it is far lower (about 0.3 points in those two 200 MeV
+  runs). The equivalence rows at 50 and 70 mm answer whether any difference there is below 0.20% of the in-field
+  dose. The descriptive ratio of the B-pgcc rows at 100 MeV, 50 and 70 mm, is the number that speaks to the 1.035.
 
 ## Sizing
 
@@ -136,6 +154,22 @@ twice the 200 MeV case, which takes them to about 5.7 to 6.5 if the spread at 10
 200 MeV. That is an assumption: the same number of protons crosses the central patch at every energy, but nothing
 has been measured at these energies. A row whose interval comes out too wide is reported inconclusive. No runs are
 added after the results are read.
+
+**The assumption is weakest for the maximum, above all at 100 MeV.** The 200 MeV figure was measured on a fixed
+row. The maximum is a different estimator, and at 100 MeV the peak is narrow against the 2 mm rows, so its
+run-to-run spread is not covered by that figure. It is also sensitive to range: a shift well inside the ±0.5 mm
+range margin changes how the peak divides between rows and can move the maximum by an amount comparable to the
+0.5% margin. So "maximum not equivalent, R80 equivalent" is a possible outcome that would be a range effect, not
+a dose effect. Fixed now, for a maximum row that is inconclusive or not equivalent:
+
+- it counts against the joint claim as it stands; the endpoint and its margin are not changed;
+- the report gives, beside it, the R80 difference of the same contrast and, as a descriptive quantity only, the
+  ratio (with its 95% interval) of the mean of the three central-axis rows centred on each run's maximum row,
+  which depends less on how the peak divides between rows;
+- if that three-row ratio lies within [0.995, 1.005] and the R80 difference is not zero, the row is described as
+  consistent with a range effect on the 2 mm grid; otherwise as a difference in peak dose. Either way it is
+  reported as not established or not equivalent, and the description is labelled post-estimation reading, not a
+  test.
 
 **8 runs per arm and energy, 6e7 histories each: 80 runs.**
 
