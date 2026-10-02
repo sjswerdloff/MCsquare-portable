@@ -281,7 +281,9 @@ def test_joint_claim_is_not_touched_by_holm(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------------- invalid values
 
 
-def test_run_with_transport_status_not_ok_makes_its_endpoints_not_established(tmp_path: Path) -> None:
+def test_run_with_transport_status_not_ok_makes_its_endpoints_not_established_and_the_contrast_partial(
+    tmp_path: Path,
+) -> None:
     def fail(arm: str, case: str, energy: int | None, i: int, run: dict) -> None:
         if arm == "A-port" and case == "P" and energy == 100 and i == 0:
             run["transport_status"] = "failed"
@@ -290,9 +292,8 @@ def test_run_with_transport_status_not_ok_makes_its_endpoints_not_established(tm
     c = contrast(doc, A_CONTRAST)
     bad = {e["endpoint"] for e in c["endpoints"] if e["outcome"] == "not_established"}
     assert bad == {s.eid for s in aa.p_specs() if s.energy == 100}  # that energy's 13, nothing else
-    assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is False
-    assert c["claims"]["n_not_established"] == 13
-    assert all(e["holm_decision"] == "not_established" for e in c["endpoints"] if e["endpoint"] in bad)
+    assert_no_confirmatory_claims(c)
+    assert [r for r in c["partial_reasons"] if "run not usable: transport_status 'failed'" in r]
     assert doc["runs"]["A-port/P"]["n"] == 3 * N_RUNS  # the run stays in the population
     assert len(doc["runs"]["A-port/P"]["unusable"]) == 1
 
@@ -305,6 +306,7 @@ def test_f_run_not_ok_makes_all_13_f_endpoints_not_established(tmp_path: Path) -
     doc = analyse(build(tmp_path, ("A-up", "A-port"), run_mutate=fail))
     bad = {e["endpoint"] for e in contrast(doc, A_CONTRAST)["endpoints"] if e["outcome"] == "not_established"}
     assert bad == {s.eid for s in aa.f_specs()}
+    assert_no_confirmatory_claims(contrast(doc, A_CONTRAST))
 
 
 def test_missing_transport_status_is_not_ok(tmp_path: Path) -> None:
@@ -314,6 +316,7 @@ def test_missing_transport_status_is_not_ok(tmp_path: Path) -> None:
 
     doc = analyse(build(tmp_path, ("A-up", "A-port"), run_mutate=drop))
     assert ep(doc, A_CONTRAST, "P200/R80")["outcome"] == "not_established"
+    assert_no_confirmatory_claims(contrast(doc, A_CONTRAST))
 
 
 def test_none_sigma_makes_only_that_endpoint_not_established(tmp_path: Path) -> None:
@@ -327,6 +330,7 @@ def test_none_sigma_makes_only_that_endpoint_not_established(tmp_path: Path) -> 
     assert ep(doc, A_CONTRAST, "P150/sigma_80")["outcome"] == "equivalent"
     assert ep(doc, A_CONTRAST, "P150/ring_125_40_80")["outcome"] == "equivalent"
     assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is False
+    assert c["partial"] is False  # an invalid value in a usable run fails its endpoint, not the population
 
 
 @pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
@@ -430,6 +434,20 @@ def test_missing_endpoint_file_is_an_unusable_run_not_a_crash(tmp_path: Path) ->
     assert {e["outcome"] for e in contrast(doc, A_CONTRAST)["endpoints"] if e["endpoint"].startswith("F/")} == {
         "not_established"
     }
+    assert_no_confirmatory_claims(contrast(doc, A_CONTRAST))
+
+
+@pytest.mark.parametrize("n_lines", [0, 2])
+def test_endpoints_file_without_exactly_one_endpoints_line_makes_the_contrast_partial(tmp_path: Path, n_lines: int) -> None:
+    root = build(tmp_path, ("A-up", "A-port"))
+    path = min((root / "A-port" / "P").iterdir()) / "endpoints.json"  # a 100 MeV run
+    line = next(ln for ln in path.read_text().splitlines() if ln.startswith("ENDPOINTS "))
+    path.write_text("".join(f"{line}\n" for _ in range(n_lines)) or "no endpoints here\n")
+    doc = analyse(root)
+    c = contrast(doc, A_CONTRAST)
+    assert ep(doc, A_CONTRAST, "P100/R80")["outcome"] == "not_established"
+    assert_no_confirmatory_claims(c)
+    assert [r for r in c["partial_reasons"] if f"{n_lines} ENDPOINTS lines" in r]
 
 
 # ------------------------------------------------------------------------------- part B and descriptive
@@ -582,6 +600,14 @@ def test_exit_2_when_root_is_not_a_directory(tmp_path: Path) -> None:
 
 
 # ------------------------------------------------------------------ identity source and design completeness
+
+
+def test_report_says_case_p_endpoint_values_are_taken_as_written(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = build(tmp_path, ("A-up", "A-port"))
+    doc = analyse(root)
+    assert doc["p_endpoints_not_verifiable"] == list(aa.P_ENDPOINTS_NOT_VERIFIABLE)
+    assert aa.main([str(root), "--parts", "A"]) == 0
+    assert "Case-P endpoints. Not verifiable: endpoint values: endpoints.json is written on the run host" in capsys.readouterr().out
 
 
 def test_report_header_says_where_identity_comes_from(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -920,6 +946,37 @@ def test_binary_hash_must_be_one_value_across_an_arm(tmp_path: Path) -> None:
     assert any("binary_sha256 differs within arm A-up" in r for r in c["partial_reasons"])
     assert len(doc["runs"]["A-up/P"]["unusable"]) == 24 and len(doc["runs"]["A-up/F"]["unusable"]) == 8
     assert doc["runs"]["A-port/P"]["unusable"] == []
+
+
+def test_an_arm_carrying_its_references_binary_is_partial(tmp_path: Path) -> None:
+    def same(arm: str, case: str, energy: int | None, i: int, run: dict) -> None:
+        if arm == "A-port":
+            run["binary_sha256"] = binary_of("A-up")
+
+    def same_f(arm: str, case: str, energy: int | None, i: int, rec: dict) -> None:
+        if arm == "A-port" and case == "F":
+            rec["sha256"]["binary"] = binary_of("A-up")
+
+    doc = analyse(build(tmp_path, ("A-up", "A-port"), identical=True, run_mutate=same, doc_mutate=same_f))
+    c = contrast(doc, A_CONTRAST)
+    assert doc["runs"]["A-port/P"]["unusable"] == [] and doc["runs"]["A-port/F"]["unusable"] == []  # nothing else is wrong
+    assert_no_confirmatory_claims(c)
+    assert c["partial_reasons"] == [f"A-port and A-up carry the same binary_sha256 ({binary_of('A-up')})"]
+
+
+def test_a_shared_binary_withholds_only_the_contrasts_between_those_two_arms(tmp_path: Path) -> None:
+    def same(arm: str, case: str, energy: int | None, i: int, run: dict) -> None:
+        if arm == "B-pgcc":
+            run["binary_sha256"] = binary_of("B-picc")
+
+    def same_f(arm: str, case: str, energy: int | None, i: int, rec: dict) -> None:
+        if arm == "B-pgcc" and case == "F":
+            rec["sha256"]["binary"] = binary_of("B-picc")
+
+    doc = analyse(build(tmp_path, ("B-up", "B-pgcc", "B-picc"), run_mutate=same, doc_mutate=same_f), ("B",))
+    assert contrast(doc, "B-pgcc vs B-picc (descriptive)")["partial"] is True
+    for name in ("B-pgcc vs B-up", "B-picc vs B-up"):
+        assert contrast(doc, name)["partial"] is False and contrast(doc, name)["claims"]
 
 
 def test_binary_hash_is_reported_per_arm(tmp_path: Path) -> None:
