@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import apples_seeds_check as sc
 import field_followup_runs as fr
 import platform_study_metrics as psm
-from field_edge_analyse import C, N, SP
+from field_edge_analyse import SP, C, N
 
 PLAN = Path(__file__).resolve().parents[2] / "docs" / "field_100_150_plan.md"
 

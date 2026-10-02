@@ -14,8 +14,7 @@ import math
 import sys
 
 import numpy as np
-
-from field_edge_analyse import C, N, OFFSETS_MM, SP, load, side_profile
+from field_edge_analyse import OFFSETS_MM, SP, C, N, load, side_profile
 
 DEPTH_IY = {127: N - 64, 201: N - 101}  # fixed voxel rows, the same as field_edge_profile.py
 
@@ -109,6 +108,20 @@ def field_endpoints(d: np.ndarray, side_mm: float, depths_mm: tuple[int, ...], o
         if not (math.isfinite(out[k]) and out[k] > 0):
             out[f"{k}_invalid"] = True
     return out
+
+
+def peak_three_row_mean(d: np.ndarray) -> float | None:
+    """Mean CAX dose (central 10 x 10 voxels) of the three rows centred on the row of the maximum. Descriptive
+    companion of cax_max (docs/field_100_150_plan.md): it depends less on how the peak divides between 2 mm rows.
+    None when the maximum is on the first or last row, or the mean is not finite and positive."""
+    if d.shape != (N, N, N):
+        raise ValueError(f"dose is {d.shape}, expected {(N, N, N)}")
+    cax = d[C - 5:C + 5, :, C - 5:C + 5].mean(axis=(0, 2)).astype(np.float64)
+    i = int(np.argmax(cax))
+    if not 1 <= i <= N - 2:
+        return None
+    v = float(cax[i - 1:i + 2].mean())
+    return v if math.isfinite(v) and v > 0 else None
 
 
 if __name__ == "__main__":
