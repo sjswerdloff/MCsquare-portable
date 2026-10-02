@@ -525,11 +525,17 @@ def analyse_contrast(cells: Cells, issues: Issues, arm: str, ref: str, *, confir
 
 # ----------------------------------------------------------------------------------------------------- reporting
 def _num(x: object, digits: int = 4) -> str:
-    return "" if not isinstance(x, (int, float)) or isinstance(x, bool) else f"{x:.{digits}f}"
+    """A number for the table: `digits` decimals, or three significant figures where that many decimals would show
+    fewer than three, so that a very small mean is not printed as 0.0000 (#60). Only an exact zero prints as 0."""
+    if not isinstance(x, (int, float)) or isinstance(x, bool):
+        return ""
+    if x == 0:
+        return "0"
+    return f"{x:.{digits}f}" if abs(x) >= 10.0 ** (2 - digits) else f"{x:.3g}"
 
 
 def _pair(ci: object, digits: int = 4) -> str:
-    return f"[{ci[0]:.{digits}f}, {ci[1]:.{digits}f}]" if isinstance(ci, list) else ""
+    return f"[{_num(ci[0], digits)}, {_num(ci[1], digits)}]" if isinstance(ci, list) else ""
 
 
 def markdown(doc: dict[str, object]) -> list[str]:

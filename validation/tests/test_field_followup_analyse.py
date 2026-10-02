@@ -606,6 +606,42 @@ def test_the_reading_of_a_maximum_is_printed_only_when_it_falls_short_and_the_th
     assert "Joint claim (all 34 endpoints equivalent): **NOT ESTABLISHED**" in md
 
 
+@pytest.mark.parametrize(("x", "digits", "text"), [
+    (0.0, 4, "0"), (-0.0, 4, "0"), (0, 4, "0"),
+    (3.2e-7, 4, "3.2e-07"), (-4.56789e-5, 4, "-4.57e-05"), (0.000123456, 4, "0.000123"),
+    (0.00999, 4, "0.00999"), (0.01, 4, "0.0100"), (-0.01, 4, "-0.0100"), (1.23456, 4, "1.2346"), (5, 4, "5.0000"),
+    (0.000999, 5, "0.000999"), (0.001, 5, "0.00100"), (1.000049, 5, "1.00005"),
+    (None, 4, ""), (True, 4, ""), ("1.0", 4, ""),
+])
+def test_a_table_number_keeps_three_significant_figures_when_small_and_only_exact_zero_prints_as_zero(
+        x: object, digits: int, text: str) -> None:
+    assert fa._num(x, digits) == text
+
+
+def test_a_table_interval_is_formatted_as_its_numbers_are() -> None:
+    assert fa._pair([-3.2e-7, 4.1e-6]) == "[-3.2e-07, 4.1e-06]"
+    assert fa._pair([-0.2, 0.2]) == "[-0.2000, 0.2000]" and fa._pair([0.995, 1.005], 5) == "[0.99500, 1.00500]"
+    assert fa._pair(None) == ""
+
+
+def test_very_small_lateral_means_are_legible_in_the_table() -> None:
+    """#60: at 100 MeV, 70 mm, the dose can be a few millionths of a point; the table must show how small."""
+    def value(arm: str, energy: int, i: int, key: str) -> float:
+        if key.endswith("_70") and energy == 100:
+            return (3.0e-6 if arm == "B-picc" else 2.0e-6) * (1 + 0.1 * (i - 3.5) / 3.5)
+        return noisy(arm, energy, i, key)
+
+    cells, issues = cells_of(value)
+    doc = {"acquisition_commit": COMMIT, "label": fa.LABEL, "contrasts": [fa.analyse_contrast(cells, issues, "B-picc", "B-up", confirmatory=True)]}
+    lines = fa.markdown(doc)
+    row = next(line for line in lines if line.startswith("| E100/lateral_39_70 |")).split(" | ")
+    assert row[1:4] == ["3e-06", "2e-06", "1e-06"] and row[6] == "equivalent"
+    assert row[4].startswith("[") and "e-0" in row[4] and row[5] == "[-0.2000, 0.2000] (difference)"
+    ratio = [line for line in lines if line.startswith("| E100/lateral_39_70 |")][1].split(" | ")
+    assert ratio[1:4] == ["3e-06", "2e-06", "1.5000"]
+    assert not any("0.0000" in line for line in lines if line.startswith("| E100/lateral_"))
+
+
 # ------------------------------------------------------------------------------------------ the whole population
 def test_status_verifies_every_run_without_reading_a_dose_value(trees: list[Path], monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fa, "measure", lambda _run: pytest.fail("a dose value was read in --status"))
