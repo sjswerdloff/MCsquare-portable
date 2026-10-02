@@ -1,9 +1,10 @@
 # TOPAS halo comparison: addendum to the TOPAS design
 
-**Status: FROZEN at the commit that introduces this line (2026-10-02).** The 24 TOPAS runs listed here are
-authorised, from a `git archive` of that commit; sjswerdloff confirmed the decisions under "Decisions" on
-2026-10-02. The run list, seeds, endpoints and analysis script do not change from here; a change needed before the
-analysis is run is made as a recorded amendment, in a new commit, before any endpoint is read. Written at
+**Status: FROZEN at `5aedf3ac49d7a79567a7f413e95a244359600dd3` (2026-10-02); amended once before the analysis, see
+"Amendments" at the end.** The 24 TOPAS runs listed here are authorised, from a `git archive` of the frozen commit;
+sjswerdloff confirmed the decisions under "Decisions" on 2026-10-02. The run list, seeds, endpoints and analysis
+script do not change from the frozen commit; a change needed before the analysis is run is made as a recorded
+amendment, in a new commit, before any endpoint is read. Written at
 sjswerdloff's request (2026-10-02). It extends `validation/topas_design.md` (TD), which stays the governing design;
 where this file is silent, TD applies.
 
@@ -17,11 +18,14 @@ therefore optional. It characterises a difference; it supports no equivalence cl
 
 - At 200 MeV (4 runs × 1e7 per code, planning data), Portable's normalised energy fractions in the annuli far from
   the axis are about 10–20% lower than TOPAS opt0's (report §5.4). These are fractions of each code's own slab
-  energy, not absolute deposited energy, and they are point estimates without intervals.
+  energy, not absolute deposited energy. The report tabulates these ratios as point estimates; its 4 runs per code
+  would support intervals, as it gives for R80 and σ, but none are given for the annuli there.
 - On the same host, Portable and upstream with the fix are equivalent in every annulus at 200 MeV (report §5.0,
   Table 3). So, by inference, the lower fractions are common to both MCsquare code lines. Their cause (physics
   models, scoring, estimators, geometry or source conditions) is not established.
-- At 100 and 150 MeV there is no comparison with TOPAS.
+- At 100 and 150 MeV there is no comparison with TOPAS in the halo (the annulus fractions). For range there is a
+  planning value at 100 MeV (R80 about 0.43 mm shorter than TOPAS, 2 × 1e6 per code, report §5.4) and none at
+  150 MeV.
 
 ## Question
 
@@ -72,7 +76,9 @@ scorer:
   MCsquare / TOPAS, from the difference of mean logs of the per-run values;
 - σ at each depth and R80: difference of run-level means, MCsquare − TOPAS.
 
-Each with pointwise 90% and 95% Welch intervals: 13 endpoints × 3 energies × 3 Portable arms = 117 rows. TD's
+13 endpoints × 3 energies × 3 Portable arms = 117 rows. A row carries pointwise 90% and 95% Welch intervals, except
+a row under either of the two rules below (an annulus with a zero run; an invalid value): such a row has no ratio or
+difference and no interval. TD's
 reference bands are shown beside the 200 MeV rows only; they were set for 200 MeV and are not extended to the other
 energies.
 
@@ -90,10 +96,12 @@ with the count of invalid runs per code. The row stays in the table.
 
 From the same-host runs, the per-run standard deviation of the log fraction in MCsquare is about 0.03–0.06 for the
 40–80 mm annulus at 100 MeV and about 0.06–0.08 for the 80–200 mm annulus at 150 MeV; at 200 MeV and in the inner
-annuli it is smaller. If TOPAS varies similarly, 8 runs per code give 95% half-widths of roughly ±3–6% and ±6–9% on
-those two ratios. That resolves a difference of the size seen at 200 MeV (10–20%) and does not resolve one under
-about 5%. TOPAS's run-to-run spread at 100 and 150 MeV is not known; the intervals are reported as they come out,
-and no runs are added after the results are read.
+annuli it is smaller. **If** TOPAS's standard deviation of the log fraction equals MCsquare's, 8 + 8 runs give a 95%
+interval on the ratio whose upper relative half-width is about 3.3% at a standard deviation of 0.03, 6.6% at 0.06
+and 9.0% at 0.08 (t(0.975, 14) × SD / 2 on the log scale; the lower side is slightly narrower). These are the
+widths to expect under that assumption. They are not a threshold: nothing here says which differences the
+comparison will or will not detect. TOPAS's run-to-run spread at 100 and 150 MeV is not known; the intervals are
+reported as they come out, and no runs are added after the results are read.
 
 ## Execution (clement-7074f29f)
 
@@ -112,12 +120,17 @@ and no runs are added after the results are read.
 `validation/topas_halo_compare.py`, committed with this file, with its tests.
 
 - `--topas-root <dir> --status` reports whether the 24 runs are complete. It opens no dose file.
-- The full analysis first requires exactly one run directory with `verdict: COMPLETE` for each of the 24 seeds, with
-  `run.txt` and `stage1_base.txt` as recorded in its provenance, the base identical to the frozen commit's, one TOPAS
-  executable for all runs, and no run directory outside the list. Otherwise it refuses, and no dose file is opened.
-- It then checks each `dose.bin` against the sha256 in its provenance, computes its endpoints, verifies the MCsquare
-  tree as `apples_analyse.py` does (frozen population, collection manifest, the fingerprint above), and writes one
-  JSON document and one markdown table.
+- The full analysis first requires exactly one run directory with `verdict: COMPLETE` for each of the 24 seeds, and
+  no run directory outside the list. Each run must conform to the design and not only agree with its own record
+  (amendment 1): `run.txt` byte for byte what `make_run.sh` writes for the directory's name; `stage1_base.txt` and
+  the runner identical to the frozen commit's; a well-formed sha256 of the TOPAS executable, the same in all runs;
+  no provenance key written twice; `dose.binheader` as hashed in the provenance and stating exactly the scorer,
+  filter, component, grid, voxel widths, quantity and report that the base requests; `dose.bin` of the size that
+  grid implies. An entry that looks like a run but is not named as `make_run.sh` names one is refused, not ignored.
+  Otherwise the analysis refuses, and no dose file is opened.
+- It then checks each `dose.bin` and its header against the sha256 in the provenance, checks the header again,
+  computes the endpoints, verifies the MCsquare tree as `apples_analyse.py` does (frozen population, collection
+  manifest, the fingerprint above), and writes one JSON document and one markdown table.
 - **Nobody reads an endpoint until all 24 runs are complete.** `pencil_endpoints.py` is not run on a single TOPAS
   output of this set; the analysis above is the only reader.
 
@@ -134,3 +147,41 @@ comment 28305), and then to connor-227743e6 directly: "I'm confirming the TOPAS 
 
 1. Both TOPAS programmes run, this addendum first, then TD's confirmatory arms.
 2. The MCsquare arm is the existing same-host Portable runs; no new MCsquare runs are made.
+
+## Amendments
+
+### Amendment 1, 2026-10-02 16:50 NZDT, before any endpoint was read (alden-ec2221c7, #54 review 7101)
+
+**State of the data when it was made.** 10 of the 24 TOPAS runs had finished (the eight at 100 MeV and the first two
+at 150 MeV); the rest were running or not started. No `dose.bin` of the set had been opened by connor-227743e6, and
+clement-7074f29f reports opening none. The acquisition is untouched: `make_run.sh`, `run_topas.sh`,
+`stage1_base.txt`, the run list and the seeds are those of the frozen commit.
+
+**What the frozen analysis accepted and should not have** (each reproduced by alden-ec2221c7 on synthetic runs made
+by the real wrappers):
+
+1. a set in which no run records a sha256 of the TOPAS executable (24 absent values counted as one executable);
+2. a `run.txt` that requests the EM option alone and not the six frozen physics modules, if its provenance recorded
+   that file's hash: the check was of identity with the run's own record, not of conformity to the design;
+3. a `dose.binheader` changed after the run (the X and Y bin counts exchanged): the header was never hashed, and
+   it is what tells the reader the grid.
+
+**What changes, in `validation/topas_halo_compare.py` only.** The gate now requires what the "Analysis" section
+above lists. In addition a directory entry that looks like a run (a name starting `E<digit>`, or a directory
+holding run files) but is not named as `make_run.sh` names one is a refusal; other entries are still listed as
+ignored. The header and dose hashes and the header's content are checked again immediately before a dose file is
+interpreted.
+
+**What does not change.** The estimands, the endpoints, the intervals, the zero and invalid-value rules, the MCsquare
+dataset and its fingerprint. Every new check reads provenance and configuration only; none depends on a dose value,
+so none can be tuned to an outcome.
+
+**Checked on the real runs.** The amended gate was run in `--status` mode on the run directory at the time above.
+That mode reads `provenance.txt`, `run.txt`, `stage1_base.txt` and `dose.binheader` and takes the size of
+`dose.bin`; it reads no dose value. The ten finished runs pass every new check; the refusal lists only the
+fourteen runs not yet complete.
+
+**Wording corrected in this file** (same review): rows under the zero-run or invalid-value rule carry no interval;
+the precision paragraph gives interval widths under a stated assumption and no longer says what the comparison
+"resolves"; "no comparison with TOPAS at 100 and 150 MeV" is limited to the halo, since a 100 MeV planning range
+value exists; the 200 MeV planning ratios are described as tabulated without intervals, not as incapable of them.

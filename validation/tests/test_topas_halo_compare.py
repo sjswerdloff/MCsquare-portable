@@ -1,13 +1,16 @@
 """Tests for topas_halo_compare on SYNTHETIC inputs only (no run output from any machine is read).
 
 The TOPAS run directories are made by the REAL make_run.sh and run_topas.sh with the fake TOPAS of the wrapper tests
-and a shrunk grid, so the provenance and run.txt this analysis parses are in the format the wrappers write.
+and a shrunk grid, so the provenance and run.txt this analysis parses are in the format the wrappers write. The fake
+is followed by a step that writes dose.binheader as OpenTOPAS 4.3.0 writes it (REAL_HEADER is one of its own), so
+run_topas.sh records that header's hash itself.
 
 Run: uv run --no-project --with numpy --with scipy --with pytest pytest validation/tests/test_topas_halo_compare.py
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -40,9 +43,26 @@ from apples_fixtures import (  # noqa: F401 - the autouse fixture must be in thi
 pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="run_topas.sh uses macOS stat and shasum paths")
 
 TOPAS_DIR = Path(__file__).resolve().parents[1] / "topas"
-SHRUNK = {"X": 2, "Y": 3, "Z": 4}
 PEAK = {100: 75, 150: 155, 200: 204}  # depth bin of the synthetic Bragg peak; each energy's slabs lie short of it
-N_LATERAL = 24
+# The shrunk phantom: 1 mm voxels, X and Y unequal so that an exchange of the two is a change.
+BINS = {"X": 24, "Y": 26, "Z": 210}
+HALF_CM = {"X": "1.2", "Y": "1.3", "Z": "10.5"}
+HEADER = (
+    "# TOPAS Version: 4.3\n"
+    "# Parameter File: run.txt\n"
+    "# Results for scorer: Dose\n"
+    '# Filtered by: OnlyIncludeIfParticleOrAncestorNotNamed = 2 "neutron" "gamma"\n'
+    "# Scored in component: Phantom\n"
+    "# X in {X} bins of 0.1 cm\n"
+    "# Y in {Y} bins of 0.1 cm\n"
+    "# Z in {Z} bins of 0.1 cm\n"
+    "# DoseToMedium ( Gy ) : Sum   \n"
+    "# Binary file: dose.bin\n"
+)
+# dose.binheader of a run OpenTOPAS 4.3.0 made from the committed base (planning run E100 seed 900011, 2026-09-30),
+# and the size and hash run_topas.sh recorded for it.
+REAL_HEADER = HEADER.format(X=400, Y=400, Z=350)
+REAL_HEADER_RECORD = (315, "e0acf0430f0b4c08fecc743a286dc8b92415a2877d433cbe6e42d36165aed334")
 
 
 # ------------------------------------------------------------------------------------------------ frozen design
@@ -138,13 +158,26 @@ class Wrappers:
         for name in ("make_run.sh", "run_topas.sh"):
             shutil.copy2(TOPAS_DIR / name, self.bin / name)
         base, n = re.subn(
-            r"(?m)^(i:Ge/Phantom/([XYZ])Bins) = .*$", lambda m: f"{m[1]} = {SHRUNK[m[2]]}",
+            r"(?m)^(i:Ge/Phantom/([XYZ])Bins) = .*$", lambda m: f"{m[1]} = {BINS[m[2]]}",
             (TOPAS_DIR / "stage1_base.txt").read_text(encoding="utf-8"),
         )
         assert n == 3  # the shrink must have applied to all three axes
+        base, n = re.subn(r"(?m)^(d:Ge/Phantom/HL([XYZ])) = .*$", lambda m: f"{m[1]} = {HALF_CM[m[2]]} cm", base)
+        assert n == 3
         self.base = self.bin / "stage1_base.txt"
         self.base.write_text(base, encoding="utf-8")
-        self.env = {**os.environ, "TOPAS_BIN": str(TOPAS_DIR / "tests" / "fake_topas.sh"), "MIN_FREE_GB": "0"}
+        header = home / "dose.binheader"
+        header.write_text(HEADER.format(**BINS), encoding="utf-8")
+        fake = home / "fake_topas_then_header.sh"
+        fake.write_text(
+            "#!/bin/bash\n"
+            f"'{TOPAS_DIR / 'tests' / 'fake_topas.sh'}' \"$@\" || exit $?\n"
+            f"[ -e dose.binheader ] && /bin/cat '{header}' > dose.binheader\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        fake.chmod(0o755)
+        self.env = {**os.environ, "TOPAS_BIN": str(fake), "MIN_FREE_GB": "0"}
 
     def run(self, out: Path, energy: int, seed: int, *, em: str = "opt0", histories: int = thc.TOPAS_HISTORIES,
             threads: int = 12, attempt: str = "a1", mode: str = "ok") -> Path:
@@ -192,6 +225,24 @@ def refusal(root: Path) -> str:
     with pytest.raises(thc.InputError) as e:
         thc.discover(root)
     return str(e.value)
+
+
+def rerecord(run: Path, name: str) -> None:
+    """Make provenance.txt record `name` as it is now, the way run_topas.sh records it: a changed file that still
+    agrees with its own record, so that only a check of CONFORMITY can refuse it."""
+    f = run / name
+    digest = hashlib.sha256(f.read_bytes()).hexdigest()
+    line = f"{name} sha256: {digest}" if name.endswith(".txt") else f"{name} bytes: {f.stat().st_size} sha256: {digest}"
+    prov = run / "provenance.txt"
+    text, n = re.subn(rf"(?m)^{re.escape(line.split(': ')[0])}: .*$", line, prov.read_text())
+    assert n == 1
+    prov.write_text(text)
+
+
+def edit(path: Path, old: str, new: str) -> None:
+    text = path.read_text()
+    assert text.count(old) == 1
+    path.write_text(text.replace(old, new))
 
 
 def test_the_wrappers_format_is_the_one_parsed(topas: Path) -> None:
@@ -290,7 +341,8 @@ def test_run_txt_must_request_what_the_directory_name_says(topas: Path) -> None:
     shutil.rmtree(victim)
     run_dir(topas, 100, 912001).rename(topas / name)  # seed 912001's files under seed 912002's name
     msg = refusal(topas)
-    assert f"{name}: run.txt lacks the line 'i:Ts/Seed = 912002'" in msg
+    assert (f"{name}: run.txt is not what make_run.sh writes for this directory: line 4 is 'i:Ts/Seed = 912001', "
+            "expected 'i:Ts/Seed = 912002'") in msg
     assert "E100 seed 912001: 0 COMPLETE run directories" in msg
 
 
@@ -307,6 +359,160 @@ def test_runs_from_two_topas_executables_refuse(topas: Path) -> None:
     assert "2 different TOPAS executables" in refusal(topas)
 
 
+# ------------------------------------------------------------ amendment 1 (review 7101): conformity, not only identity
+def test_expected_run_txt_is_what_make_run_sh_writes(topas: Path) -> None:
+    for (energy, seed), r in thc.discover(topas)[0].items():
+        assert (r.path / "run.txt").read_text() == thc.expected_run_txt(energy, seed, r.threads)
+    assert '6 "g4em-standard_opt0" "g4h-phy_QGSP_BIC_HP" "g4decay" "g4ion-binarycascade" "g4h-elastic_HP" "g4stopping"' in (
+        thc.expected_run_txt(100, 912001, 12))
+
+
+def test_a_set_with_no_topas_executable_hash_refuses(topas: Path) -> None:
+    for prov in topas.glob("E*/provenance.txt"):
+        text, n = re.subn(r"(?m)^topas_bin sha256: .*\n", "", prov.read_text())
+        assert n == 1
+        prov.write_text(text)
+    assert refusal(topas).count("provenance.txt has no well-formed 'topas_bin sha256' line") == 24
+
+
+@pytest.mark.parametrize("value", ["", "absent", "ab" * 31, "AB" * 32, "ab" * 32 + " x"])
+def test_a_malformed_topas_executable_hash_refuses(topas: Path, value: str) -> None:
+    prov = run_dir(topas, 150, 912015) / "provenance.txt"
+    text, n = re.subn(r"(?m)^topas_bin sha256: .*$", f"topas_bin sha256: {value}", prov.read_text())
+    assert n == 1
+    prov.write_text(text)
+    msg = refusal(topas)
+    assert "th16_a1: provenance.txt has no well-formed 'topas_bin sha256' line" in msg
+    assert msg.count("no well-formed") == 1
+
+
+@pytest.mark.parametrize("key", ["topas_bin sha256", "run.txt sha256", "dose.bin bytes", "dose.binheader bytes", "host"])
+def test_a_provenance_key_written_twice_refuses_even_with_equal_values(topas: Path, key: str) -> None:
+    prov = run_dir(topas, 100, 912003) / "provenance.txt"
+    line = next(ln for ln in prov.read_text().splitlines() if ln.startswith(key + ": "))
+    with prov.open("a") as f:
+        f.write(line + "\n")
+    assert f"provenance.txt has more than one {key!r} line" in refusal(topas)
+
+
+def test_a_run_not_written_by_this_commits_runner_refuses(topas: Path) -> None:
+    edit(run_dir(topas, 100, 912001) / "provenance.txt", f"runner sha256: {thc.sha256_file(thc.RUNNER)}",
+         "runner sha256: " + "cd" * 32)
+    msg = refusal(topas)
+    assert msg.count("provenance.txt was not written by this commit's validation/topas/run_topas.sh") == 1
+
+
+@pytest.mark.parametrize(("old", "new", "line"), [
+    # review 7101: the EM option alone instead of the six frozen modules
+    ('6 "g4em-standard_opt0" "g4h-phy_QGSP_BIC_HP" "g4decay" "g4ion-binarycascade" "g4h-elastic_HP" "g4stopping"',
+     '1 "g4em-standard_opt0"', 3),
+    ('"g4h-phy_QGSP_BIC_HP"', '"g4h-phy_QGSP_BERT_HP"', 3),
+    ("includeFile = stage1_base.txt", "includeFile = other_base.txt", 1),
+    ('s:Sc/Dose/OutputFile = "dose"', 's:Sc/Dose/OutputFile = "dose"\nd:Ph/Default/CutForAllParticles = 1 mm', 8),
+    ('s:Sc/DoseAll/OutputFile = "dose_all"\n', 's:Sc/DoseAll/OutputFile = "dose_all"\ni:Ts/Seed = 5\n', None),
+    ("i:Ts/Seed = 912021\n", "i:Ts/Seed = 912021\ni:Ts/Seed = 912021\n", 5),
+    ('s:Sc/DoseAll/OutputFile = "dose_all"\n', 's:Sc/DoseAll/OutputFile = "dose_all"', None),
+])
+def test_a_run_txt_that_is_not_the_frozen_configuration_refuses_though_correctly_recorded(
+    topas: Path, old: str, new: str, line: int | None
+) -> None:
+    run = run_dir(topas, 200, 912021)
+    edit(run / "run.txt", old, new)
+    rerecord(run, "run.txt")  # identity holds: the file is the one its provenance records
+    msg = refusal(topas)
+    assert "run.txt is not the file recorded" not in msg
+    assert msg.count("run.txt is not what make_run.sh writes for this directory") == 1
+    if line is not None:
+        assert f"for this directory: line {line} is " in msg
+
+
+def test_a_header_changed_after_the_run_refuses(topas: Path) -> None:
+    run = run_dir(topas, 100, 912001)
+    edit(run / "dose.binheader", f"# X in {BINS['X']} bins", f"# X in {BINS['Y']} bins")
+    edit(run / "dose.binheader", f"# Y in {BINS['Y']} bins", f"# Y in {BINS['X']} bins")
+    msg = refusal(topas)
+    assert "dose.binheader is not the file recorded in provenance.txt" in msg
+    assert "no dose file was opened" in msg
+
+
+@pytest.mark.parametrize(("old", "new", "what"), [
+    ("# X in 24 bins of 0.1 cm\n# Y in 26 bins", "# X in 26 bins of 0.1 cm\n# Y in 24 bins", "line 6 is ('X', 26, 1.0)"),
+    ("# Z in 210 bins of 0.1 cm", "# Z in 105 bins of 0.2 cm", "line 8 is ('Z', 105, 2.0)"),
+    ("# Z in 210 bins of 0.1 cm", "# Z in 210 bins of 0.2 cm", "line 8 is ('Z', 210, 2.0)"),
+    ("# X in 24 bins of 0.1 cm\n# Y in 26 bins of 0.1 cm\n", "# Y in 26 bins of 0.1 cm\n# X in 24 bins of 0.1 cm\n",
+     "line 6 is"),
+    ("# Results for scorer: Dose", "# Results for scorer: DoseAll", "line 3 is"),
+    ('# Filtered by: OnlyIncludeIfParticleOrAncestorNotNamed = 2 "neutron" "gamma"\n', "", "has 9 lines"),
+    ("# Scored in component: Phantom", "# Scored in component: World", "line 5 is"),
+    ("( Gy ) : Sum", "( Gy ) : Sum Mean", "line 9 is"),
+    ("# DoseToMedium ( Gy )", "# DoseToWater ( Gy )", "line 9 is"),
+    ("# Binary file: dose.bin", "# Binary file: dose_all.bin", "line 10 is"),
+    ("# TOPAS Version: 4.3", "# TOPAS Version: 4.2", "line 1 is"),
+    ("# Binary file: dose.bin\n", "# Binary file: dose.bin\n# X in 24 bins of 0.1 cm\n", "has 11 lines"),
+])
+def test_a_header_that_is_not_what_the_base_requests_refuses_though_correctly_recorded(
+    topas: Path, monkeypatch: pytest.MonkeyPatch, old: str, new: str, what: str
+) -> None:
+    run = run_dir(topas, 150, 912012)
+    edit(run / "dose.binheader", old, new)
+    rerecord(run, "dose.binheader")
+    monkeypatch.setattr(pe, "read_topas_bin", lambda *_a: pytest.fail("a dose file was opened"))
+    msg = refusal(topas)
+    assert "dose.binheader is not the file recorded" not in msg
+    assert f"th12_a1: dose.binheader {what}" in msg
+    with pytest.raises(thc.InputError, match="dose.binheader"):  # and the reader of one run refuses it by itself
+        thc.topas_record(thc.TopasRun(150, 912012, run, 12, thc.parse_provenance((run / "provenance.txt").read_text())))
+
+
+def test_the_header_template_is_a_real_opentopas_header_and_matches_the_committed_base() -> None:
+    assert len(REAL_HEADER.encode()) == REAL_HEADER_RECORD[0]
+    assert hashlib.sha256(REAL_HEADER.encode()).hexdigest() == REAL_HEADER_RECORD[1]
+    want = thc.expected_header(TOPAS_DIR / "stage1_base.txt")
+    assert want[5:8] == [("X", 400, 1.0), ("Y", 400, 1.0), ("Z", 350, 1.0)]
+    assert [w[0] for w in want if len(w) == 1] == [ln.rstrip() for ln in REAL_HEADER.splitlines() if " bins of " not in ln]
+    assert thc.base_grid(TOPAS_DIR / "stage1_base.txt") == ([400, 400, 350], [1.0, 1.0, 1.0])
+
+
+def test_an_axis_width_in_mm_is_the_same_statement_as_in_cm(topas: Path) -> None:
+    run = run_dir(topas, 100, 912002)
+    edit(run / "dose.binheader", "# Z in 210 bins of 0.1 cm", "# Z in 210 bins of 1 mm")
+    assert thc.header_problems(run / "dose.binheader", thc.expected_header(thc.BASE)) == []
+
+
+def test_a_dose_file_of_another_size_than_the_grid_refuses_though_correctly_recorded(topas: Path) -> None:
+    run = run_dir(topas, 200, 912024)
+    dose = run / "dose.bin"
+    dose.write_bytes(dose.read_bytes()[:-8])
+    rerecord(run, "dose.bin")
+    n = 8 * BINS["X"] * BINS["Y"] * BINS["Z"]
+    assert f"dose.bin is not the {n} bytes the base's grid implies (recorded {n - 8}, on disk {n - 8})" in refusal(topas)
+
+
+def test_a_base_that_sets_a_parameter_twice_is_refused(tmp_path: Path) -> None:
+    base = tmp_path / "base.txt"
+    base.write_text((TOPAS_DIR / "stage1_base.txt").read_text() + "i:Ge/Phantom/XBins = 200\n")
+    with pytest.raises(thc.InputError, match="Ge/Phantom/XBins is set more than once"):
+        thc.base_grid(base)
+
+
+@pytest.mark.parametrize(("name", "kind"), [
+    ("E100_opt0_seed912001_n10000000_th12_a1.bak", "dir"),
+    ("E100_opt0_seed0912001_n10000000_th12_a1", "dir"),  # a leading zero: make_run.sh refuses to write it
+    ("E100_opt0_seed912001_n10000000_th12", "dir"),  # no attempt tag
+    ("E100_opt0_seed912001_n10000000_th012_a2", "dir"),
+    ("E100_opt0_seed912001_n10000000_th12_a2", "file"),  # a well-formed name that is not a directory
+    ("e100-copy", "dir with run files"),
+])
+def test_a_run_like_entry_that_is_not_named_as_a_run_refuses(topas: Path, name: str, kind: str) -> None:
+    if kind == "file":
+        (topas / name).write_text("x")
+    else:
+        (topas / name).mkdir()
+    if kind == "dir with run files":
+        shutil.copy2(run_dir(topas, 100, 912001) / "provenance.txt", topas / name / "provenance.txt")
+    assert f"{name}: looks like a run but is not a directory named as make_run.sh names one" in refusal(topas)
+
+
 def test_status_reports_completeness_without_opening_a_dose_file(
     topas: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -321,30 +527,22 @@ def test_status_reports_completeness_without_opening_a_dose_file(
 # ------------------------------------------------------------------------------------------------ end to end
 def synthetic_dose(energy: int, rng: random.Random) -> np.ndarray:
     """v[ix, iy, kz] as TOPAS writes it: a Gaussian spot (sigma about 3 mm) with a Bragg-like peak at PEAK[energy]."""
-    c = np.arange(N_LATERAL) + 0.5 - N_LATERAL / 2
+    cx, cy = (np.arange(BINS[a]) + 0.5 - BINS[a] / 2 for a in "XY")
     sigma = 3.0 * (1 + rng.gauss(0, 0.01))
-    lateral = np.exp(-(c[:, None] ** 2 + c[None, :] ** 2) / (2 * sigma**2))
-    k = np.arange(PEAK[energy] + 6)
+    lateral = np.exp(-(cx[:, None] ** 2 + cy[None, :] ** 2) / (2 * sigma**2))
+    k = np.arange(BINS["Z"])
     idd = 1 + 3 * np.exp(-(((k - PEAK[energy] - rng.gauss(0, 0.2)) / 5) ** 2))
+    idd[PEAK[energy] + 6:] = 0.0  # nothing beyond the distal edge
     canonical = idd[:, None, None] * lateral[None, :, :]  # D[k, x, y]
     return np.ascontiguousarray(canonical.transpose(1, 2, 0)[:, :, ::-1])
 
 
 def put_dose(run: Path, v: np.ndarray) -> None:
-    """Replace a wrapper-made run's dose with `v`, recorded in its provenance as run_topas.sh records it."""
-    nx, ny, nz = v.shape
-    payload = np.asfortranarray(v, dtype="<f8").tobytes(order="F")
-    (run / "dose.bin").write_bytes(payload)
-    (run / "dose.binheader").write_text(
-        "# TOPAS Version: 4.3\n# Results for scorer: Dose\n"
-        f"# X in {nx} bins of 0.1 cm\n# Y in {ny} bins of 0.1 cm\n# Z in {nz} bins of 0.1 cm\n"
-        "# DoseToMedium ( Gy ) : Sum   \n# Binary file: dose.bin\n"
-    )
-    prov = run / "provenance.txt"
-    text, n = re.subn(r"(?m)^dose\.bin bytes: .*$", f"dose.bin bytes: {len(payload)} sha256: {thc.sha256_file(run / 'dose.bin')}",
-                      prov.read_text())
-    assert n == 1
-    prov.write_text(text)
+    """Replace a wrapper-made run's dose with `v` on the run's own grid, recorded as run_topas.sh records it.
+    The header stays the one the run wrote."""
+    assert v.shape == (BINS["X"], BINS["Y"], BINS["Z"])
+    (run / "dose.bin").write_bytes(np.asfortranarray(v, dtype="<f8").tobytes(order="F"))
+    rerecord(run, "dose.bin")
 
 
 @pytest.fixture
@@ -397,7 +595,7 @@ def test_end_to_end_rows_match_an_independent_computation(both: tuple[Path, Path
             assert ratio["status"] == "ratio"
             assert ratio["estimate"] == pytest.approx(want)
             assert ratio["ci90"][0] > ratio["ci95"][0] and ratio["ci90"][1] < ratio["ci95"][1]
-            # the synthetic TOPAS grid is 24 mm wide, so it scores nothing beyond 20 mm
+            # the synthetic TOPAS grid is 24 x 26 mm, so it scores nothing beyond 20 mm
             far = row_of(doc, energy, arm, f"ring_{d0}_40_80")
             assert far["status"] == "no ratio (zero runs)"
             assert far["topas"]["n_nonzero"] == 0 and far["mcsquare"]["n_nonzero"] == 8
@@ -428,6 +626,19 @@ def test_a_dose_file_changed_after_the_run_refuses(both: tuple[Path, Path, dict[
     dose.write_bytes(bytes(data))
     with pytest.raises(thc.InputError, match="dose.bin is not the file recorded in provenance.txt"):
         thc.run(topas, mc, expect_fingerprint=None)
+
+
+def test_a_header_changed_between_the_gate_and_the_read_refuses_before_the_dose_is_interpreted(
+    both: tuple[Path, Path, dict[int, list[dict]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    topas, _mc, _direct = both
+    runs, _notes = thc.discover(topas)
+    victim = runs[(100, 912001)]
+    edit(victim.path / "dose.binheader", f"# X in {BINS['X']} bins", f"# X in {BINS['Y']} bins")
+    edit(victim.path / "dose.binheader", f"# Y in {BINS['Y']} bins", f"# Y in {BINS['X']} bins")
+    monkeypatch.setattr(pe, "read_topas_bin", lambda *_a: pytest.fail("the dose was interpreted with a changed header"))
+    with pytest.raises(thc.InputError, match="dose.binheader is not the file recorded in provenance.txt"):
+        thc.topas_record(victim)
 
 
 def test_main_refuses_any_mcsquare_dataset_but_the_reused_one(
