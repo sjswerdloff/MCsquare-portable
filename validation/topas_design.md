@@ -187,8 +187,9 @@ fraction is not a measured halo effect.
 - **Huang et al. 2018 is context, and its figures are TOPAS-against-MEASUREMENT** (corrected 2026-10-01; this line
   read as if they were MCsquare comparisons): R80 differences generally under 0.1 mm on average (§3.A.2), range
   within 0.6 mm (§3.D), spot size 0.1 ± 0.1 mm (§3.B). MCsquare appears only against TOPAS on patient plans (§3.F:
-  99.2% of lung iCTV voxels within 3%). None of it is a band here. (Read through an agent's page summary; the two
-  quoted sentences should be checked against the PDF before the report cites them.)
+  99.2% of lung iCTV voxels within 3%). None of it is a band here. (Checked against the paper's full text, PMC6123159,
+  on 2026-10-02: the four figures are as quoted; the 99.2% is of voxels within 3% of the prescription dose. The
+  section numbers were not checked.)
 
 ### Source and geometry check (before confirmatory acquisition)
 
