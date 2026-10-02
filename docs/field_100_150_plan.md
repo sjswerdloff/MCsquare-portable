@@ -113,16 +113,18 @@ TOST at one-sided α = 0.05; three outcomes (equivalent, not equivalent, inconcl
   or a non-finite lateral value (it is a percentage of the same run's central-axis dose at that depth, so it is
   undefined when that dose is not finite and positive) in any run makes that endpoint not established. No run is
   excluded and nothing is imputed.
-- **A lateral value of zero is a valid value.** The lateral endpoints are differences on an absolute scale, so a
-  point where a run scores no dose contributes 0. A zero is informative here. In two 200 MeV field runs (one per
-  Lenovo arm, 3e7 histories) the smallest non-zero voxel among the 400 that make a 50 or 70 mm value added between
-  6e-7 and 4e-5 points to it, and the median non-zero voxel under 0.001 points; at 6e7 histories each is half
-  that. So runs that are all zero bound both arms far inside ±0.20 points. A row where every run of both arms is exactly
-  zero is marked "all runs zero in both arms": it says that neither code deposits dose there at this number of
-  histories, not that a difference was measured and found small.
-- **Zero standard error.** When both arms have zero variance (all-zero rows included), Welch's degrees of freedom
-  are undefined. The outcome is then decided by the point difference against the margin: equivalent, with p = 0
-  entered into Holm, if it is inside; not equivalent, with p = 1, if it is not.
+- **A lateral value of zero is a valid value** and stays in the data: the lateral endpoints are differences on an
+  absolute scale, so a point where a run scores no dose contributes 0.
+- **Zero sample variance is not zero variance.** When both arms have zero sample variance (every run of both arms
+  exactly zero is the case expected, but identical non-zero values count too), Welch's calculation is undefined
+  and nothing replaces it: the endpoint is NOT ESTABLISHED, it stays in the family as a non-rejection, and it
+  counts against the joint claim. Eight runs that are all zero can miss a rare contribution, and the sample alone
+  cannot bound it (#55 review 7098). The table marks such a row "all runs zero in both arms" and gives each arm's
+  simulated histories.
+- **Secondary joint claim, fixed now.** Because an all-zero row is foreseeable at 100 MeV, 70 mm (the 80–200 mm
+  annulus scored nothing there in parts A and B), each confirmatory contrast also reports: equivalent on every
+  endpoint other than rows where every run of both arms is exactly zero. It is reported beside the primary joint
+  claim, never in its place, with the excluded rows listed.
 - **What the lateral rows report.** Each arm's mean, in points, beside the difference and its intervals, so that
   a reader can see when a row is equivalent because both doses are very small.
 - **Descriptive ratio at 50 and 70 mm.** For those rows the table also gives the ratio of the arm means (arm /
@@ -166,12 +168,9 @@ a dose effect. Fixed now, for a maximum row that is inconclusive or not equivale
 - the report gives, beside it, the R80 difference of the same contrast and, as a descriptive quantity only, the
   ratio (with its 95% interval) of the mean of the three central-axis rows centred on each run's maximum row,
   which depends less on how the peak divides between rows;
-- if that three-row ratio lies within [0.995, 1.005] and the R80 difference is not zero, the row is described as
-  consistent with a range effect on the 2 mm grid; otherwise as a difference in peak dose. Either way it is
-  reported as not established or not equivalent, and the description is labelled post-estimation reading, not a
-  test.
-
-**8 runs per arm and energy, 6e7 histories each: 80 runs.**
+- no cause is attributed. If the three-row ratio lies within [0.995, 1.005] while the maximum does not, the
+  report says the row is compatible with a shift of the peak against the 2 mm rows and with a difference in peak
+  dose, and that these runs do not distinguish them. The row stays not established or not equivalent.
 
 ## Seeds
 
