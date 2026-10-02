@@ -2,7 +2,7 @@
 
 **DRAFT, 2026-10-02, in the form of the published MCsquare validations (Souris et al. 2016; Huang et al. 2018). Not
 a publication.** The confirmatory same-host acquisition (commit `2f9dab40`, §4) is complete and its endpoint results
-are in §5.0–§5.2. Figures and gamma tables are still to be generated from the dose files. Results marked PRELIMINARY
+are in §5.0–§5.2, with figures and gamma tables made from the dose files. Results marked PRELIMINARY
 (§5.4) come from planning runs made before the confirmatory designs were frozen; they are not confirmatory and must
 not be quoted as final.
 
@@ -161,8 +161,10 @@ point estimate with its 95% interval and the outcome of the equivalence test: **
 a cell marked E. **†** marks an endpoint equivalent unadjusted but not after Holm adjustment.
 
 The tables in §5.0–§5.2 and Appendix A are written by `validation/report_confirmatory_tables.py` from the analysis
-document, and a test fails if the report and the document disagree. `[Fig n]` marks a figure, and `·` a descriptive
-value, still to be generated from the collected dose files (§7, item 1).
+document, and a test fails if the report and the document disagree. Tables 1b, 2 and 5 and the figures are
+**descriptive**: they come from `validation/report_dose_descriptives.py`, which reads the Dose files, and they carry
+no margin and no claim. That script first recomputed R80 for all 120 pencil-beam runs and all 13 broad-field
+endpoints for all 40 broad-field runs from the Dose files and found them identical to the recorded values.
 
 ### 5.0 Summary of the confirmatory comparison
 
@@ -230,10 +232,33 @@ How these are to be read:
   way in all three contrasts. This is recorded as an observation, not as a compiler effect. A follow-up acquisition
   should name it in advance.
 
+**How much the unresolved endpoints could matter.** The table gives, for each annulus endpoint that is not
+equivalent, the share of the energy deposited at that depth that the annulus holds, the largest departure from 1
+that any of the three 95% intervals still allows, and their product. This is descriptive and was not pre-specified.
+
+<!-- BEGIN GENERATED: halo-bound -->
+| endpoint | share of the slab's energy (upstream mean) | largest \|ratio − 1\| within the three 95% intervals | product |
+|---|---|---|---|
+| P100/ring_40_40_80 | 0.0337% | 6.7% | 0.0023% |
+| P100/ring_40_80_200 | no energy scored in any run | no interval | — |
+| P100/ring_60_40_80 | 0.0110% | 7.8% | 0.0009% |
+| P100/ring_60_80_200 | no energy scored in any run | no interval | — |
+| P150/ring_80_80_200 | 0.0181% | 13.1% | 0.0024% |
+| P150/ring_125_80_200 | 0.0040% | 12.5% | 0.0005% |
+<!-- END GENERATED: halo-bound -->
+
+The unresolved annuli hold between 0.004% and 0.034% of the energy at their depth, and the largest difference
+between the code lines that the data still allow is about 0.002% of that energy. In a uniform broad field the far
+halo of the surrounding spots contributes about the same share of the local dose, so the corresponding dose
+difference is of the order of 0.002% of local dose, roughly 1 mGy in 60 Gy. That conversion is an estimate, not a
+measurement. The endpoints are inconclusive because the margins (2% and 5% of the annulus's own energy) are narrow
+against the noise in annuli that hold almost nothing, not because a difference of clinical size is left open.
+
 ### 5.1 Depth dose
 
-[Fig 1] Integrated depth dose at 100, 150 and 200 MeV: mean over 8 runs per arm, the two arms of each contrast
-overlaid, normalised to the upstream maximum, with the difference curve beneath (% of maximum).
+![Fig 1. Integrated depth dose at 100, 150 and 200 MeV: mean over 8 runs per arm, all five arms overlaid, each
+normalised to the maximum of its host's upstream arm; beneath, the difference Portable − upstream for each contrast
+(% of the upstream maximum).](figures/fig1_idd.png)
 
 **Table 1. Pencil beam: R80 difference (mm). Margin ±0.05 mm.**
 
@@ -255,21 +280,57 @@ R80 is equivalent at every energy in every contrast. The largest estimate is 0.0
 interval lies within ±0.007 mm, against a margin of ±0.05 mm. There is no sign of an energy dependence. The
 broad-field R80 and R20 (Table 4) agree within ±0.022 mm at the 95% level.
 
-R90, R20 and the distal fall-off of the pencil beam were not pre-specified endpoints. They will be added as
-descriptive values from the dose files, with Table 2.
+R90, R20 and the distal fall-off of the pencil beam were not pre-specified endpoints; Table 1b gives them as
+descriptive values. Every estimate is within ±0.003 mm and every 95% interval within ±0.007 mm. One of the 27
+intervals excludes 0 (the fall-off at
+200 MeV in A, −0.003 mm), with no multiplicity adjustment. In Fig 1 the depth-dose curves of the arms differ by at
+most 0.06% of the maximum.
 
-**Table 2. Gamma pass rates, integrated depth dose and 3D dose (% of points passing). Descriptive; pending.**
+**Table 1b. Pencil beam: R90, R20 and distal fall-off (R20 − R80) differences, Portable − upstream (mm), estimate [95% interval] from 8 runs per arm. Descriptive: no margin, no outcome.**
 
-| energy | contrast | 2%/2 mm, 10% | 1%/1 mm, 10% |
-|---|---|---|---|
-| 100 MeV | A / B1 / B2 | · / · / · | · / · / · |
-| 150 MeV | A / B1 / B2 | · / · / · | · / · / · |
-| 200 MeV | A / B1 / B2 | · / · / · | · / · / · |
+<!-- BEGIN GENERATED: table-1b-range-descriptive -->
+| energy | contrast | R90 difference (mm) | R20 difference (mm) | distal fall-off, R20 − R80, difference (mm) |
+|---|---|---|---|---|
+| 100 MeV | A | 0.0000 [−0.0008, +0.0007] | −0.0001 [−0.0006, +0.0005] | 0.0000 [−0.0014, +0.0014] |
+|  | B1 | +0.0002 [−0.0005, +0.0009] | −0.0001 [−0.0007, +0.0006] | −0.0004 [−0.0015, +0.0007] |
+|  | B2 | −0.0001 [−0.0006, +0.0004] | −0.0002 [−0.0010, +0.0005] | 0.0000 [−0.0011, +0.0010] |
+| 150 MeV | A | −0.0002 [−0.0014, +0.0010] | +0.0007 [−0.0006, +0.0020] | +0.0011 [−0.0009, +0.0030] |
+|  | B1 | −0.0006 [−0.0023, +0.0011] | +0.0001 [−0.0012, +0.0015] | +0.0007 [−0.0011, +0.0025] |
+|  | B2 | −0.0002 [−0.0021, +0.0016] | +0.0001 [−0.0014, +0.0017] | +0.0006 [−0.0014, +0.0027] |
+| 200 MeV | A | +0.0022 [−0.0007, +0.0051] | −0.0007 [−0.0025, +0.0011] | −0.0027 [−0.0052, −0.0002] |
+|  | B1 | +0.0010 [−0.0022, +0.0041] | +0.0012 [−0.0002, +0.0025] | −0.0002 [−0.0027, +0.0024] |
+|  | B2 | +0.0020 [−0.0015, +0.0055] | +0.0007 [−0.0016, +0.0029] | −0.0025 [−0.0063, +0.0013] |
+<!-- END GENERATED: table-1b-range-descriptive -->
+
+**Table 2. Gamma pass rates on the arm mean doses, integrated depth dose and 3D (global, 10% low-dose cutoff): % of evaluated points passing (points evaluated), then the split-half noise control of the upstream arm. Descriptive.**
+
+<!-- BEGIN GENERATED: table-2-gamma-pencil -->
+| energy | contrast | IDD, 2%/2 mm | IDD, 1%/1 mm | 3D, 2%/2 mm | 3D, 1%/1 mm |
+|---|---|---|---|---|---|
+| 100 MeV | A | 100.000 (n = 79); control 100.000 (n = 79) | 100.000 (n = 79); control 100.000 (n = 79) | 100.000 (n = 6029); control 100.000 (n = 6035) | 100.000 (n = 6029); control 100.000 (n = 6035) |
+|  | B1 | 100.000 (n = 79); control 100.000 (n = 79) | 100.000 (n = 79); control 100.000 (n = 79) | 100.000 (n = 6032); control 100.000 (n = 6030) | 100.000 (n = 6032); control 100.000 (n = 6030) |
+|  | B2 | 100.000 (n = 79); control 100.000 (n = 79) | 100.000 (n = 79); control 100.000 (n = 79) | 100.000 (n = 6032); control 100.000 (n = 6030) | 100.000 (n = 6032); control 100.000 (n = 6030) |
+| 150 MeV | A | 100.000 (n = 161); control 100.000 (n = 161) | 100.000 (n = 161); control 100.000 (n = 161) | 100.000 (n = 20289); control 100.000 (n = 20238) | 100.000 (n = 20289); control 100.000 (n = 20238) |
+|  | B1 | 100.000 (n = 161); control 100.000 (n = 161) | 100.000 (n = 161); control 100.000 (n = 161) | 100.000 (n = 20263); control 100.000 (n = 20234) | 100.000 (n = 20263); control 100.000 (n = 20234) |
+|  | B2 | 100.000 (n = 161); control 100.000 (n = 161) | 100.000 (n = 161); control 100.000 (n = 161) | 100.000 (n = 20263); control 100.000 (n = 20234) | 100.000 (n = 20263); control 100.000 (n = 20234) |
+| 200 MeV | A | 100.000 (n = 265); control 100.000 (n = 265) | 100.000 (n = 265); control 100.000 (n = 265) | 100.000 (n = 55838); control 100.000 (n = 55768) | 100.000 (n = 55838); control 100.000 (n = 55768) |
+|  | B1 | 100.000 (n = 265); control 100.000 (n = 265) | 100.000 (n = 265); control 100.000 (n = 265) | 100.000 (n = 55805); control 100.000 (n = 55757) | 100.000 (n = 55805); control 100.000 (n = 55757) |
+|  | B2 | 100.000 (n = 265); control 100.000 (n = 265) | 100.000 (n = 265); control 100.000 (n = 265) | 100.000 (n = 55805); control 100.000 (n = 55757) | 100.000 (n = 55805); control 100.000 (n = 55757) |
+<!-- END GENERATED: table-2-gamma-pencil -->
+
+Every pencil-beam gamma passes at 100%, and so does the noise control (the upstream arm's four lowest seeds against
+its four highest). **This says little.** As a check of the method, the same analysis was run on the A-up mean dose
+against altered copies of itself. With a 3 mm shift in depth, the pass rate at 2%/2 mm falls to 78–91% for the
+integrated depth dose but only to 95–97% in 3D. With a uniform 3% increase in dose, the 3D pass rate stays at 100%
+at both criteria. For a single pencil beam, most voxels above the 10% cutoff lie on steep lateral gradients, where
+the distance criterion absorbs a dose difference. Gamma at these criteria is therefore a weak test here; it is
+reported for comparison with the literature, and the endpoint tables above are the evidence.
 
 ### 5.2 Off-axis dose
 
-**Pencil beam.** [Fig 2] Lateral profiles in x and y through the axis at each energy's two depths (100 MeV: 40 and
-60 mm; 150 MeV: 80 and 125 mm; 200 MeV: 100 and 200 mm), log dose axis so that the halo is visible, arms overlaid.
+**Pencil beam.** ![Fig 2. Lateral profiles in x and y through the axis at each energy's two depths (100 MeV: 40 and
+60 mm; 150 MeV: 80 and 125 mm; 200 MeV: 100 and 200 mm), log dose axis so that the halo is visible, arms overlaid;
+first lateral axis.](figures/fig2_pencil_lateral.png) ![Fig 2b. The same for the second lateral axis.](figures/fig2b_pencil_lateral_y.png)
 
 **Table 3. Pencil beam: spot σ difference (mm; margin ±0.02 mm) and annulus energy-fraction ratios (margin
 ×[0.98, 1.02] out to 80 mm, ×[0.95, 1.05] for 80–200 mm).**
@@ -305,8 +366,9 @@ descriptive values from the dose files, with Table 2.
   150 MeV the 40–80 mm annulus is equivalent and the 80–200 mm annulus is inconclusive. At 100 MeV the 40–80 mm
   annulus is inconclusive and the 80–200 mm annulus is not established (§5.0).
 
-**Broad field.** [Fig 3] Lateral profiles across the field edge at mid-range depth (127 mm), arms overlaid, log dose
-axis; inset: dose 0–30 mm outside the edge. [Fig 4] Gamma maps (1%/1 mm and low-dose) on the plane at 127 mm.
+**Broad field.** ![Fig 3. Lateral profiles across the field edge at mid-range depth (127 mm), arms overlaid, log dose
+axis; inset: dose 0–30 mm outside the edge.](figures/fig3_field_edge.png) ![Fig 4. Gamma maps on the plane at 127 mm depth for each contrast: 1%/1 mm global with a 10% cutoff, and 2%/2 mm
+local with a 1% cutoff.](figures/fig4_field_gamma.png)
 
 **Table 4. Broad field, 200 MeV: dose outside the field edge (difference in percentage points of the central-axis
 dose at that depth; margin ±0.5 at 5 mm, ±0.2 at 10–30 mm), central-axis dose (ratio; margin ×[0.995, 1.005]) and
@@ -334,13 +396,22 @@ All 13 broad-field endpoints are equivalent in all three contrasts. Outside the 
 distributed computes less dose (§2), the largest estimate is 0.07 points and every 95% interval lies within ±0.12
 points of central-axis dose. Central-axis dose agrees within 0.10% (95% intervals within 0.34%).
 
-**Table 5. Gamma pass rates on the broad-field planes (% passing). Descriptive; pending.**
+**Table 5. Gamma pass rates on the broad-field arm mean doses, 3D (global unless stated): % of evaluated points passing (points evaluated), then the split-half noise control of the upstream arm. Descriptive.**
 
-| contrast | 2%/2 mm, 10% | 1%/1 mm, 10% | low-dose (2%/2 mm, ~1% threshold) | local 2%/2 mm, ~1% threshold |
+<!-- BEGIN GENERATED: table-5-gamma-field -->
+| contrast | 2%/2 mm, 10% cutoff | 1%/1 mm, 10% cutoff | low-dose: 2%/2 mm, 1% cutoff | local 2%/2 mm, 1% cutoff |
 |---|---|---|---|---|
-| A | · | · | · | · |
-| B1 | · | · | · | · |
-| B2 | · | · | · | · |
+| A | 99.9991 (n = 772072); control 99.9918 (n = 771394) | 99.9005 (n = 772072); control 99.1216 (n = 771394) | 99.9993 (n = 1013256); control 99.9938 (n = 1011009) | 99.7408 (n = 1013256); control 98.7499 (n = 1011009) |
+| B1 | 99.9991 (n = 771760); control 99.9926 (n = 771311) | 99.9099 (n = 771760); control 99.0993 (n = 771311) | 99.9993 (n = 1012384); control 99.9944 (n = 1011189) | 99.7564 (n = 1012384); control 98.7198 (n = 1011189) |
+| B2 | 99.9987 (n = 771760); control 99.9926 (n = 771311) | 99.9037 (n = 771760); control 99.0993 (n = 771311) | 99.9990 (n = 1012384); control 99.9944 (n = 1011189) | 99.7514 (n = 1012384); control 98.7198 (n = 1011189) |
+<!-- END GENERATED: table-5-gamma-field -->
+
+For the broad field, at least 99.90% of points pass at 1%/1 mm with the 10% cutoff, and at least 99.74% pass the
+strictest analysis (2%/2 mm local with a 1% cutoff, which includes the region outside the field edge). In every cell
+the contrast between code lines passes at a higher rate than the noise control within the upstream arm (99.10–99.12%
+and 98.72–98.75% for those two analyses). The control compares means of four runs, which are noisier than the means
+of eight used for the contrasts, so the control is expected to be lower. The failures are at the level of statistical
+noise and show no pattern in Fig 4. The standard and the low-dose analyses tell the same story.
 
 **Compiler (descriptive).** Portable built with gcc against Portable built with icc on the HP has no margin and
 makes no claim (AP). Its 52 rows are in Appendix A. Fifty have estimates. Two 95% intervals exclude the null value:
@@ -413,8 +484,9 @@ without intervals, at 200 MeV only.
 
 ## 7. Limitations
 
-1. **Figures and gamma tables are pending.** Figures 1–4, Tables 2 and 5, and the pencil beam's R90, R20 and distal
-   fall-off need the dose files, not the endpoint records. They are descriptive and were not pre-specified endpoints.
+1. **Gamma is a weak test for the pencil beam.** At 2%/2 mm and 1%/1 mm with a 10% cutoff it does not detect a
+   uniform 3% dose difference in 3D (§5.1). The pencil-beam comparison rests on the endpoint tables. All gamma
+   values compare means of Monte Carlo runs, so they include statistical noise in both distributions.
 2. **The joint equivalence claim is not established** in any contrast, because the far halo at 100 and 150 MeV lacks
    precision at 1e7 histories per run (§5.0).
 3. **Homogeneous phantoms only.** Neither case has a density interface. Differences in lateral scattering and in the
@@ -448,8 +520,12 @@ Portable MCsquare repository.
   `e71859561b820bff7f887e8987c5c190542f45151ebc2f86cb9c77fecb8a7570`.
 - **Analysis document:** `validation/report_data/apples_analysis_2f9dab40.json`, written by
   `validation/apples_analyse.py <collected> --parts A,B --json <file>` at commit `bad1419`.
+- **Descriptive document and figures:** `validation/report_data/apples_descriptive_2f9dab40.json` and
+  `docs/figures/`, written by `validation/report_dose_descriptives.py` from the run trees (pymedphys 0.41.0 for
+  gamma). The annulus shares in §5.0 are in `validation/report_data/apples_ring_fractions_2f9dab40.json`, written by
+  `validation/report_ring_fractions.py` from the collected records.
 - **Tables:** `python validation/report_confirmatory_tables.py --check` confirms that the tables in this report are
-  what the analysis document renders.
+  what those documents render.
 
 The archives are held on the project's storage. A read-only link and a step-by-step reproduction guide will be added
 before any wider circulation.

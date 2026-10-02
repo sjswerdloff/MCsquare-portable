@@ -1,8 +1,9 @@
 """Render the confirmatory same-host tables of docs/validation_report_draft.md from the committed analysis JSON.
 
 The input is the document validation/apples_analyse.py wrote for the collection at the acquisition commit
-(validation/report_data/apples_analysis_2f9dab40.json). Nothing is recomputed here: every number in a table is a
-field of that document, formatted. The tables live in the report between marker comments
+(validation/report_data/apples_analysis_2f9dab40.json), and, for the descriptive tables (1b, 2, 5), the document
+validation/report_dose_descriptives.py wrote from the Dose files (validation/report_data/apples_descriptive_2f9dab40.json).
+Nothing is recomputed here: every number in a table is a field of one of those documents, formatted. The tables live in the report between marker comments
 
     <!-- BEGIN GENERATED: <name> -->  ...  <!-- END GENERATED: <name> -->
 
@@ -27,6 +28,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 ANALYSIS_JSON = REPO / "validation" / "report_data" / "apples_analysis_2f9dab40.json"
+DESCRIPTIVE_JSON = REPO / "validation" / "report_data" / "apples_descriptive_2f9dab40.json"
+DESCRIPTIVE_SCHEMA = "apples_descriptive/1"
+FRACTIONS_JSON = REPO / "validation" / "report_data" / "apples_ring_fractions_2f9dab40.json"
+FRACTIONS_SCHEMA = "apples_ring_fractions/1"
 REPORT = REPO / "docs" / "validation_report_draft.md"
 
 # report label -> the analysis's contrast name
@@ -53,6 +58,25 @@ F_ROWS = {
 }
 HOLM_NOTE = "†"
 MINUS = "−"
+# descriptive tables: (metric key, column heading) of the range metrics
+RANGE_COLUMNS = (("R90", "R90 difference (mm)"), ("R20", "R20 difference (mm)"), ("falloff", "distal fall-off, R20 − R80, difference (mm)"))
+# pencil-beam gamma columns: (dimension, gamma spec key, heading); case-F columns: (gamma spec key, heading)
+PENCIL_GAMMA_COLUMNS = (
+    ("idd", "g2_2_c10", "IDD, 2%/2 mm"),
+    ("idd", "g1_1_c10", "IDD, 1%/1 mm"),
+    ("3d", "g2_2_c10", "3D, 2%/2 mm"),
+    ("3d", "g1_1_c10", "3D, 1%/1 mm"),
+)
+FIELD_GAMMA_COLUMNS = (
+    ("g2_2_c10", "2%/2 mm, 10% cutoff"),
+    ("g1_1_c10", "1%/1 mm, 10% cutoff"),
+    ("g2_2_c1", "low-dose: 2%/2 mm, 1% cutoff"),
+    ("l2_2_c1", "local 2%/2 mm, 1% cutoff"),
+)
+# the upstream arm whose split halves are the noise control of each contrast
+CONTROL_ARM = {"A": "A-up", "B1": "B-up", "B2": "B-up"}
+PENCIL_PASS_DECIMALS = 3  # one failing point of the largest pencil-beam analysis (55 838 points) is 0.002 percentage points
+FIELD_PASS_DECIMALS = 4  # one failing point of the case-F analyses (about 7.7e5 to 1.0e6 points) is 0.0001 percentage points
 
 
 class ReportError(Exception):
@@ -102,6 +126,103 @@ def cell(row: dict[str, object], decimals: int = 4) -> str:
     if row["outcome"] == "equivalent" and row["holm_decision"] != "equivalent":
         mark += HOLM_NOTE
     return f"{text} {mark}"
+
+
+def load_descriptive(path: Path) -> dict[str, object]:
+    """The descriptive document, refused unless it is the expected schema and every binding control in it passed."""
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if doc.get("schema") != DESCRIPTIVE_SCHEMA or doc.get("descriptive_only") is not True:
+        msg = f"{path}: not a {DESCRIPTIVE_SCHEMA} descriptive document"
+        raise ReportError(msg)
+    controls = doc["controls"]
+    failed = [k for k in ("case_P_r80", "case_F_metrics", "dose_file_sha256") if controls.get(k, {}).get("passed") is not True]
+    if failed:
+        msg = f"{path}: binding control(s) did not pass: {', '.join(failed)}"
+        raise ReportError(msg)
+    return doc
+
+
+def range_cell(entry: dict[str, object]) -> str:
+    """One descriptive range-metric cell: estimate [95% interval] by the shared ``cell`` helper, or ``unavailable``.
+
+    A metric is unavailable when some run has no single distal crossing; the descriptive document then carries no
+    estimate, and none is invented.
+    """
+    if not entry["available"]:
+        return "unavailable"
+    ci = entry["ci95"]
+    if ci is None:
+        return f"{num(entry['estimate'], 4, signed=True)} [interval undefined: zero variance]"
+    row = {
+        "endpoint": "descriptive", "scale": "difference", "outcome": "descriptive", "holm_decision": "",
+        "estimate_reported_scale": entry["estimate"], "ci95_reported_scale": ci,
+    }  # fmt: skip
+    return cell(row)
+
+
+def pass_rate(entry: dict[str, object], decimals: int) -> str:
+    """A pass rate in percent with its evaluated-point count; never a rate without the count.
+
+    Raises:
+        ReportError: If the rounded rate would read 100 while some evaluated point failed.
+    """
+    rate = entry["pass_rate_percent"]
+    n = entry["n_evaluated"]
+    if rate is None:
+        return f"no evaluated points (n = {n})"
+    text = f"{rate:.{decimals}f}"
+    if float(text) >= 100 and entry["n_fail"] > 0:
+        msg = f"a pass rate of {rate!r}% would print as 100 with {entry['n_fail']} failing point(s)"
+        raise ReportError(msg)
+    missing = entry["n_not_evaluated_in_region"]
+    return f"{text} (n = {n}{f', {missing} not evaluated' if missing else ''})"
+
+
+def gamma_cell(entry: dict[str, object], control: dict[str, object], decimals: int) -> str:
+    """Pass rate of Portable against upstream, then the split-half noise control of the upstream arm."""
+    return f"{pass_rate(entry, decimals)}; control {pass_rate(control, decimals)}"
+
+
+def range_descriptive_table(desc: dict[str, object]) -> list[str]:
+    """Table 1b: R90, R20 and fall-off differences (Portable − upstream) per energy and contrast; no outcome mark."""
+    contrasts = desc["range_metrics"]["contrasts"]  # type: ignore[index]
+    out = ["| energy | contrast | " + " | ".join(h for _, h in RANGE_COLUMNS) + " |", "|---|---|" + "---|" * len(RANGE_COLUMNS)]
+    for energy in SLABS:
+        for i, label in enumerate(CONFIRMATORY):
+            first = f"{energy} MeV" if i == 0 else ""
+            cells = [range_cell(contrasts[label][str(energy)][metric]) for metric, _ in RANGE_COLUMNS]
+            out.append(f"| {first} | {label} | " + " | ".join(cells) + " |")
+    return out
+
+
+def gamma_pencil_table(desc: dict[str, object]) -> list[str]:
+    """Table 2: pencil-beam gamma pass rates (IDD and 3D, two criteria) with their noise controls and point counts."""
+    gamma = desc["gamma_pencil"]
+    out = ["| energy | contrast | " + " | ".join(h for _, _, h in PENCIL_GAMMA_COLUMNS) + " |", "|---|---|" + "---|" * len(PENCIL_GAMMA_COLUMNS)]
+    for energy in SLABS:
+        for i, label in enumerate(CONFIRMATORY):
+            first = f"{energy} MeV" if i == 0 else ""
+            cells = []
+            for dim, spec, _ in PENCIL_GAMMA_COLUMNS:
+                block = gamma[str(energy)][dim]
+                cells.append(
+                    gamma_cell(block["contrasts"][label][spec], block["noise_control"][CONTROL_ARM[label]][spec], PENCIL_PASS_DECIMALS)
+                )
+            out.append(f"| {first} | {label} | " + " | ".join(cells) + " |")
+    return out
+
+
+def gamma_field_table(desc: dict[str, object]) -> list[str]:
+    """Table 5: broad-field gamma pass rates (four analyses) with their noise controls and point counts."""
+    gamma = desc["gamma_field"]
+    out = ["| contrast | " + " | ".join(h for _, h in FIELD_GAMMA_COLUMNS) + " |", "|---|" + "---|" * len(FIELD_GAMMA_COLUMNS)]
+    for label in CONFIRMATORY:
+        cells = [
+            gamma_cell(gamma["contrasts"][label][spec], gamma["noise_control"][CONTROL_ARM[label]][spec], FIELD_PASS_DECIMALS)
+            for spec, _ in FIELD_GAMMA_COLUMNS
+        ]
+        out.append(f"| {label} | " + " | ".join(cells) + " |")
+    return out
 
 
 def summary_table(contrasts: dict[str, dict[str, object]]) -> list[str]:
@@ -174,9 +295,56 @@ def compiler_table(contrasts: dict[str, dict[str, object]]) -> list[str]:
     return out
 
 
-def render(contrasts: dict[str, dict[str, object]]) -> dict[str, list[str]]:
-    """Every generated block of the report, by marker name."""
-    return {
+def load_fractions(path: Path) -> dict[str, float]:
+    """The upstream arms' mean annulus energy fractions by endpoint id (validation/report_ring_fractions.py)."""
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if doc.get("schema") != FRACTIONS_SCHEMA:
+        msg = f"{path}: schema {doc.get('schema')!r}, expected {FRACTIONS_SCHEMA!r}"
+        raise ReportError(msg)
+    return {str(k): float(v) for k, v in doc["mean_fraction"].items()}
+
+
+def percent(x: float, decimals: int) -> str:
+    return f"{100 * x:.{decimals}f}%"
+
+
+def halo_bound_table(contrasts: dict[str, dict[str, object]], fractions: dict[str, float]) -> list[str]:
+    """For each annulus endpoint not equivalent in some contrast: the share of the slab's energy it holds, the largest
+    departure from 1 that any of the three 95% intervals still allows, and their product (the largest difference in
+    the slab's energy that the data still allow). An all-zero annulus has no interval and is stated as such."""
+    out = [
+        "| endpoint | share of the slab's energy (upstream mean) | largest \|ratio − 1\| within the three 95% intervals | product |",
+        "|---|---|---|---|",
+    ]
+    order = list(next(iter(contrasts.values()))["rows"])
+    for eid in order:
+        rows = [contrasts[n]["rows"][eid] for n in CONFIRMATORY.values()]
+        if "/ring_" not in eid or all(r["outcome"] == "equivalent" for r in rows):
+            continue
+        share = fractions[eid]
+        bounds = [abs(b - 1) for r in rows if r["ci95_reported_scale"] is not None for b in r["ci95_reported_scale"]]
+        if share == 0 or not bounds:
+            if share != 0 or bounds:
+                msg = f"{eid}: a zero share and an interval, or a non-zero share and no interval"
+                raise ReportError(msg)
+            out.append(f"| {eid} | no energy scored in any run | no interval | — |")
+            continue
+        worst = max(bounds)
+        out.append(f"| {eid} | {percent(share, 4)} | {percent(worst, 1)} | {percent(share * worst, 4)} |")
+    return out
+
+
+def render(
+    contrasts: dict[str, dict[str, object]],
+    descriptive: dict[str, object] | None = None,
+    fractions: dict[str, float] | None = None,
+) -> dict[str, list[str]]:
+    """Every generated block of the report, by marker name.
+
+    The descriptive blocks (Tables 1b, 2 and 5) are rendered when the descriptive document is given, and the
+    far-halo bound when the annulus fractions are.
+    """
+    blocks = {
         "confirmatory-summary": summary_table(contrasts),
         "confirmatory-not-equivalent": not_equivalent_table(contrasts),
         "table-1-r80": r80_table(contrasts),
@@ -184,6 +352,15 @@ def render(contrasts: dict[str, dict[str, object]]) -> dict[str, list[str]]:
         "table-4-field": field_table(contrasts),
         "table-a1-compiler": compiler_table(contrasts),
     }
+    if descriptive is not None:
+        blocks |= {
+            "table-1b-range-descriptive": range_descriptive_table(descriptive),
+            "table-2-gamma-pencil": gamma_pencil_table(descriptive),
+            "table-5-gamma-field": gamma_field_table(descriptive),
+        }
+    if fractions is not None:
+        blocks["halo-bound"] = halo_bound_table(contrasts, fractions)
+    return blocks
 
 
 def splice(report: str, blocks: dict[str, list[str]]) -> str:
@@ -202,13 +379,14 @@ def splice(report: str, blocks: dict[str, list[str]]) -> str:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     ap.add_argument("--json", type=Path, default=ANALYSIS_JSON, help="the analysis document")
+    ap.add_argument("--descriptive-json", type=Path, default=DESCRIPTIVE_JSON, help="the descriptive document")
     ap.add_argument("--report", type=Path, default=REPORT)
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--write", action="store_true", help="splice the blocks into the report")
     mode.add_argument("--check", action="store_true", help="exit 1 if the report differs from the rendered blocks")
     args = ap.parse_args(argv)
     try:
-        blocks = render(load(args.json))
+        blocks = render(load(args.json), load_descriptive(args.descriptive_json), load_fractions(FRACTIONS_JSON))
         if not (args.write or args.check):
             for name, lines in blocks.items():
                 print(f"## {name}\n\n" + "\n".join(lines) + "\n")
