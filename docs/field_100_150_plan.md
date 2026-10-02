@@ -1,6 +1,6 @@
 # Same-host comparison, part E: field edge at 100 and 150 MeV (PLAN)
 
-**Status: DRAFT for review. Nothing here has run.** sjswerdloff authorised the work on 2026-10-02 ("We aren't
+**Status: DRAFT until the freeze recorded under "Chronology". Nothing here has run.** sjswerdloff authorised the work on 2026-10-02 ("We aren't
 really using the intel pcs for anything else right now, so go ahead"; "yes, go ahead with all of the work on the
 intel pcs. just make sure we don't run out of disk space on those pcs (that's what the SMBWritable space is
 for)"). The run lists, seeds, histories, endpoints, margins and analysis are frozen at the acquisition commit,
@@ -168,9 +168,10 @@ a dose effect. Fixed now, for a maximum row that is inconclusive or not equivale
 - the report gives, beside it, the R80 difference of the same contrast and, as a descriptive quantity only, the
   ratio (with its 95% interval) of the mean of the three central-axis rows centred on each run's maximum row,
   which depends less on how the peak divides between rows;
-- no cause is attributed. If the three-row ratio lies within [0.995, 1.005] while the maximum does not, the
-  report says the row is compatible with a shift of the peak against the 2 mm rows and with a difference in peak
-  dose, and that these runs do not distinguish them. The row stays not established or not equivalent.
+- no cause is attributed. If the 95% interval of the three-row ratio lies within [0.995, 1.005] while the maximum
+  is inconclusive or not equivalent, the report says the row is compatible with a shift of the peak against the
+  2 mm rows and with a difference in peak dose, and that these runs do not distinguish them. The row stays as it
+  is.
 
 ## Seeds
 
@@ -190,7 +191,9 @@ the programme before anything runs:
 1. **One workflow per host**, as parts A and B. The workflow file is the run request. One job per arm and energy,
    8 runs each: 4 jobs on the Lenovo, 6 on the HP.
 2. **Smoke first** (1e5 histories, the smoke seeds), to show that each job completes on its host. Only completion
-   and the transport checks are looked at.
+   and the transport checks are looked at: the smoke trees are put through the analysis's verification
+   (`field_followup_analyse.py --mode smoke --status`), which reads no dose value and refuses to compute an
+   endpoint in that mode.
 3. **Each run** gets a new directory, writes `run.json` (seed, requested and simulated histories, threads, energy,
    binary sha256, commit, host, times, transport status) and the sha256 of its two dose files, and refuses on any
    count, config or hash failure. **No endpoint is computed on the run hosts.**
@@ -203,15 +206,21 @@ the programme before anything runs:
 
 ## Analysis inputs and what is verified
 
-`validation/field_followup_analyse.py` reads the two extracted trees. For every run of the frozen lists it checks,
-and refuses or marks the contrast PARTIAL otherwise:
+`validation/field_followup_analyse.py` reads the two extracted trees. It refuses if an arm's directory is absent,
+so one host's endpoints are never read without the other's. For every run of the frozen lists it checks, and marks
+the contrast PARTIAL otherwise:
 
-- the run lists themselves, read from the workflow files at the acquisition commit;
-- `run.json` against the frozen seed, energy, threads, histories, commit and the binary hash above, and against
-  the config and the log's simulated count;
-- the plan and CT against what `field_edge_make_cases.py` writes at the acquisition commit, and the materials,
-  scanner and beam-model files against the committed ones;
-- each dose file against the sha256 written beside it on the run host.
+- the run lists themselves: `validation/field_followup_runs.py` (which the workflows take their seeds, histories,
+  threads and binaries from) and `field_edge_make_cases.py`, as the analysis imports them, must be the files of
+  the acquisition commit, and so must the copies each run job snapshotted;
+- `run.json` against the frozen seed, energy, threads, histories, host, mode, commit and the binary hash above;
+  `cfg.txt` line for line; the log's simulated count against `run.json`, and no unrecognised config tag;
+- the plan and CT against what `field_edge_make_cases.py` writes (text files compared after CRLF to LF: the Lenovo
+  writes CRLF), and every materials, scanner and beam-model file against the committed blob, with no file added
+  or missing;
+- `Dose.raw` and `Dose.mhd` against the sha256 written beside them on the run host, `Dose.mhd` against the grid
+  the analysis assumes when it reads `Dose.raw` (150 voxels of 2 mm per side, 32-bit little-endian), and the size
+  of `Dose.raw`. The dose is hashed again when it is read, and the bytes analysed are the bytes hashed.
 
 **It then computes every endpoint itself, from those dose files.** No endpoint value written on a run host is
 used, which closes for this part the limit that #52 records for parts A and B.
@@ -226,3 +235,10 @@ An estimate; each job's first run shows the real rate.
 
 Recorded here as they happen, not tidied: the acquisition commit, the smoke and full run identifiers, any change
 made after the freeze and why, and the commit of the analysis that produced the reported numbers.
+
+- 2026-10-02 16:41 NZDT: sjswerdloff merged #55 (this plan as a draft, the run lists, the parameterised endpoints
+  and the two run workflows at `MODE: smoke`) at `e54369b484526f86ed828a338039e8a3dfa6a636`. Nothing had run.
+- 2026-10-02: the analysis script and its tests, written before any run of this part exists. In the same change,
+  two clarifications of this plan, both before the freeze: the "Analysis inputs" section states what the script
+  verifies (the run lists come from `field_followup_runs.py`, not from the workflow text), and the reading of a
+  maximum that falls short refers to the 95% interval of the three-row ratio, where the draft said "the ratio".
