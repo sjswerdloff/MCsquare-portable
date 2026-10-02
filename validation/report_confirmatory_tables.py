@@ -310,10 +310,13 @@ def percent(x: float, decimals: int) -> str:
 
 def halo_bound_table(contrasts: dict[str, dict[str, object]], fractions: dict[str, float]) -> list[str]:
     """For each annulus endpoint not equivalent in some contrast: the share of the slab's energy it holds, the largest
-    departure from 1 that any of the three 95% intervals still allows, and their product (the largest difference in
-    the slab's energy that the data still allow). An all-zero annulus has no interval and is stated as such."""
+    departure from 1 inside any of the three 95% intervals, and their product.
+
+    The product is a plug-in illustration of scale, not a bound on dose: the fractions are normalised (they do not
+    constrain the slab's absolute energy), the share's own uncertainty is not propagated, and an all-zero annulus has
+    no interval (stated as such)."""
     out = [
-        "| endpoint | share of the slab's energy (upstream mean) | largest \|ratio − 1\| within the three 95% intervals | product |",
+        "| endpoint | share of the slab's energy (upstream mean) | largest \|ratio − 1\| within the three 95% intervals | product (illustrative) |",
         "|---|---|---|---|",
     ]
     order = list(next(iter(contrasts.values()))["rows"])

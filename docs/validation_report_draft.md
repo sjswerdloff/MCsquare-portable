@@ -28,7 +28,8 @@ MeV. The interpolated cumulative distribution goes negative or non-monotone, and
 (Linux icc and a Windows icl build), the read past the end lands on zero padding, so index 13 samples isotropically
 over 0–90°. That is not established for upstream executables in general (UR §4).
 
-Measured on the corrected code's own sampling convention (proton secondaries, 1e5 primaries): as-is, the cumulative
+Measured in an instrumented scratch build of Portable MCsquare, on the corrected code's sampling convention
+(proton secondaries only, 1e5 primaries), not by instrumenting an upstream executable: as-is, the cumulative
 is negative in 79% of samplings and non-monotone in 89%; the index reaches 13 in 27%; and 52% of samples fall in the
 0–5° bin. With the fix, the first three are 0, and the sampled bins match the table to about 0.01 per bin (#16).
 
@@ -95,13 +96,16 @@ hardware.
 
 ### 3.4 Scoring and comparison metrics
 
-- **Depth dose:** integrated depth dose (IDD) over the whole scored plane; R90, R80 and R20 by linear interpolation
-  at the first distal crossing; distal fall-off (R80–R20).
-- **Off-axis:** lateral profiles in x and y through the central axis at stated depths; for the pencil beam, σ from a
-  voxel-integrated Gaussian fit over |x| ≤ 10 mm and the fraction of energy in annuli 5–10, 10–20, 20–40, 40–80 and
-  80–200 mm from the axis. Depths per energy: 40 and 60 mm at 100 MeV, 80 and 125 mm at 150 MeV, 100 and 200 mm at
-  200 MeV (AP). For the broad field: the dose at 5, 10, 20 and 30 mm outside the field edge, in % of central-axis dose,
-  at mid-range depth.
+- **Depth dose.** *Pencil beam:* integrated depth dose (IDD) over the whole scored plane; R80 by linear
+  interpolation at the first distal crossing (R90 and R20 the same way, descriptive); distal fall-off R20 − R80.
+  *Broad field:* the depth dose is the mean over the central 20 × 20 mm patch, not a whole-plane integral; R80 and
+  R20 are taken on that curve by the same crossing rule.
+- **Off-axis.** *Pencil beam:* σ from a voxel-integrated Gaussian fit over |x| ≤ 10 mm, and the fraction of the
+  slab's energy in annuli 5–10, 10–20, 20–40, 40–80 and 80–200 mm from the axis. Depths per energy: 40 and 60 mm at
+  100 MeV, 80 and 125 mm at 150 MeV, 100 and 200 mm at 200 MeV (AP). *Broad field:* the dose at 5, 10, 20 and 30 mm
+  outside the field edge, in % of the central dose of the same profile, at 127 mm and at 201 mm depth. The profile
+  is the mean of the four sides of the field over a few depth rows around the stated depth, not a single line
+  through the axis (`validation/platform_study_metrics.py`).
 - **Gamma analysis:** 3D gamma between arms on the mean dose of each arm:
   - 2%/2 mm and 1%/1 mm, global (normalised to the maximum dose), 10% low-dose threshold, as in the literature;
   - in addition, a **low-dose gamma** (global, about 1% threshold, or local) on the broad-field planes, because the
@@ -141,7 +145,7 @@ missing.
   PowerShell wrote as UTF-16; it refused all of part A and wrote nothing. It was corrected at `bad1419` before any
   collection succeeded, so, as far as connor-227743e6 knows, before any full-run endpoint was read. After the results
   were read, a second review found two checks missing from the analysis (a contrast whose two arms carry one binary;
-  a run that is not usable); they are added in #53 (not yet merged) and change no result (AP, chronology).
+  a run that is not usable); they were added in #53 (merged as `d80871ff`) and change no result (AP, chronology).
 - **Independent checks** (silas-397300f6; #48 comments 28187 and 28192). All 208 endpoint rows (4 contrasts × 52)
   were recomputed from the plan text with separate code. All 208 agree with the analysis document on outcome, and the
   200 that have estimates agree to a relative difference of at most 3.6e-10. The endpoint scripts of each arm's
@@ -220,24 +224,24 @@ How these are to be read:
   arms** (margin / SE = t(0.95) + t(0.90): at a true difference of zero both one-sided tests must reject); adding histories to one arm alone reduces the standard error by at most a factor of 1.4. The 80–200 mm
   annulus at 100 MeV would need far more, since no run scored any energy there. That is design information for a
   separate, pre-specified acquisition. These results are not to be rescued by adding runs to this one (AP).
-- **One row to watch.** Six of the 150 confirmatory 95% intervals exclude the null value, against 7.5 expected by
-  chance at that level. Four are in contrast A, all in the dose outside the field edge: 127 mm depth at 30 mm
-  (+0.025 points), and 201 mm depth at 10, 20 and 30 mm (+0.070, +0.031, −0.028). The others are the B1 row above
-  (1.035) and B2's 200 MeV, 200 mm, 10–20 mm annulus (0.9988). The 150 intervals are not independent: endpoints of
-  one run share its noise, and B1 and B2 share the B-up runs. So the count varies more than a binomial count would,
-  and four lateral rows in one contrast are weaker evidence than four independent rows. Five of the six, including
-  those four, are equivalent. The sixth is the B1 row. Portable
-  built with gcc is also above Portable built with icc on the same host at this endpoint (Appendix A), and A (gcc
-  against icl) points the same way without excluding 1. At the other 100 MeV depth the same annulus points the other
-  way in all three contrasts. This is recorded as an observation, not as a compiler effect. A follow-up acquisition
-  should name it in advance.
+- **Intervals that exclude the null value.** Six of the 150 confirmatory 95% intervals exclude it. If every true
+  difference were zero, 7.5 would be expected; that is a benchmark for calibrated intervals, not a test that there
+  are no effects, and the intervals are not independent (endpoints of one run share its noise, and B1 and B2 share
+  the B-up runs). Four of the six are in contrast A, all in the dose outside the field edge: 127 mm depth at 30 mm
+  (+0.025 points), and 201 mm depth at 10, 20 and 30 mm (+0.070, +0.031, −0.028). One is B2's 200 MeV, 200 mm,
+  10–20 mm annulus (0.9988). Those five are small differences that lie well inside their margins, so they are
+  equivalent. The sixth is the B1 row above (1.035), which is inconclusive. Portable built with gcc is also above
+  Portable built with icc on the same host at that endpoint (Appendix A), and A (gcc against icl) points the same
+  way without excluding 1; at the other 100 MeV depth the same annulus points the other way in all three contrasts.
+  That is pointwise evidence of a non-zero difference at one endpoint. It does not establish non-equivalence, and
+  it does not isolate a compiler effect. A follow-up acquisition should name it in advance.
 
-**How much the unresolved endpoints could matter.** The table gives, for each annulus endpoint that is not
-equivalent, the share of the energy deposited at that depth that the annulus holds, the largest departure from 1
-that any of the three 95% intervals still allows, and their product. This is descriptive and was not pre-specified.
+**Annular energy budget of the unresolved endpoints (descriptive, post hoc).** For each annulus endpoint that is
+not equivalent, the table gives the share of the slab's energy that the annulus holds (the mean over the 16
+upstream runs), the largest departure from 1 inside any of the three 95% intervals, and their product.
 
 <!-- BEGIN GENERATED: halo-bound -->
-| endpoint | share of the slab's energy (upstream mean) | largest \|ratio − 1\| within the three 95% intervals | product |
+| endpoint | share of the slab's energy (upstream mean) | largest \|ratio − 1\| within the three 95% intervals | product (illustrative) |
 |---|---|---|---|
 | P100/ring_40_40_80 | 0.0337% | 6.7% | 0.0023% |
 | P100/ring_40_80_200 | no energy scored in any run | no interval | — |
@@ -247,12 +251,21 @@ that any of the three 95% intervals still allows, and their product. This is des
 | P150/ring_125_80_200 | 0.0040% | 12.5% | 0.0005% |
 <!-- END GENERATED: halo-bound -->
 
-The unresolved annuli hold between 0.004% and 0.034% of the energy at their depth, and the largest difference
-between the code lines that the data still allow is about 0.002% of that energy. In a uniform broad field the far
-halo of the surrounding spots contributes about the same share of the local dose, so the corresponding dose
-difference is of the order of 0.002% of local dose, roughly 1 mGy in 60 Gy. That conversion is an estimate, not a
-measurement. The endpoints are inconclusive because the margins (2% and 5% of the annulus's own energy) are narrow
-against the noise in annuli that hold almost nothing, not because a difference of clinical size is left open.
+The unresolved annuli hold between 0.004% and 0.034% of the energy at their depth. The product is an illustration
+of scale, not a bound on dose, for these reasons:
+
+- The endpoints are normalised fractions. Two configurations can have equal fractions and different absolute
+  energy in the slab; nothing in this table constrains the slab total.
+- The share is itself an estimate, and its uncertainty is not carried into the product.
+- The two annuli that scored no energy have no interval and no upper limit here.
+- Turning an annular energy share into local dose needs a model of the field. For a uniform broad field in a
+  homogeneous medium, with a laterally invariant kernel, the far halo of the surrounding spots contributes about the
+  same share of the local dose, which would put the products at the order of 0.002% of local dose. That
+  approximation does not hold at a field edge, in heterogeneous anatomy or for an arbitrary plan.
+
+**The clinical impact of the unresolved endpoints is therefore not established by this comparison.** The direct
+test is the one made at 200 MeV: the broad-field case, whose out-of-field dose endpoints were all equivalent
+(Table 4). It has not been run at 100 or 150 MeV.
 
 ### 5.1 Depth dose
 
@@ -324,7 +337,10 @@ against altered copies of itself. With a 3 mm shift in depth, the pass rate at 2
 integrated depth dose but only to 95–97% in 3D. With a uniform 3% increase in dose, the 3D pass rate stays at 100%
 at both criteria. For a single pencil beam, most voxels above the 10% cutoff lie on steep lateral gradients, where
 the distance criterion absorbs a dose difference. Gamma at these criteria is therefore a weak test here; it is
-reported for comparison with the literature, and the endpoint tables above are the evidence.
+reported for comparison with the literature, and the endpoint tables above are the evidence. The 10% cutoff also
+restricts the analysis to the core of the beam: the far-halo annuli, whose equivalence is unresolved (§5.0), are
+outside it. The gamma compares the raw arm means, normalised to the maximum of the upstream mean; the arms are not
+rescaled to each other.
 
 ### 5.2 Off-axis dose
 
@@ -406,12 +422,18 @@ points of central-axis dose. Central-axis dose agrees within 0.10% (95% interval
 | B2 | 99.9987 (n = 771760); control 99.9926 (n = 771311) | 99.9037 (n = 771760); control 99.0993 (n = 771311) | 99.9990 (n = 1012384); control 99.9944 (n = 1011189) | 99.7514 (n = 1012384); control 98.7198 (n = 1011189) |
 <!-- END GENERATED: table-5-gamma-field -->
 
-For the broad field, at least 99.90% of points pass at 1%/1 mm with the 10% cutoff, and at least 99.74% pass the
-strictest analysis (2%/2 mm local with a 1% cutoff, which includes the region outside the field edge). In every cell
-the contrast between code lines passes at a higher rate than the noise control within the upstream arm (99.10–99.12%
-and 98.72–98.75% for those two analyses). The control compares means of four runs, which are noisier than the means
-of eight used for the contrasts, so the control is expected to be lower. The failures are at the level of statistical
-noise and show no pattern in Fig 4. The standard and the low-dose analyses tell the same story.
+For the broad field, at least 99.90% of the evaluated points pass at 1%/1 mm with the 10% cutoff, and at least
+99.74% pass the strictest analysis (2%/2 mm local with a 1% cutoff). In every cell the pass rate between code lines
+is higher than the pass rate of the control within the upstream arm (99.10–99.12% and 98.72–98.75% for those two
+analyses). The control compares means of four runs, which are noisier than the means of eight used for the
+contrasts, so this is a descriptive comparison only: it does not show that the remaining failures are statistical
+noise, which would need a noise-matched analysis.
+
+**What the gamma analyses cover.** The cutoff is a percentage of the maximum of the upstream mean dose (at the
+Bragg peak), for the local analysis as well as the global ones. With the 10% cutoff the evaluated region on the
+127 mm plane is the field up to about its edge. With the 1% cutoff it reaches roughly 15 mm outside the edge
+(Fig 4). The endpoints at 20 and 30 mm outside the edge are not covered by any gamma analysis here; Table 4 is the
+evidence for them.
 
 **Compiler (descriptive).** Portable built with gcc against Portable built with icc on the HP has no margin and
 makes no claim (AP). Its 52 rows are in Appendix A. Fifty have estimates. Two 95% intervals exclude the null value:
@@ -451,34 +473,38 @@ Portable's range is about 0.5 mm shorter than TOPAS's at 200 MeV, and about 0.43
 close to rigid: peak −0.46, R90 −0.46, R80 −0.51, R50 −0.56, R20 −0.57 mm (#32). The water stopping power used by
 MCsquare matches Geant4's option 0 table to within 0.006% over 50–400 MeV, and the integrated ranges agree within
 about 0.01 mm (TD stage 0), so the gap is **not yet explained**. It persists with nuclear interactions off in both
-codes (−0.56 mm; #32). Annuli far from the axis carry 10–20% less energy in Portable at 200 mm depth.
+codes (−0.56 mm; #32). In the annuli far from the axis, Portable's normalised energy fractions are 10–20% lower
+than TOPAS's at 200 mm depth; these are fractions of each code's own slab energy, not absolute deposited energy.
 
 At 200 MeV, upstream with the fix and Portable are equivalent in every annulus, including the two outer ones
-(Table 3). So the far-halo deficit against TOPAS was not introduced by the port; by inference it is common to both
-MCsquare code lines. Its cause is not established. The TOPAS ratios above are point estimates from 4 runs per code,
-without intervals, at 200 MeV only.
+(Table 3). So, by inference from two separate comparisons, the lower far-halo fractions against TOPAS are common
+to both MCsquare code lines and were not introduced by the port. That inference says nothing about the cause:
+physics models, scoring, estimators, and geometry or source conditions all remain possible. The TOPAS ratios above
+are point estimates from 4 runs per code, without intervals, at 200 MeV only.
 
 ## 6. Discussion
 
 1. **Agreement between the code lines.** On the same host, and with the same fix in both, upstream OpenMCsquare and
    Portable MCsquare agree within the pre-stated margins on range, spot size, the core and near halo of the pencil
    beam at all three energies, the far halo at 200 MeV, and every broad-field endpoint. In the far halo at 100 and
-   150 MeV the comparison is inconclusive or not established: there is no evidence of a difference, and not enough
-   precision to show equivalence. The joint claim over all 52 endpoints is therefore not established (§5.0). The
-   picture is the same in all three contrasts (icl against MSYS2 gcc on Windows; icc against gcc, and icc against icc,
-   on Linux), and the descriptive comparison of the two Portable builds shows no compiler effect.
+   150 MeV the comparison is inconclusive or not established: the precision is not enough to show equivalence, and
+   one pointwise interval there excludes 1 (§5.0). The joint claim over all 52 endpoints is therefore not
+   established. The pattern of outcomes is the same in all three contrasts (icl against MSYS2 gcc on Windows; icc
+   against gcc, and icc against icc, on Linux). No isolated compiler effect is established; the descriptive
+   comparison of the two Portable builds has two pointwise intervals that exclude the null value (§5.2).
 2. **The upstream defect in clinical terms.** As distributed, upstream computes 13–18% less dose than the corrected
    code between 5 and 30 mm outside the edge of the 200 MeV field (§2), up to 0.95 percentage points of central-axis
-   dose. For a field that delivers 60 Gy on the axis, that is about 0.6 Gy at 5 mm outside the edge, in the region
-   where organs at risk sit. With the fix in both code lines, the two differ there by at most 0.12 points at the 95%
+   dose. As an illustration, for a field that delivers 60 Gy on the axis that is about 0.6 Gy at 5 mm outside the
+   edge, in the region where organs at risk sit; it is a difference between computed doses under that assumption, not
+   an observed patient dose. With the fix in both code lines, the two differ there by at most 0.12 points at the 95%
    level (Table 4), about 0.07 Gy on the same scale. The defect is roughly ten times larger than any difference
    between the corrected code lines. Whether the corrected dose is closer to physical dose has not been shown (§5.4).
 3. **Portability.** Portable MCsquare gives equivalent results on Linux, Windows and macOS (§5.3) and, with free
    compilers, matches the Intel-built upstream within the margins above. Treatment-planning research with MCsquare
    need not depend on Intel compilers.
-4. **The TOPAS differences.** The 0.5 mm range offset and the far-halo deficit (§5.4) are open. Both belong to
-   MCsquare's physics models as shared by the two code lines, not to the port. The next stage is a pre-specified
-   comparison with intervals at 100, 150 and 200 MeV; it has not been designed yet.
+4. **The TOPAS differences.** The 0.5 mm range offset and the lower far-halo fractions (§5.4) are open. By
+   inference they are common to the two code lines and not introduced by the port; their cause is not established.
+   A pre-specified comparison with intervals at 100, 150 and 200 MeV is drafted (#54) and not authorised.
 5. **Speed.** Run time per 1e7 histories by arm and host is in the run records and will be tabulated as resource
    information, not as a performance claim.
 
@@ -488,7 +514,8 @@ without intervals, at 200 MeV only.
    uniform 3% dose difference in 3D (§5.1). The pencil-beam comparison rests on the endpoint tables. All gamma
    values compare means of Monte Carlo runs, so they include statistical noise in both distributions.
 2. **The joint equivalence claim is not established** in any contrast, because the far halo at 100 and 150 MeV lacks
-   precision at 1e7 histories per run (§5.0).
+   precision at 1e7 histories per run (§5.0). The clinical impact of those unresolved endpoints is not established;
+   the broad-field case has not been run at 100 or 150 MeV.
 3. **Homogeneous phantoms only.** Neither case has a density interface. Differences in lateral scattering and in the
    nuclear halo matter most clinically behind low-density tissue and at bone–air interfaces, and none of that is
    tested here. Planned as future work: a lung-density slab; a sinus-like cavity of air in bone; and the same cavity

@@ -119,7 +119,7 @@ uses ran at `bad1419b`.
 **After the results were read:** #53 (second review, #48 comment 28187; #51, #52): a contrast whose two arms carry
 one binary, and a contrast with a collected run that is not usable, become PARTIAL; the output states that case-P
 endpoint values are taken as written. On this collection the analysis document is unchanged apart from that added
-statement. Its merge commit is to be recorded here.
+statement. Merged as `d80871ff5b6246fea079f86bd3e8a1610b076d0c`.
 
 ## Sizing (from planning variance, separate from timing)
 
@@ -193,10 +193,13 @@ the joint claim is not established in any (report §5.0). Nothing below changes 
   margin / SE = t(0.95) + t(0.90), since at a true difference of zero both one-sided tests must reject (#45 review
   7059). The Sizing rule above, (margin − |δ|) / SE ≥ about 2.6, is right when δ is near a margin and optimistic at
   δ = 0, where about 2.9 is needed. The 80–200 mm annulus at
-  100 MeV scored exactly zero in all 80 runs; a log-ratio endpoint is undefined there, so a follow-up needs either
+  100 MeV scored exactly zero in all 40 runs at both depths (80 values); a log-ratio endpoint is undefined there, so a follow-up needs either
   far more histories or a different, pre-stated estimator for that annulus.
 - **B-pgcc at 100 MeV, 40 mm, 40–80 mm** (1.035 against B-up, 95% [1.004, 1.067]) is to be named in advance in any
   follow-up.
+- **Clinical impact of the unresolved far-halo endpoints is not established** (#45 review 7080). The direct test
+  is the broad-field case at 100 and 150 MeV, with the out-of-field dose endpoints used at 200 MeV; that needs far
+  fewer histories than resolving the pencil-beam annuli.
 - **Heterogeneity** is untested: a lung-density slab, a sinus-like air cavity in bone, and the same cavity filled in
   steps are candidate cases.
 - **Before the next collection:** the collector should recompute the endpoints from the hash-verified Dose files
