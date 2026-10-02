@@ -146,6 +146,12 @@ PROVENANCE_DIR = ".provenance"  # apples_collect.py puts run_root.txt and the *_
 NOT_ESTABLISHED_DIR = ".not_established"  # apples_collect.py copies a failed run's diagnostics here, never as a run
 NE_OUTCOMES = ("failed", "absent")
 
+# What ties a case-P endpoint value to its Dose files: nothing in the collection (the case-F limit is in RecordSchema).
+P_ENDPOINTS_NOT_VERIFIABLE = (
+    "endpoint values: endpoints.json is written on the run host from the Dose files; the collector verifies the Dose "
+    "files against out/sha256.txt and the shape of endpoints.json, and no hash ties the values to the Dose files, so "
+    "they are taken as written",
+)
 IDENTITY_SOURCE = (
     "Run identity comes from the frozen workflow run lists at the acquisition commit and is validated against "
     "run.json and the endpoint record (arm, case, seed, mode, commit, requested/simulated, threads, energy, binary "
@@ -631,8 +637,8 @@ def _reconcile_f(
 def load_run(
     arm: str, case: str, run_dir: Path, seed: int, energy: int, commit: str, ledger: Ledger
 ) -> Run:
-    """Load one accepted seed directory. A damaged or unprovenanced run stays in the population as unusable;
-    only a run.json that contradicts its own directory is fatal."""
+    """Load one accepted seed directory. A damaged or unprovenanced run stays in the population as unusable (and is a
+    population issue, so its contrasts are PARTIAL); only a run.json that contradicts its own directory is fatal."""
     label = f"{arm}/{case}/s{seed}"
     problems: list[str] = []
     provenance: list[str] = []
@@ -689,7 +695,7 @@ def load_arm_case(
     listed: dict[int, dict[str, object]] | None = None, *, attested: bool = False,
 ) -> tuple[list[Run], list[str]]:
     """Accepted runs of one arm and case, and the population issues (missing, rejected, not established, provenance
-    failures).
+    failures, runs that are not usable).
 
     Only `s<seed>` directories whose seed is expected for this arm and case, written exactly as the workflow writes it
     and not repeated by numeric identity, are opened. Everything else that looks like a seed directory is rejected
@@ -748,6 +754,9 @@ def load_arm_case(
     for r in runs:
         if r.provenance:
             issues.append(f"{r.label}: provenance failure: " + "; ".join(r.provenance))
+        other = [p for p in r.problems if p not in r.provenance]
+        if other:
+            issues.append(f"{r.label}: run not usable: " + "; ".join(other))
     return runs, issues
 
 
@@ -766,6 +775,16 @@ def check_arm_binary(data: dict[tuple[str, str], list[Run]], issues: dict[tuple[
                     r.problems.append(note)
                     r.usable = False
                 issues[(arm, c)].append(f"{arm} {c}: {note}")
+
+
+def shared_binary_reasons(data: dict[tuple[str, str], list[Run]], arm: str, ref: str) -> list[str]:
+    """A contrast compares two builds. An arm and a reference that carry one binary_sha256 compare a binary with
+    itself, so the contrast says nothing about the two configurations."""
+
+    def hashes(name: str) -> set[str]:
+        return {r.binary for c in CASES for r in data.get((name, c), []) if r.binary is not None}
+
+    return [f"{arm} and {ref} carry the same binary_sha256 ({h})" for h in sorted(hashes(arm) & hashes(ref))]
 
 
 def load_root(
@@ -1034,10 +1053,11 @@ def analyse_contrast(
     issues: dict[tuple[str, str], list[str]],
     collection: list[str] | None = None,
 ) -> dict[str, object]:
-    """One contrast. A confirmatory contrast whose population is not exactly the frozen one, or whose collection is not
-    verified (`collection`: reasons that apply to every contrast, e.g. no collection manifest), is PARTIAL: it is
-    analysed descriptively (estimates and intervals, nothing classified) and emits no joint claim and no Holm decision."""
-    partial = [*(collection or []), *partial_reasons(issues, (arm, ref))]
+    """One contrast. A confirmatory contrast whose population is not exactly the frozen one, whose arm and reference
+    carry the same binary, or whose collection is not verified (`collection`: reasons that apply to every contrast,
+    e.g. no collection manifest), is PARTIAL: it is analysed descriptively (estimates and intervals, nothing
+    classified) and emits no joint claim and no Holm decision."""
+    partial = [*(collection or []), *partial_reasons(issues, (arm, ref)), *shared_binary_reasons(data, arm, ref)]
     withheld = confirmatory and bool(partial)
     descriptive = not confirmatory or withheld
     results = [evaluate(s, data[(arm, s.case)], data[(ref, s.case)], descriptive=descriptive) for s in specs]
@@ -1208,6 +1228,7 @@ def run_analysis(
         md.append(f"Case-F record schema: {binding.schema.name} (binding {binding.name}). Verified: "
                   + "; ".join(binding.schema.verified) + "."
                   + (" Not verifiable: " + "; ".join(binding.schema.not_verifiable) + "." if binding.schema.not_verifiable else ""))
+    md.append("Case-P endpoints. Not verifiable: " + "; ".join(P_ENDPOINTS_NOT_VERIFIABLE) + ".")
     md.append("")
     doc: dict[str, object] = {"parts": list(parts), "alpha": ALPHA, "family_size": FAMILY_SIZE,
                            "identity_source": IDENTITY_SOURCE, "runs_per_cell": RUNS_PER_CELL,
@@ -1218,6 +1239,7 @@ def run_analysis(
                                "name": binding.name, "commit": binding.commit, "study": binding.study,
                                "schema": binding.schema.name, "verified": list(binding.schema.verified),
                                "not_verifiable": list(binding.schema.not_verifiable)},
+                           "p_endpoints_not_verifiable": list(P_ENDPOINTS_NOT_VERIFIABLE),
                            "contrasts": []}
     md.append("Runs per arm and case (unusable runs stay in the population):")
     md.append("")
