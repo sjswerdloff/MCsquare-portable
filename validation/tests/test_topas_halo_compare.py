@@ -92,6 +92,7 @@ def test_difference_row_hand_checked() -> None:
     assert row["df"] == pytest.approx(2.0)
     assert row["ci95"] == pytest.approx([1 - 4.302653 * math.sqrt(1 / 3), 1 + 4.302653 * math.sqrt(1 / 3)], abs=1e-5)
     assert row["ci90"] == pytest.approx([1 - 2.919986 * math.sqrt(1 / 3), 1 + 2.919986 * math.sqrt(1 / 3)], abs=1e-5)
+    assert row["uncertainty"] == "welch"  # zero sample variance in ONE code is an ordinary Welch row
 
 
 def test_difference_is_mcsquare_minus_topas() -> None:
@@ -121,6 +122,39 @@ def test_a_zero_run_in_either_code_gives_counts_and_means_and_no_ratio(mc: list[
     assert "estimate" not in row and "ci95" not in row
     assert row["mcsquare"] == {"n_nonzero": sum(v > 0 for v in mc), "n": 2, "mean_fraction": st.mean(mc)}
     assert row["topas"] == {"n_nonzero": sum(v > 0 for v in tp), "n": 2, "mean_fraction": st.mean(tp)}
+
+
+def test_constant_values_in_both_codes_give_the_difference_and_no_interval() -> None:
+    """Amendment 2 (#54 review 7114): zero sample variance in both codes is not zero variance."""
+    row = thc.difference_row([1.0] * 8, [1.5] * 8)
+    assert row == {"status": "difference", "estimate": -0.5, "n_mcsquare": 8, "n_topas": 8,
+                   "uncertainty": "not estimated: zero sample variance in both codes"}
+
+
+def test_constant_positive_values_in_both_codes_give_the_ratio_and_no_interval() -> None:
+    row = thc.ring_row([0.02] * 8, [0.01] * 8)
+    assert row["estimate"] == pytest.approx(2.0)
+    assert {k: v for k, v in row.items() if k != "estimate"} == {
+        "status": "ratio", "n_mcsquare": 8, "n_topas": 8, "uncertainty": "not estimated: zero sample variance in both codes"}
+
+
+def test_the_ordinary_and_the_zero_run_rows_are_unchanged_beside_the_constant_ones() -> None:
+    ordinary = thc.ring_row([0.02, 0.021] * 4, [0.01] * 8)  # variable in one code: Welch, with intervals
+    assert ordinary["uncertainty"] == "welch" and ordinary["ci90"][0] < ordinary["estimate"] < ordinary["ci90"][1]
+    assert ordinary["ci95"][0] < ordinary["ci90"][0] and ordinary["se_log"] > 0 and ordinary["df"] == pytest.approx(7.0)
+    zero = thc.ring_row([0.0] * 8, [0.0] * 8)  # constant AND zero: the zero-run rule, not a ratio
+    assert zero["status"] == "no ratio (zero runs)" and "uncertainty" not in zero and "estimate" not in zero
+
+
+def test_a_row_without_an_interval_says_so_in_the_table() -> None:
+    rows = [thc._row(100, "A-port", "R80", thc.difference_row([1.0] * 8, [1.5] * 8), None),
+            thc._row(100, "A-port", "ring_40_5_10", thc.ring_row([0.02] * 8, [0.01] * 8), None),
+            thc._row(100, "A-port", "sigma_40", thc.difference_row([1.0, 2.0, 3.0], [1.0, 1.0, 1.0]), None)]
+    md = thc.markdown({"label": "label", "rows": rows})
+    assert "| R80 (difference) | A-port | -0.5000 | not estimated: zero sample variance in both codes | not estimated |  |" in md
+    assert "| ring_40_5_10 (ratio) | A-port | 2.000 | not estimated: zero sample variance in both codes | not estimated |  |" in md
+    assert sum("[" in line for line in md if line.startswith(("| R80", "| ring_"))) == 0
+    assert next(line for line in md if line.startswith("| sigma_40")).count("[") == 2
 
 
 def test_an_invalid_run_keeps_the_endpoint_visible_as_not_computed() -> None:
@@ -424,6 +458,15 @@ def test_a_run_txt_that_is_not_the_frozen_configuration_refuses_though_correctly
     assert msg.count("run.txt is not what make_run.sh writes for this directory") == 1
     if line is not None:
         assert f"for this directory: line {line} is " in msg
+
+
+def test_a_header_whose_recorded_byte_count_is_not_its_size_refuses(topas: Path) -> None:
+    run = run_dir(topas, 100, 912001)
+    n = (run / "dose.binheader").stat().st_size
+    edit(run / "provenance.txt", f"dose.binheader bytes: {n} sha256:", f"dose.binheader bytes: {n + 1} sha256:")
+    msg = refusal(topas)
+    assert f"dose.binheader is {n} bytes, provenance.txt records {n + 1}" in msg
+    assert "no dose file was opened" in msg
 
 
 def test_a_header_changed_after_the_run_refuses(topas: Path) -> None:

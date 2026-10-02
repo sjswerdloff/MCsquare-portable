@@ -67,6 +67,7 @@ TOPAS_EM = "opt0"
 PORTABLE_ARMS = ("A-port", "B-pgcc", "B-picc")
 PARTS = ("A", "B")
 LEVELS = (0.90, 0.95)
+NO_INTERVAL = "not estimated: zero sample variance in both codes"
 BASE = Path(__file__).resolve().parent / "topas" / "stage1_base.txt"
 RUNNER = Path(__file__).resolve().parent / "topas" / "run_topas.sh"
 TOPAS_VERSION = "4.3"  # as OpenTOPAS 4.3.0 states it in the header of every output
@@ -274,6 +275,8 @@ def _input_problems(run: TopasRun, want: Frozen) -> list[str]:
     head = _DOSE_LINE.match(run.provenance.get("dose.binheader bytes", ""))
     if head is None:
         bad.append("provenance.txt has no well-formed 'dose.binheader bytes: N sha256: H' line")
+    elif int(head[1]) != (run.path / "dose.binheader").stat().st_size:
+        bad.append(f"dose.binheader is {(run.path / 'dose.binheader').stat().st_size} bytes, provenance.txt records {head[1]}")
     elif sha256_file(run.path / "dose.binheader") != head[2]:
         bad.append("dose.binheader is not the file recorded in provenance.txt")
     bad += header_problems(run.path / "dose.binheader", want.header)
@@ -337,7 +340,7 @@ def topas_record(run: TopasRun) -> dict[str, object]:
     dose = run.path / "dose.bin"
     for name in ("dose.binheader", "dose.bin"):
         m = _DOSE_LINE.match(run.provenance.get(f"{name} bytes", ""))
-        if m is None or sha256_file(run.path / name) != m[2]:
+        if m is None or int(m[1]) != (run.path / name).stat().st_size or sha256_file(run.path / name) != m[2]:
             msg = f"{run.path.name}: {name} is not the file recorded in provenance.txt"
             raise InputError(msg)
     bad = header_problems(run.path / "dose.binheader", expected_header(BASE))
@@ -428,17 +431,27 @@ def _invalid(mc: list[float | None], tp: list[float | None]) -> dict[str, object
     return None
 
 
+def _with_uncertainty(row: dict[str, object], d: float, se: float, df: float, se_key: str, *, log: bool) -> dict[str, object]:
+    """Add the standard error, degrees of freedom and pointwise Welch intervals to a row.
+
+    When the sample variance is zero in BOTH codes the estimate is kept and nothing else is given: zero sample
+    variance in a finite set of Monte Carlo runs is not zero variance, so a zero-width interval would claim a
+    precision that was not estimated (amendment 2)."""
+    if se == 0.0:
+        return {**row, "uncertainty": NO_INTERVAL}
+    row = {**row, se_key: se, "df": df, "uncertainty": "welch"}
+    for level in LEVELS:
+        row[f"ci{round(level * 100)}"] = [math.exp(x) if log else x for x in aa.interval(d, se, df, level)]
+    return row
+
+
 def difference_row(mc: list[float | None], tp: list[float | None]) -> dict[str, object]:
     """MCsquare - TOPAS difference of run-level means with pointwise Welch intervals."""
     bad = _invalid(mc, tp)
     if bad is not None:
         return bad
     d, se, df = aa.welch([v for v in mc if v is not None], [v for v in tp if v is not None])
-    row: dict[str, object] = {"status": "difference", "estimate": d, "se": se, "df": None if math.isinf(df) else df,
-                              "n_mcsquare": len(mc), "n_topas": len(tp)}
-    for level in LEVELS:
-        row[f"ci{round(level * 100)}"] = list(aa.interval(d, se, df, level))
-    return row
+    return _with_uncertainty({"status": "difference", "estimate": d, "n_mcsquare": len(mc), "n_topas": len(tp)}, d, se, df, "se", log=False)
 
 
 def ring_row(mc: list[float | None], tp: list[float | None]) -> dict[str, object]:
@@ -452,11 +465,7 @@ def ring_row(mc: list[float | None], tp: list[float | None]) -> dict[str, object
                 "mcsquare": {"n_nonzero": sum(v > 0 for v in a), "n": len(a), "mean_fraction": st.mean(a)},
                 "topas": {"n_nonzero": sum(v > 0 for v in b), "n": len(b), "mean_fraction": st.mean(b)}}
     d, se, df = aa.welch([math.log(v) for v in a], [math.log(v) for v in b])
-    row: dict[str, object] = {"status": "ratio", "estimate": math.exp(d), "se_log": se,
-                              "df": None if math.isinf(df) else df, "n_mcsquare": len(a), "n_topas": len(b)}
-    for level in LEVELS:
-        row[f"ci{round(level * 100)}"] = [math.exp(x) for x in aa.interval(d, se, df, level)]
-    return row
+    return _with_uncertainty({"status": "ratio", "estimate": math.exp(d), "n_mcsquare": len(a), "n_topas": len(b)}, d, se, df, "se_log", log=True)
 
 
 def _row(energy: int, arm: str, endpoint: str, row: dict[str, object], band: tuple[float, float] | None) -> dict[str, object]:
@@ -503,8 +512,9 @@ def markdown(doc: dict[str, object]) -> list[str]:
             digits = 3 if str(r["endpoint"]).startswith("ring") else 4
             band = _pair(r["td_reference_band"], 2) if r["td_reference_band"] else ""
             if r["status"] in ("difference", "ratio"):
-                md.append(f"| {r['endpoint']} ({r['status']}) | {r['arm']} | {_num(r['estimate'], digits)} "
-                          f"| {_pair(r['ci90'], digits)} | {_pair(r['ci95'], digits)} | {band} |")
+                ci = (f"{_pair(r['ci90'], digits)} | {_pair(r['ci95'], digits)}" if r["uncertainty"] == "welch"
+                      else f"{r['uncertainty']} | not estimated")
+                md.append(f"| {r['endpoint']} ({r['status']}) | {r['arm']} | {_num(r['estimate'], digits)} | {ci} | {band} |")
             elif r["status"] == "not computed":
                 md.append(f"| {r['endpoint']} | {r['arm']} | not computed: {r['reason']} | | | {band} |")
             else:

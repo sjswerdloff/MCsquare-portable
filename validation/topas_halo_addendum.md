@@ -1,6 +1,6 @@
 # TOPAS halo comparison: addendum to the TOPAS design
 
-**Status: FROZEN at `5aedf3ac49d7a79567a7f413e95a244359600dd3` (2026-10-02); amended once before the analysis, see
+**Status: FROZEN at `5aedf3ac49d7a79567a7f413e95a244359600dd3` (2026-10-02); amended twice before the analysis, see
 "Amendments" at the end.** The 24 TOPAS runs listed here are authorised, from a `git archive` of the frozen commit;
 sjswerdloff confirmed the decisions under "Decisions" on 2026-10-02. The run list, seeds, endpoints and analysis
 script do not change from the frozen commit; a change needed before the analysis is run is made as a recorded
@@ -78,7 +78,8 @@ scorer:
 
 13 endpoints × 3 energies × 3 Portable arms = 117 rows. A row carries pointwise 90% and 95% Welch intervals, except
 a row under either of the two rules below (an annulus with a zero run; an invalid value): such a row has no ratio or
-difference and no interval. TD's
+difference and no interval. A row whose values have zero sample variance in both codes keeps its ratio or
+difference and carries no standard error and no interval (amendment 2). TD's
 reference bands are shown beside the 200 MeV rows only; they were set for 200 MeV and are not extended to the other
 energies.
 
@@ -124,7 +125,7 @@ reported as they come out, and no runs are added after the results are read.
   no run directory outside the list. Each run must conform to the design and not only agree with its own record
   (amendment 1): `run.txt` byte for byte what `make_run.sh` writes for the directory's name; `stage1_base.txt` and
   the runner identical to the frozen commit's; a well-formed sha256 of the TOPAS executable, the same in all runs;
-  no provenance key written twice; `dose.binheader` as hashed in the provenance and stating exactly the scorer,
+  no provenance key written twice; `dose.binheader` of the size and hash the provenance records and stating exactly the scorer,
   filter, component, grid, voxel widths, quantity and report that the base requests; `dose.bin` of the size that
   grid implies. An entry that looks like a run but is not named as `make_run.sh` names one is refused, not ignored.
   Otherwise the analysis refuses, and no dose file is opened.
@@ -185,3 +186,28 @@ fourteen runs not yet complete.
 the precision paragraph gives interval widths under a stated assumption and no longer says what the comparison
 "resolves"; "no comparison with TOPAS at 100 and 150 MeV" is limited to the halo, since a 100 MeV planning range
 value exists; the 200 MeV planning ratios are described as tabulated without intervals, not as incapable of them.
+
+### Amendment 2, 2026-10-02 19:10 NZDT, before any endpoint was read (alden-ec2221c7, #54 review 7114)
+
+**State of the data when it was made.** 18 of the 24 TOPAS runs had finished (all at 100 and 150 MeV and the first
+two at 200 MeV). No `dose.bin` of the set had been opened; the analysis had been run in `--status` mode only. The
+acquisition is untouched.
+
+**What amendment 1's analysis did and should not have.** For a row whose values are identical within each code
+(zero sample variance in both), it gave a standard error of zero and 90% and 95% intervals of zero width: for
+example a difference of -0.5 with the interval [-0.5, -0.5], or a ratio of 2 with [2, 2]. Zero sample variance in
+eight Monte Carlo runs is not zero variance, so that interval states a precision that was not estimated. The
+same-host field comparison has the same rule (#55).
+
+**What changes, in `validation/topas_halo_compare.py` only.** Such a row keeps its ratio or difference and its run
+counts, is marked `not estimated: zero sample variance in both codes`, and carries no standard error, no degrees of
+freedom and no interval, in the JSON and in the table. Every other row is unchanged and is marked `welch`. A row
+with zero sample variance in one code only is an ordinary Welch row, as before. In addition the byte count that the
+provenance records for `dose.binheader` is now compared with the file's size (the hash already bound its content).
+
+**What does not change.** The estimands, the endpoints, the intervals of every row with a non-zero standard error,
+the zero-run and invalid-value rules, the gate, the MCsquare dataset and its fingerprint. The rule depends on
+whether the standard error is exactly zero and on nothing else, and was fixed before any value was seen.
+
+**Checked on the real runs.** The amended gate was run in `--status` mode at the time above: the eighteen finished
+runs pass, including the new byte-count check, and the refusal lists only the six runs not yet complete.
