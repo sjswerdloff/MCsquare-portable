@@ -276,7 +276,42 @@ def test_the_log_must_carry_the_simulated_count_and_no_unknown_tag(one: tuple[fa
     log = one[0].path / "log.txt"
     log.write_bytes(b"Unknown tag: Num_Primarys\nno count here\n")
     msg = problems(one)
-    assert "log.txt reports no primaries simulated" in msg and "a configuration tag MCsquare did not recognise" in msg
+    assert "log.txt has 0 'Nbr primaries simulated' lines, expected exactly 1" in msg
+    assert "a configuration tag MCsquare did not recognise" in msg
+
+
+@pytest.mark.parametrize("one", ["A-port", "B-up"], indirect=True)  # the Lenovo's UTF-16 CRLF log and the HP's LF log
+@pytest.mark.parametrize(("line", "message"), [
+    ("Nbr primaries simulated: {n}garbage ", "a malformed 'Nbr primaries simulated' line"),
+    ("Nbr primaries simulated: {n} \nNbr primaries simulated: {m} ", "2 'Nbr primaries simulated' lines, expected exactly 1"),
+    ("Nbr primaries simulated: {n} \nNbr primaries simulated: {n} ", "2 'Nbr primaries simulated' lines, expected exactly 1"),
+    ("Nbr primaries simulated: {n} Nbr primaries simulated: {m} ", "a malformed 'Nbr primaries simulated' line"),
+    ("xNbr primaries simulated: {n} ", "a malformed 'Nbr primaries simulated' line"),
+    ("Nbr primaries simulated: {n} (7 generated outside the geometry) extra", "a malformed 'Nbr primaries simulated' line"),
+    ("Nbr primaries simulated:  {n} ", "a malformed 'Nbr primaries simulated' line"),
+])
+def test_the_completion_count_must_be_one_whole_unambiguous_line(
+        one: tuple[fa.Run, fa.Expected, aa.Ledger], line: str, message: str) -> None:
+    """#59 review 7116: a numeric prefix ('60000000garbage') and the first of two conflicting counts both passed."""
+    run = one[0]
+    n = json.loads(fa._text((run.path / "run.json").read_bytes()))["simulated"]
+    win = run.arm in WINDOWS
+    log = "\nRange shifter initialized for beam 0:\n\n" + line.format(n=n, m=n + 1) + "\n"
+    (run.path / "log.txt").unlink()
+    (run.path / "log.txt").write_bytes(log.replace("\n", "\r\n").encode("utf-16") if win else log.encode())
+    assert message in problems(one)
+
+
+@pytest.mark.parametrize("one", ["A-port", "B-up"], indirect=True)
+@pytest.mark.parametrize("line", ["Nbr primaries simulated: {n} ", "Nbr primaries simulated: {n} (19 generated outside the geometry) ",
+                                  "Nbr primaries simulated: {n}"])
+def test_both_forms_of_the_completion_line_that_mcsquare_prints_verify(one: tuple[fa.Run, fa.Expected, aa.Ledger], line: str) -> None:
+    run = one[0]
+    n = json.loads(fa._text((run.path / "run.json").read_bytes()))["simulated"]
+    log = "\nRange shifter initialized for beam 0:\n\n" + line.format(n=n) + "\n"
+    (run.path / "log.txt").unlink()
+    (run.path / "log.txt").write_bytes(log.replace("\n", "\r\n").encode("utf-16") if run.arm in WINDOWS else log.encode())
+    assert problems(one) == ""
 
 
 def test_cube_raw_must_be_the_generated_ct(one: tuple[fa.Run, fa.Expected, aa.Ledger]) -> None:
@@ -442,7 +477,7 @@ def test_all_equivalent_gives_both_joint_claims_and_holm_over_34() -> None:
     c = fa.analyse_contrast(cells, issues, "A-port", "A-up", confirmatory=True)
     assert len(c["rows"]) == 34 and {r["outcome"] for r in c["rows"]} == {"equivalent"}
     assert c["claims"] == {
-        "joint_claim_equivalent_on_all_endpoints": True, "secondary_joint_claim_excluding_all_zero_rows": True,
+        "joint_claim_equivalent_on_all_endpoints": True, "secondary_joint_claim_holm_excluding_all_zero_rows": True,
         "all_zero_rows_excluded_from_the_secondary_claim": [], "n_equivalent_unadjusted": 34, "n_equivalent_holm": 34, "n_not_established": 0}
     smallest = min(c["rows"], key=lambda r: r["p_tost"])
     assert smallest["holm_p"] == pytest.approx(min(1.0, 34 * smallest["p_tost"]))
@@ -492,12 +527,37 @@ def test_all_runs_zero_in_both_arms_is_not_established_and_only_the_secondary_cl
         assert "ci90" not in r and r["estimate"] == 0.0
         assert r["reason"] == "all runs zero in both arms (simulated histories: arm 480000000, reference 480000000)"
     assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is False
-    assert c["claims"]["secondary_joint_claim_excluding_all_zero_rows"] is True
+    assert c["claims"]["secondary_joint_claim_holm_excluding_all_zero_rows"] is True
     assert c["claims"]["all_zero_rows_excluded_from_the_secondary_claim"] == ["E100/lateral_39_70", "E100/lateral_61_70"]
     assert (c["claims"]["n_equivalent_unadjusted"], c["claims"]["n_not_established"]) == (32, 2)
     # the two rows stay in the Holm family: the smallest p is still multiplied by 34
     smallest = min((r for r in c["rows"] if r["p_tost"] is not None), key=lambda r: r["p_tost"])
     assert smallest["holm_p"] == pytest.approx(min(1.0, 34 * smallest["p_tost"]))
+
+
+def test_the_secondary_claim_needs_every_retained_row_to_survive_holm_over_all_34() -> None:
+    """#59 review 7116: rows are set aside by the data, so the unadjusted tests give the secondary claim no error
+    control. One retained row equivalent at an unadjusted p near 0.03 does not survive Holm, and the claim fails."""
+    def value(arm: str, energy: int, i: int, key: str) -> float:
+        if key.endswith("_70") and energy == 100:
+            return 0.0
+        if key == "lateral_79_30":
+            return 5.0 + 0.2815 * (i - 3.5) / 3.5  # SE about 0.0985 against a margin of 0.2
+        return noisy(arm, energy, i, key)
+
+    cells, issues = cells_of(value)
+    c = fa.analyse_contrast(cells, issues, "B-picc", "B-up", confirmatory=True)
+    weak = next(r for r in c["rows"] if r["endpoint"] == "E150/lateral_79_30")
+    assert 0.05 / 34 < weak["p_tost"] < 0.05 and weak["outcome"] == "equivalent"
+    assert weak["holm_p"] > 0.05 and weak["holm_decision"] == "not shown"
+    retained = [r for r in c["rows"] if not r["all_runs_zero"]]
+    assert len(retained) == 32 and all(r["outcome"] == "equivalent" for r in retained)  # unadjusted, every retained row passes
+    assert c["claims"]["secondary_joint_claim_holm_excluding_all_zero_rows"] is False
+    assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is False
+    assert (c["claims"]["n_equivalent_unadjusted"], c["claims"]["n_equivalent_holm"]) == (32, 31)
+    md = "\n".join(fa.markdown({"acquisition_commit": COMMIT, "label": fa.LABEL, "contrasts": [c],
+                                "collection": {"population_issues_before_any_dose_was_read": 0, "declared_closed": None}}))
+    assert "is equivalent after Holm over all 34): **NOT ESTABLISHED**" in md
 
 
 def test_identical_non_zero_values_in_both_arms_are_not_established_and_not_excluded() -> None:
@@ -510,7 +570,7 @@ def test_identical_non_zero_values_in_both_arms_are_not_established_and_not_excl
     assert row["outcome"] == "not_established" and row["all_runs_zero"] is False
     assert row["reason"].startswith("zero sample variance in both arms (simulated histories: arm 480000000")
     assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is False
-    assert c["claims"]["secondary_joint_claim_excluding_all_zero_rows"] is False  # only all-zero rows are set aside
+    assert c["claims"]["secondary_joint_claim_holm_excluding_all_zero_rows"] is False  # only all-zero rows are set aside
 
 
 def test_zero_variance_in_one_arm_only_is_evaluated() -> None:
@@ -531,7 +591,7 @@ def test_an_invalid_value_in_one_run_makes_the_endpoint_not_established() -> Non
     row = next(r for r in c["rows"] if r["endpoint"] == "E150/r20_mm")
     assert row["outcome"] == "not_established" and row["reason"] == "reference: invalid or unusable in 1 of 8 runs: A-up 150 MeV s960053"
     assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is False and c["claims"]["n_not_established"] == 1
-    assert c["claims"]["secondary_joint_claim_excluding_all_zero_rows"] is False
+    assert c["claims"]["secondary_joint_claim_holm_excluding_all_zero_rows"] is False
 
 
 def test_a_population_issue_withholds_the_claims_of_the_contrasts_it_touches_only() -> None:
@@ -599,7 +659,8 @@ def test_the_reading_of_a_maximum_is_printed_only_when_it_falls_short_and_the_th
         return noisy(arm, energy, i, key)
 
     cells, issues = cells_of(value)
-    doc = {"acquisition_commit": COMMIT, "label": fa.LABEL, "contrasts": [fa.analyse_contrast(cells, issues, "A-port", "A-up", confirmatory=True)]}
+    doc = {"acquisition_commit": COMMIT, "label": fa.LABEL, "contrasts": [fa.analyse_contrast(cells, issues, "A-port", "A-up", confirmatory=True)],
+           "collection": {"population_issues_before_any_dose_was_read": 0, "declared_closed": None}}
     md = "\n".join(fa.markdown(doc))
     assert "At 100 MeV the maximum is inconclusive while the three-row ratio's 95% interval lies within [0.995, 1.005]" in md
     assert "At 150 MeV the maximum" not in md and "No cause is attributed." in md
@@ -632,7 +693,8 @@ def test_very_small_lateral_means_are_legible_in_the_table() -> None:
         return noisy(arm, energy, i, key)
 
     cells, issues = cells_of(value)
-    doc = {"acquisition_commit": COMMIT, "label": fa.LABEL, "contrasts": [fa.analyse_contrast(cells, issues, "B-picc", "B-up", confirmatory=True)]}
+    doc = {"acquisition_commit": COMMIT, "label": fa.LABEL, "contrasts": [fa.analyse_contrast(cells, issues, "B-picc", "B-up", confirmatory=True)],
+           "collection": {"population_issues_before_any_dose_was_read": 0, "declared_closed": None}}
     lines = fa.markdown(doc)
     row = next(line for line in lines if line.startswith("| E100/lateral_39_70 |")).split(" | ")
     assert row[1:4] == ["3e-06", "2e-06", "1e-06"] and row[6] == "equivalent"
@@ -659,7 +721,7 @@ def test_end_to_end_population_fingerprint_and_claims(document: dict) -> None:
         # the synthetic 100 MeV field scores nothing 70 mm out: the foreseeable case of the plan
         assert c["claims"]["all_zero_rows_excluded_from_the_secondary_claim"] == ["E100/lateral_39_70", "E100/lateral_61_70"]
         assert c["claims"]["joint_claim_equivalent_on_all_endpoints"] is False
-        assert c["claims"]["secondary_joint_claim_excluding_all_zero_rows"] is True
+        assert c["claims"]["secondary_joint_claim_holm_excluding_all_zero_rows"] is True
         assert c["claims"]["n_equivalent_unadjusted"] == 32
         notes = {r["endpoint"]: r for r in c["ratio_of_arm_means_at_50_and_70_mm"]}
         assert notes["E100/lateral_39_70"]["status"] == "not given" and notes["E150/lateral_79_70"]["status"] == "ratio"
@@ -689,13 +751,41 @@ def test_end_to_end_rows_match_an_independent_computation(document: dict, trees:
     assert 75.0 < a[0]["r80_mm"] < 170.0 and a[0]["lateral_79_5"] > 10  # the synthetic field is where the estimators look
 
 
+def test_an_incomplete_population_is_refused_before_any_dose_value_is_read(trees: list[Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    """#59 review 7116: with one frozen seed missing and both hosts' trees present, 79 runs were measured."""
+    monkeypatch.setattr(fa, "measure", lambda _run: pytest.fail("a dose value was read although the population is incomplete"))
+    cell = trees[0] / "apt" / "e150"
+    (cell / "s961058").rename(cell.parent / "held_s961058")  # one frozen run is absent; nothing else is wrong
+    try:
+        with pytest.raises(fa.InputError, match=r"not complete and verified \(\d+ issue\(s\)\); no dose value was read") as e:
+            fa.run(trees, COMMIT)
+        with pytest.raises(fa.InputError, match="needs a statement"):
+            fa.run(trees, COMMIT, closed="  ")
+    finally:
+        (cell.parent / "held_s961058").rename(cell / "s961058")
+    assert "A-port 150 MeV: run s961058 is missing" in str(e.value)
+
+
+def test_the_whole_population_is_verified_before_the_first_dose_value_is_read(trees: list[Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    order: list[str] = []
+    verify, measure = fa.verify_run, fa.measure
+    monkeypatch.setattr(fa, "verify_run", lambda run, *a: (order.append("verify"), verify(run, *a))[1])
+    monkeypatch.setattr(fa, "measure", lambda run: (order.append("measure"), measure(run))[1])
+    fa.run(trees, COMMIT)
+    assert order == ["verify"] * 80 + ["measure"] * 80
+
+
 def test_a_missing_and_an_unexpected_run_make_the_lenovo_contrast_partial_only(trees: list[Path]) -> None:
     cell = trees[0] / "apt" / "e150"
     (cell / "s961058").rename(cell / "s961059")  # the frozen seed is gone and an unlisted one is there
+    statement = "connor-227743e6: both workflows finished (runs 1 and 2); archives verified on the share"
     try:
-        doc = fa.run(trees, COMMIT)
+        doc = fa.run(trees, COMMIT, closed=statement)
     finally:
         (cell / "s961059").rename(cell / "s961058")
+    assert doc["collection"] == {"state": "closed by declaration, with population issues",
+                                 "population_issues_before_any_dose_was_read": 2, "declared_closed": statement}
+    assert f"The collection was declared closed: {statement}**" in "\n".join(fa.markdown(doc))
     a, pg, pi, _d = doc["contrasts"]
     assert a["claims_withheld"] is True and a["claims"] == {}
     assert a["partial_reasons"] == ["A-port 150 MeV: run s961058 is missing", "A-port 150 MeV: run s961059 is not in the frozen list"]
@@ -710,21 +800,80 @@ def test_a_run_hosts_snapshot_of_the_run_lists_must_be_the_acquisition_commits(t
     original = snap.read_bytes()
     snap.write_bytes(original + b"# changed\n")
     try:
-        _cells, issues, _ledger, _notes = fa.load(trees, fa.expected(COMMIT, "full"), status_only=True)
+        _cells, issues, _ledger, _notes = fa.load(trees, fa.expected(COMMIT, "full"))
     finally:
         snap.write_bytes(original)
     assert issues[("B-picc", 100)] == [f"B-picc 100 MeV: the run host's snapshot of {fa.RUN_LIST_FILES[0]} is not the acquisition commit's"]
     assert not any(v for k, v in issues.items() if k != ("B-picc", 100))
 
 
+@pytest.mark.parametrize(("where", "name", "holds_run", "cells_touched"), [
+    ("cell", "s9610417", True, [("A-port", 150)]),      # a seven-digit seed directory holding run.json (review 7116)
+    ("cell", "s96105", False, [("A-port", 150)]),       # named like a run, empty
+    ("cell", "old", True, [("A-port", 150)]),           # not named like a run, but it holds one
+    ("cell", "snapshot/copy", True, [("A-port", 150)]), # run data hidden inside a known entry
+    ("arm", "e150_first_try", True, [("A-port", 100), ("A-port", 150)]),
+    ("root", "apt_old", True, [("A-port", 100), ("A-port", 150), ("A-up", 100), ("A-up", 150)]),
+])
+def test_run_data_that_is_not_a_frozen_run_is_a_population_issue_wherever_it_sits(
+        trees: list[Path], monkeypatch: pytest.MonkeyPatch, where: str, name: str, holds_run: bool, cells_touched: list[tuple[str, int]]) -> None:
+    monkeypatch.setattr(fa, "verify_run", lambda *_a: None)  # the layout check alone
+    base = {"cell": trees[0] / "apt" / "e150", "arm": trees[0] / "apt", "root": trees[0]}[where]
+    stray = base / name
+    (stray / "deeper").mkdir(parents=True)
+    if holds_run:
+        (stray / "deeper" / "run.json").write_text("{}")
+    try:
+        _cells, issues, _ledger, notes = fa.load(trees, fa.expected(COMMIT, "full"))
+    finally:
+        shutil.rmtree(base / name.split("/")[0] if "/" not in name else stray)
+    top = name.split("/")[0]
+    for key, why in issues.items():
+        assert (len(why) == 1 and f"{top} looks like run data and is not a run of the frozen lists" in why[0]) if key in cells_touched else why == []
+    assert not any(top in n for n in notes)
+
+
+def test_an_entry_that_is_not_run_data_is_noted_and_is_no_issue(trees: list[Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fa, "verify_run", lambda *_a: None)
+    extra = [trees[0] / "apt" / "e150" / "notes.txt", trees[0] / "apt" / "README", trees[0] / "listing.txt"]
+    for f in extra:
+        f.write_text("not a run\n")
+    try:
+        _cells, issues, _ledger, notes = fa.load(trees, fa.expected(COMMIT, "full"))
+    finally:
+        for f in extra:
+            f.unlink()
+    assert not any(issues.values())
+    assert sum("is ignored (not run data)" in n for n in notes) == 3
+
+
+def test_the_real_layout_of_both_hosts_has_no_stray_entry(trees: list[Path], template: Template, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Lenovo's cells also hold inputs.tar; every cell holds the case, the snapshot and their hash files."""
+    monkeypatch.setattr(fa, "verify_run", lambda *_a: None)
+    made = []
+    for root in trees:
+        for cell in (c for arm in root.iterdir() for c in arm.iterdir()):
+            for name in ("fcase_sha256.txt", "snapshot_sha256.txt", "run_root.txt", "inputs.tar"):
+                (cell / name).write_text("x\n")
+                made.append(cell / name)
+            (cell / "fcase").mkdir()
+            made.append(cell / "fcase")
+    try:
+        _cells, issues, _ledger, notes = fa.load(trees, fa.expected(COMMIT, "full"))
+    finally:
+        for m in made:
+            m.rmdir() if m.is_dir() else m.unlink()
+    assert not any(issues.values()) and notes == []
+
+
 def test_two_runs_with_the_same_dose_are_a_duplicated_run(trees: list[Path], monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(fa, "measure", lambda _run: None)
+    monkeypatch.setattr(fa, "measure", lambda _run: pytest.fail("load() read a dose value"))
     a, b = trees[1] / "bpg" / "e100" / "s963041" / "out_seed", trees[1] / "bup" / "e150" / "s962052" / "out_seed"
     kept = {p: p.read_bytes() for p in (b / "Dose.raw", b / "sha256.txt")}
     (b / "Dose.raw").write_bytes((a / "Dose.raw").read_bytes())
     record_hashes(b.parent, "B-up")  # each run agrees with its own record; only the pair gives it away
     try:
-        _cells, issues, _ledger, _notes = fa.load(trees, fa.expected(COMMIT, "full"), status_only=False)
+        _cells, issues, _ledger, _notes = fa.load(trees, fa.expected(COMMIT, "full"))
     finally:
         for p, data in kept.items():
             p.write_bytes(data)
