@@ -20,6 +20,8 @@
 #            uploaded, does nothing.
 #   cleanup  linux: removes the run tree from WSL only when <tar>.uploaded holds the hash pack recorded
 #            (sjswerdloff, 2026-10-02: "move the run data off the pcs, on to the SMBWritable").
+# Run requests (one line per push that asks for runs):
+#   1  2026-10-02  smoke
 
 name: Same-host comparison, part E (Linux, HP)
 

@@ -17,6 +17,8 @@
 #            the SMBWritable"). It runs even when a run job failed, so the failure records reach the share.
 # Upstream 85bf2911 reads the MHD ElementDataFile and Materials\ relative to the WORKING directory and has short fixed
 # path buffers: each run directory is the cwd, every config path is relative and short (as part A).
+# Run requests (one line per push that asks for runs):
+#   1  2026-10-02  smoke
 
 name: Same-host comparison, part E (Windows, Lenovo)
 
