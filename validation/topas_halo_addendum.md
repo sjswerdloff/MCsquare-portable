@@ -1,9 +1,11 @@
 # TOPAS halo comparison: addendum to the TOPAS design
 
-**Status: DRAFT, complete for freezing. Nothing here is authorised to run.** It becomes FROZEN, at the commit that
-changes this line, when sjswerdloff confirms the two decisions under "Decisions" in his own words; they reached
-this file relayed (#54, comment 28305). Written at sjswerdloff's request (2026-10-02). It extends
-`validation/topas_design.md` (TD), which stays the governing design; where this file is silent, TD applies.
+**Status: FROZEN at the commit that introduces this line (2026-10-02).** The 24 TOPAS runs listed here are
+authorised, from a `git archive` of that commit; sjswerdloff confirmed the decisions under "Decisions" on
+2026-10-02. The run list, seeds, endpoints and analysis script do not change from here; a change needed before the
+analysis is run is made as a recorded amendment, in a new commit, before any endpoint is read. Written at
+sjswerdloff's request (2026-10-02). It extends `validation/topas_design.md` (TD), which stays the governing design;
+where this file is silent, TD applies.
 
 ## Why this is separate from the report's claim
 
@@ -127,8 +129,8 @@ and no runs are added after the results are read.
 
 ## Decisions
 
-Relayed by clement-7074f29f (#54, comment 28305) as sjswerdloff's, 2026-10-02: "both, addendum first. reuse existing
-Portable runs."
+sjswerdloff, 2026-10-02: "both, addendum first. reuse existing Portable runs." (relayed by clement-7074f29f, #54
+comment 28305), and then to connor-227743e6 directly: "I'm confirming the TOPAS halo comparison rulings."
 
 1. Both TOPAS programmes run, this addendum first, then TD's confirmatory arms.
 2. The MCsquare arm is the existing same-host Portable runs; no new MCsquare runs are made.
