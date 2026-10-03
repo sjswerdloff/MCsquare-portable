@@ -37,5 +37,37 @@
   "mean": -0.021560784429311752,
   "p95_abs": 2.0652825832366943
  },
- "tumour_voxels_with_lenovo_dose_zero": 0
+ "tumour_voxels_with_lenovo_dose_zero": 0,
+ "axis_profile": {
+  "step_mm": 0.5,
+  "from_mm": -80.0,
+  "to_mm": 60.0,
+  "max_abs_diff_pct_of_studio_axis_max": 5.298373222351074,
+  "peak_mm": {
+   "lenovo": 4.0,
+   "studio": 3.0
+  },
+  "distal_r80_mm_from_centroid": {
+   "lenovo": 10.892061322927475,
+   "studio": 7.490980684757233
+  }
+ },
+ "gamma_2pct_2mm_body": {
+  "points": 277113,
+  "pass_rate_pct": 99.99603050019307,
+  "box_zyx": [
+   [
+    91,
+    181
+   ],
+   [
+    0,
+    330
+   ],
+   [
+    0,
+    309
+   ]
+  ]
+ }
 }
