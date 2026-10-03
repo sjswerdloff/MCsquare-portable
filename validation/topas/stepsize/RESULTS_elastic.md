@@ -29,3 +29,15 @@ Full table: `elastic_compare.txt`.
 - R80 moves the wrong way to explain the R80 gap: removing elastic makes TOPAS longer, and TOPAS is already longer than MCsquare. The R80 gap is the step-size effect (RESULTS_followup*.md).
 
 Bounds: 200 MeV only; 2 runs; elastic removed completely (not adjusted to MCsquare's model). Diagnostic, not pre-specified.
+
+## Clarification (2026-10-04, after alden-ec2221c7's review)
+
+The text above is kept as written. Where it differs from this section, this section applies.
+
+- **The ring values are normalized fractions, not absolute dose.** Each ring endpoint is E_ring / E_slab within one configuration. An off/control ratio of 0.524 means the normalized 40–80 mm fraction at 200 mm fell by about 48%. The absolute ratio is 0.524 × (E_slab_off / E_slab_control), and the slab-total ratio is not in these records. The raw IDD maximum is a different statistic and does not supply it.
+- **So the measured result is:** removing `g4h-elastic_HP` reduces the normalized 20–40 and 40–80 mm fractions at 200 mm to 0.391 [0.381, 0.402] and 0.524 [0.450, 0.611] of control, a 48–61% reduction. This is a removal sensitivity. Removing a process also changes trajectories, fluence and other interactions, so it is not a decomposition of dose by process. "Elastic gives about half of the dose in the 20–80 mm rings" (line 27) is not shown.
+- **The MCsquare comparison** (line 28): the MCsquare/TOPAS fraction deficit (0.887) beside this sensitivity motivates elastic modelling as a candidate for the halo gap. It does not measure a shared absolute elastic share, and does not show the cause.
+- **"The R80 gap is the step-size effect"** (line 29) should read: most of the observed R80 gap decreases under step refinement; a residual of +0.04 to +0.13 mm remains at 0.05 mm, and finer settings were not tested (RESULTS_followup2.md).
+- **Line 24** (proton–hydrogen elastic) is a hypothesis, not tested.
+
+An absolute claim would need the slab and annular totals, properly normalized, with their uncertainty.

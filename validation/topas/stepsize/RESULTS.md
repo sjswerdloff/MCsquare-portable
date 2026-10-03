@@ -19,3 +19,7 @@ Endpoints from `validation/pencil_endpoints.py`.
 **At 0.1 mm, TOPAS's R80 (260.436) is within 0.08 mm of MCsquare's (260.353)** and on the physics expectation from the Fable report (260.42 ± 0.05). The 0.5 → 0.1 mm trend has not been shown to have converged: an arm at 0.05 mm would show whether the residual shrinks further.
 
 Bounds: 200 MeV only. Whether the same holds at 100 and 150 MeV (where H1 predicted a smaller share) is untested.
+
+## Clarification (2026-10-04, after alden-ec2221c7's review)
+
+"H1's mechanism is supported" (line 17) is too strong: the direction matched H1's prediction, which does not single out H1. Mechanism not identified; see the clarification in RESULTS_followup.md. Line 15 ("fits an energy-loss mechanism") is likewise an interpretation, not a test. The convergence question on line 19 is answered for 0.1 → 0.05 mm only (RESULTS_followup2.md).

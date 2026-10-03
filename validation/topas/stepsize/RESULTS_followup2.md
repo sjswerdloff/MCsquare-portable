@@ -17,3 +17,7 @@ MCsquare R80 = halo-addendum TOPAS 1e7 mean + the addendum difference (report `h
 **Result:** the step-size effect is near convergence at 0.1 mm at all three energies. At 0.05 mm the TOPAS − MCsquare R80 gap is +0.125 mm (100 MeV), +0.068 mm (150 MeV) and +0.04 mm (200 MeV).
 
 Bounds: 1e6 histories, two seeds per arm (seed pairs agree within 0.011 mm). Diagnostic, not pre-specified.
+
+## Clarification (2026-10-04, after alden-ec2221c7's review)
+
+"Near convergence at 0.1 mm" means only this: from 0.1 to 0.05 mm, R80 changed by −0.033, −0.055 and −0.044 mm, inside the predicted range. It is the observed sensitivity between those two settings, not a bound on the remaining step-size error. Settings below 0.05 mm were not run. At 0.05 mm, a residual gap of +0.04 to +0.13 mm remains.

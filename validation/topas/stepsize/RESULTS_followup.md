@@ -24,3 +24,7 @@ The controls agree with the halo-addendum 1e7 means (77.823 and 158.744 mm). The
 - A direct test of H1 alone: lower `linLossLimit` (Geant4 command `/process/eLoss/linLossLimit`; TOPAS needs an extension to set it) with no step limit. If H1 is the only mechanism, this gives the same R80 as the 0.1 mm arm.
 
 Not known: convergence at 100 and 150 MeV below 0.1 mm.
+
+## Clarification (2026-10-04, after alden-ec2221c7's review)
+
+H1 (the linear energy-loss branch, `linLossLimit`) and the candidates on line 23 are hypotheses. None was tested in isolation, and the 100 MeV discrepancy could equally come from the model's quantitative assumptions or from other step-dependent processes. The step-size dependence is measured. No mechanism is identified.
