@@ -288,3 +288,9 @@ made after the freeze and why, and the commit of the analysis that produced the 
     the rerun archives and only from them: it verifies their runs against the rerun commit, checks that the rerun
     commit differs from the acquisition commit only in the files named above, and does not read the interrupted
     cells.
+- 2026-10-04 00:54 NZDT: smoke request 3 at `8b3312ef05d8aa75068d67880c1cc157923a3656` (workflow runs 460, 461).
+  A-port at 150 MeV succeeded on the Lenovo. B-pgcc at 150 MeV failed before any run: extracting the input snapshot
+  on `/mnt/c` gave "tar: Cannot utime: Operation not permitted" (WSL may not set file times on the Windows drive).
+  The pack, upload and cleanup jobs ran; `field_e_A_8b3312ef05d8_smoke.tar.gz` and `field_e_B_8b3312ef05d8_smoke.tar.gz`
+  are on the share. Request 4 extracts with `tar -m` (the bytes are unchanged; the analysis compares bytes only) and
+  repeats the HP smoke.
