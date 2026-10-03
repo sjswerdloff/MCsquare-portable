@@ -271,6 +271,36 @@ claim less; none depends on a dose value.
 Also in this amendment's branch, earlier the same evening: very small table values print with three significant
 figures (#60); display only.
 
+### Analysis amendment 2, 2026-10-04: the two rerun cells (acquisition amendment 1)
+
+**State of the data.** The full run of the acquisition commit is on the share; `--status` verified 76 of 80 runs
+and read no dose value. A-port and B-pgcc at 150 MeV were stopped at the runners' 3 h job timeout with 6 of 8 runs.
+Acquisition amendment 1, recorded on `connor/field-e-run` in the run requests that made it, reruns both cells in
+full at a later commit. When this amendment was written that rerun was running, and no dose value of any full run
+had been read.
+
+**The change.** With `--rerun-root` (one or more) and `--rerun-commit`, the script:
+
+1. refuses unless the rerun commit descends from the acquisition commit and changes nothing but the two run
+   workflows and this plan, so its inputs, run lists, seeds, histories, threads and binaries are the acquisition's;
+2. takes the cells A-port 150 MeV and B-pgcc 150 MeV from the rerun roots, and only from them, verifying every run
+   as before but against the rerun commit (the `commit` in `run.json`);
+3. does not read the interrupted cells of the original roots at all;
+4. treats anything else in a rerun root (another arm, another energy, run data outside those cells) as a
+   population issue, as in the original roots, and refuses any root, original or rerun, that holds none of the
+   arms it is given for, since nothing would check its contents (found in review of #66);
+5. records the rerun commit and the two cells in its output.
+
+Without those two arguments it behaves as before.
+
+**What does not change.** Everything else: the population rule (complete and verified before any dose value is
+read), the endpoints, margins, claims and decisions. Which cells are rerun was decided by the timeout, before any
+dose value was read.
+
+**Checked on real data before the full rerun finished.** The original smoke trees of `52d6aa33` with the rerun
+smoke trees: each rerun smoke run verifies against its own commit (`8b3312ef` on the Lenovo, `b89e5e6d` on the HP)
+and is refused against the other's.
+
 ## Compute
 
 From the part A and B run times, scaled by the pencil-beam time ratios (100 and 150 MeV took 0.37 and 0.66 of the
