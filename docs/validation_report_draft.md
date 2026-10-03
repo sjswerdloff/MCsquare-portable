@@ -517,7 +517,8 @@ per arm. Descriptive: no margin, no outcome.**
   band. In the planning runs at 200 MeV (4 × 1e7 per code, #32) the shift was close to rigid: peak −0.46, R90 −0.46,
   R80 −0.51, R50 −0.56, R20 −0.57 mm, and it persisted with nuclear interactions off in both codes (−0.56 mm). The
   water stopping power used by MCsquare matches Geant4's option 0 table to within 0.006% over 50–400 MeV, and the
-  integrated ranges agree within about 0.01 mm (TD stage 0), so the gap is **not yet explained**.
+  integrated ranges agree within about 0.01 mm (TD stage 0). **Most of the gap depends on TOPAS's step size**
+  (below).
 - **Spot size.** σ differs by at most 0.036 mm. At 200 MeV the differences are at most 0.005 mm and inside TD's
   bands; the largest are at the deeper slab at 100 and 150 MeV (about −0.035 and −0.034 mm).
 - **Annuli at 200 MeV.** The ratios that have a TD band are inside it except the 40–80 mm annulus at 200 mm depth (0.886 to
@@ -536,6 +537,59 @@ At 200 MeV, upstream with the fix and Portable are equivalent in every annulus, 
 to both MCsquare code lines and were not introduced by the port. That inference is not available for the 40–80 mm
 annulus at 100 MeV and the 80–200 mm annulus at 150 MeV, where the same-host comparison is inconclusive (§5.0). None of this says anything about the
 cause: physics models, scoring, estimators, and geometry or source conditions all remain possible.
+
+**Diagnostic runs (clement-7074f29f; records in `validation/topas/stepsize/`).** These tests were not part of the
+frozen addendum, and Table 6 does not use them. Each prediction was committed before its runs. All runs use the
+TOPAS setup frozen for the addendum. The arms without a step limit reproduce the addendum's 1e7 means.
+
+*Step size.* TOPAS was rerun with a maximum step size in the phantom (`d:Ge/Phantom/MaxStepSize`): 1e6 histories,
+two seeds per arm, with seed pairs agreeing within 0.013 mm.
+
+**Table 6b. TOPAS R80 against its step limit, and TOPAS − MCsquare (mm). Mean of two runs of 1e6 histories.
+Diagnostic.**
+
+| energy | step limit | TOPAS R80 | change from no limit | TOPAS − MCsquare |
+|---|---|---|---|---|
+| 100 MeV | none | 77.824 | — | +0.43 |
+| 100 MeV | 0.1 mm | 77.556 | −0.27 | +0.16 |
+| 100 MeV | 0.05 mm | 77.523 | −0.30 | +0.13 |
+| 150 MeV | none | 158.745 | — | +0.54 |
+| 150 MeV | 0.1 mm | 158.327 | −0.42 | +0.12 |
+| 150 MeV | 0.05 mm | 158.272 | −0.47 | +0.07 |
+| 200 MeV | none | 260.866 | — | +0.51 |
+| 200 MeV | 0.5 mm | 260.694 | −0.17 | +0.34 |
+| 200 MeV | 0.1 mm | 260.436 | −0.43 | +0.08 |
+| 200 MeV | 0.05 mm | 260.392 | −0.47 | +0.04 |
+
+- **Most of the R80 gap depends on the reference code's step size.** With a 0.1 mm step limit the gap falls from
+  0.43–0.54 mm to 0.08–0.16 mm at all three energies. Going from 0.1 mm to 0.05 mm moves R80 by a further −0.033,
+  −0.055 and −0.044 mm (100, 150 and 200 MeV), within the small change predicted for an effect that has nearly
+  converged. Two step sizes cannot bound what remains below 0.05 mm. At 0.05 mm the gap is 0.04 to 0.13 mm.
+- **No mechanism is claimed.** The Geant4 11.3.2 source applies a linear energy-loss approximation when a step loses
+  less than 1% of the kinetic energy (`linLossLimit` 0.01, not changed by option 0 or TOPAS). In this phantom, steps
+  end at 1 mm voxel boundaries, so that branch acts above about 83 MeV. An approximate model of it predicted a shift
+  of −0.10 mm at 100 MeV, where −0.27 mm was measured, so that model does not account for the result quantitatively.
+  The branch was not varied on its own, and other step-dependent processes are not excluded.
+- **Where it was checked, the halo did not respond to the step limit.** At 200 MeV no appreciable change was
+  observed in the spot σ or in the 40–80 mm annulus fraction at 200 mm depth, against a large change in R80. Other
+  annuli and energies were not checked.
+- **The deficit is in the scored charged-particle channel.** TOPAS's `Dose` scorer excludes neutrons, gammas and
+  their descendants; its unfiltered `DoseAll`, run alongside, gives larger far-ring fractions of the slab energy in
+  these runs (geometric-mean ratio over four runs: 1.09 for the 40–80 mm annulus at 200 MeV, 1.20–1.21 at 150 MeV,
+  2.5–3.0 at 100 MeV, and 2.0–15 for the 80–200 mm annulus where `Dose` scored energy; at 100 MeV `Dose` scored none
+  there). These are ratios of normalized fractions, not of absolute dose. They show that the deficit remains in the
+  channel compared here; they do not validate the scorer's particle classification.
+
+*Nuclear elastic.* At 200 MeV, TOPAS was run without hadronic elastic scattering (`g4h-elastic_HP` removed), 1e7
+histories × 2, against the addendum's 8 runs. Without it the 20–40 and 40–80 mm annuli at 200 mm depth fall to 0.39
+and 0.52 of their values with it, and the 40–80 mm annulus at 100 mm to 0.73. R80 moves +0.31 mm and σ at 200 mm
+−0.18 mm. These ratios are of annulus fractions of the slab energy, not of absolute annular dose, and removing a
+process changes transport as a whole, so they measure how sensitive the halo fractions are to elastic scattering, not
+the share of the halo that elastic scattering deposits. That sensitivity is large next to MCsquare's 0.887 of TOPAS's
+fraction in the 40–80 mm annulus at 200 mm (Table 6). A difference in how the two codes model elastic scattering is
+therefore a candidate for the halo gap. This test removes elastic scattering rather than matching it to MCsquare's
+model, so it does not show that elastic modelling is the cause.
+It also does not explain the range gap: removing elastic makes TOPAS's range longer, and it is already the longer one.
 
 ## 6. Discussion
 
@@ -557,11 +611,16 @@ cause: physics models, scoring, estimators, and geometry or source conditions al
 3. **Portability.** Portable MCsquare gives equivalent results on Linux, Windows and macOS (§5.3) and, with free
    compilers, matches the Intel-built upstream within the margins above. Treatment-planning research with MCsquare
    need not depend on Intel compilers.
-4. **The TOPAS differences.** The 0.5 mm range offset and the lower far-halo fractions (§5.4) are open. By
-   inference they are common to the two code lines and not introduced by the port; their cause is not established.
-   The pre-specified descriptive comparison with intervals at 100, 150 and 200 MeV (#54, Table 6) shows the range
-   offset at all three energies (0.42 to 0.54 mm) and, at 100 and 150 MeV, outer-annulus fractions down to about a
-   third of TOPAS's. TD's confirmatory arms on one host have not been run.
+4. **The TOPAS differences.** The pre-specified descriptive comparison at 100, 150 and 200 MeV (#54, Table 6) shows
+   a range offset at all three energies (0.42 to 0.54 mm) and, at 100 and 150 MeV, outer-annulus fractions down to
+   about a third of TOPAS's. By inference both are common to the two code lines and not introduced by the port.
+   **Range:** most of the offset depends on TOPAS's step size. With a 0.1 mm step limit it falls to 0.08–0.16 mm,
+   and to 0.04–0.13 mm at 0.05 mm (Table 6b, diagnostic); the change between those two step sizes is small, but two
+   step sizes do not bound the remainder. The offset in Table 6 therefore says more
+   about the reference calculation's default stepping in a 1 mm voxel phantom than about MCsquare. No mechanism is
+   claimed. **Far halo:** the step limit did not change the one annulus checked. In TOPAS the 20–80 mm halo fractions
+   at 200 MeV are strongly sensitive to hadronic elastic scattering, so elastic modelling is a candidate for the gap;
+   its cause is not established. TD's confirmatory arms on one host have not been run.
 5. **Speed.** Run time per 1e7 histories by arm and host is in the run records and will be tabulated as resource
    information, not as a performance claim.
 
@@ -584,7 +643,10 @@ cause: physics models, scoring, estimators, and geometry or source conditions al
    that range is tested.
 6. The TOPAS comparison is descriptive and covers the pencil beam only (100, 150 and 200 MeV); TOPAS and the
    Portable arms ran on different hosts, and the MCsquare endpoints had been read before its design was fixed.
-   There is no comparison with measurement.
+   There is no comparison with measurement. The step-size diagnostic (Table 6b) is not pre-specified, uses 1e6
+   histories and two runs per arm, and checks the halo in one annulus at one energy. The elastic test is at 200 MeV
+   only, and it removes elastic scattering rather than matching it to MCsquare's model, so it cannot show the cause of
+   the far-halo difference.
 7. The broad-field phantom is Schneider_AT_AG_SI4 rather than water (§3.2).
 8. **Provenance.** The collector verifies the Dose files against their recorded hashes but does not tie the endpoint
    values to them; for this collection a reviewer's recomputation on all 160 runs does (§4; #52). Each run's binary
@@ -616,6 +678,8 @@ Portable MCsquare repository.
   by `validation/topas_halo_compare.py` at commit `868d1910` from the 24 TOPAS runs frozen at `5aedf3ac` and the
   collected records above (321 files, dataset fingerprint sha256
   `0d5be975b294e0b77860e0ddbce5807caa526a0ca56481df5056effff40033ba`).
+- **Diagnostic runs (Table 6b, elastic test):** predictions (committed before the runs), results, run scripts and the
+  `DoseAll` ring data are in `validation/topas/stepsize/`. The TOPAS outputs were run at commit `6c4aaff81994`.
 - **Tables:** `python validation/report_confirmatory_tables.py --check` confirms that the tables in this report are
   what those documents render.
 
