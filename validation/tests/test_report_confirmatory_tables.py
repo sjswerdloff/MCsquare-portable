@@ -442,3 +442,23 @@ def test_part_e_load_refuses_an_incomplete_confirmatory_contrast(tmp_path: Path,
     path.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(rt.ReportError):
         rt.load_part_e(path)
+
+
+# ---------------------------------------------------------------------------------------------- run times (Table 9)
+def test_run_time_table_has_one_row_per_arm_on_one_host_each() -> None:
+    lines = rt.run_time_table(rt.load_run_times(rt.RUN_TIMES_JSON))
+    assert [ln.split(" | ")[0].lstrip("| ") for ln in lines[2:]] == ["A-up", "A-port", "B-up", "B-pgcc", "B-picc"]
+
+
+def test_run_times_refuse_another_schema_and_a_missing_cell(tmp_path: Path) -> None:
+    doc = json.loads(rt.RUN_TIMES_JSON.read_text(encoding="utf-8"))
+    for damage in ("schema", "cell"):
+        bad = json.loads(json.dumps(doc))
+        if damage == "schema":
+            bad["schema"] = "run_times/0"
+        else:
+            bad["groups"] = [g for g in bad["groups"] if not (g["arm"] == "B-picc" and g["case"] == "E")]
+        path = tmp_path / f"{damage}.json"
+        path.write_text(json.dumps(bad), encoding="utf-8")
+        with pytest.raises(rt.ReportError):
+            rt.load_run_times(path)

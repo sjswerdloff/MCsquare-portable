@@ -35,6 +35,11 @@ DESCRIPTIVE_SCHEMA = "apples_descriptive/1"
 FRACTIONS_JSON = REPO / "validation" / "report_data" / "apples_ring_fractions_2f9dab40.json"
 FRACTIONS_SCHEMA = "apples_ring_fractions/1"
 TOPAS_HALO_JSON = REPO / "validation" / "report_data" / "halo_868d1910.json"
+RUN_TIMES_JSON = REPO / "validation" / "report_data" / "run_times.json"
+RUN_TIMES_SCHEMA = "run_times/1"
+RUN_TIME_COLUMNS = (("apples", "P", 100), ("apples", "P", 150), ("apples", "P", 200), ("apples", "F", 200),
+                    ("part_e", "E", 100), ("part_e", "E", 150))
+HOSTS = {"DESKTOP-SR5GKKA": "Lenovo", "DESKTOP-5H86O9N": "HP"}
 PART_E_JSON = REPO / "validation" / "report_data" / "field_e_analysis_26a93235.json"
 REPORT = REPO / "docs" / "validation_report_draft.md"
 
@@ -473,12 +478,45 @@ def part_e_endpoint_table(part_e: dict[str, dict[str, object]]) -> list[str]:
     return out
 
 
+def load_run_times(path: Path) -> dict[str, object]:
+    """The run-time document (validation/report_run_times.py); refuses another schema or a missing table cell."""
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if doc.get("schema") != RUN_TIMES_SCHEMA:
+        msg = f"{path}: schema {doc.get('schema')!r}, expected {RUN_TIMES_SCHEMA!r}"
+        raise ReportError(msg)
+    cells = {(g["arm"], g["study"], g["case"], g["energy_mev"]) for g in doc["groups"]}
+    arms = ("A-up", "A-port", "B-up", "B-pgcc", "B-picc")
+    missing = [(a, *c) for a in arms for c in RUN_TIME_COLUMNS if (a, *c) not in cells]
+    if missing:
+        msg = f"{path}: no run times for {missing[:3]}"
+        raise ReportError(msg)
+    return doc
+
+
+def run_time_table(doc: dict[str, object]) -> list[str]:
+    """Median wall time per 1e7 histories, seconds, with the range over the runs; one row per arm."""
+    by = {(g["arm"], g["study"], g["case"], g["energy_mev"]): g for g in doc["groups"]}
+    head = ["pencil 100 MeV", "pencil 150 MeV", "pencil 200 MeV", "field 200 MeV", "field 100 MeV (E)", "field 150 MeV (E)"]
+    out = ["| arm | host, threads | " + " | ".join(head) + " |", "|---|---|" + "---|" * len(head)]
+    for arm in ("A-up", "A-port", "B-up", "B-pgcc", "B-picc"):
+        gs = [by[(arm, *c)] for c in RUN_TIME_COLUMNS]
+        hosts = {(g["host"], g["threads"]) for g in gs}
+        if len(hosts) != 1:
+            msg = f"{arm}: run times from more than one host or thread count: {sorted(hosts)}"
+            raise ReportError(msg)
+        host, threads = hosts.pop()
+        cells = [f"{g['median_s']:.0f} ({g['min_s']:.0f}–{g['max_s']:.0f})" for g in gs]
+        out.append(f"| {arm} | {HOSTS.get(host, host)}, {threads} | " + " | ".join(cells) + " |")
+    return out
+
+
 def render(
     contrasts: dict[str, dict[str, object]],
     descriptive: dict[str, object] | None = None,
     fractions: dict[str, float] | None = None,
     topas_halo: dict[tuple[int, str, str], dict[str, object]] | None = None,
     part_e: dict[str, dict[str, object]] | None = None,
+    run_times: dict[str, object] | None = None,
 ) -> dict[str, list[str]]:
     """Every generated block of the report, by marker name.
 
@@ -506,6 +544,8 @@ def render(
     if part_e is not None:
         blocks["table-7-part-e-summary"] = part_e_summary_table(part_e)
         blocks["table-8-part-e-endpoints"] = part_e_endpoint_table(part_e)
+    if run_times is not None:
+        blocks["table-9-run-times"] = run_time_table(run_times)
     return blocks
 
 
@@ -545,6 +585,7 @@ def main(argv: list[str] | None = None) -> int:
             load_fractions(FRACTIONS_JSON),
             load_topas_halo(args.topas_halo_json),
             load_part_e(args.part_e_json),
+            load_run_times(RUN_TIMES_JSON),
         )
         if not (args.write or args.check):
             for name, lines in blocks.items():

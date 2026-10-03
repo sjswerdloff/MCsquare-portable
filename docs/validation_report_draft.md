@@ -648,8 +648,26 @@ mm outside the field edge at D mm depth, as a difference in percentage points of
    The pre-specified descriptive comparison with intervals at 100, 150 and 200 MeV (#54, Table 6) shows the range
    offset at all three energies (0.42 to 0.54 mm) and, at 100 and 150 MeV, outer-annulus fractions down to about a
    third of TOPAS's. TD's confirmatory arms on one host have not been run.
-5. **Speed.** Run time per 1e7 histories by arm and host is in the run records and will be tabulated as resource
-   information, not as a performance claim.
+5. **Speed.** Table 9 gives the wall time per 1e7 histories of every run in the confirmatory acquisitions, from the
+   runs' own records. It is resource information, not a performance claim: one run at a time per host, each host's
+   thread count, no tuning. **Portable built with the free compilers (gcc on Linux, MinGW-w64 gcc on Windows) takes
+   2.4 to 2.7 times as long as the Intel-built codes, on the same host, case and energy.** Portable built with icc runs
+   at about upstream's speed (B-picc against B-up), so the cost is the compiler's, not the port's. Dropping the dependence on
+   Intel compilers is therefore possible at that cost in run time, or with icc where it is available.
+
+   **Table 9. Wall time per 1e7 histories, seconds: median (range) over 8 runs. Pencil beam and the 200 MeV field:
+   acquisition `2f9dab40` (§4). Field at 100 and 150 MeV: part E (§5.5), 6e7 histories per run. Lenovo: Core
+   i5-6400T (4 threads); HP: Core i5-6500T (3 threads).**
+
+<!-- BEGIN GENERATED: table-9-run-times -->
+| arm | host, threads | pencil 100 MeV | pencil 150 MeV | pencil 200 MeV | field 200 MeV | field 100 MeV (E) | field 150 MeV (E) |
+|---|---|---|---|---|---|---|---|
+| A-up | Lenovo, 4 | 83 (82–84) | 148 (147–148) | 222 (221–223) | 163 (160–165) | 60 (60–62) | 109 (107–110) |
+| A-port | Lenovo, 4 | 206 (205–206) | 370 (369–370) | 554 (553–555) | 411 (409–419) | 154 (154–154) | 276 (272–277) |
+| B-up | HP, 3 | 90 (87–91) | 162 (161–165) | 248 (248–252) | 179 (179–180) | 64 (64–65) | 118 (118–119) |
+| B-pgcc | HP, 3 | 218 (214–222) | 392 (391–398) | 595 (592–609) | 441 (439–450) | 163 (160–165) | 296 (294–301) |
+| B-picc | HP, 3 | 84 (82–85) | 152 (152–154) | 236 (233–237) | 171 (170–173) | 60 (60–60) | 112 (112–112) |
+<!-- END GENERATED: table-9-run-times -->
 
 ## 7. Limitations
 
@@ -711,6 +729,9 @@ Portable MCsquare repository.
   `validation/report_data/field_e_analysis_26a93235.json` (and its table, `.md`), written by
   `validation/field_followup_analyse.py` at `26a93235` from all four (dataset fingerprint sha256
   `891933e22ce1e126076f22346a2bdf752e2c4008d60d6877710121d82fab0685`, 24,020 files).
+- **Run times (Table 9):** `validation/report_data/run_times.json`, written by `validation/report_run_times.py` from the
+  160 run records of the collected endpoint records above and the run records of part E's 80 analysed runs (the two
+  rerun cells at `b4b3bce3`).
 - **Tables:** `python validation/report_confirmatory_tables.py --check` confirms that the tables in this report are
   what those documents render.
 
