@@ -15,7 +15,7 @@ on:
     paths: [.gitea/workflows/lungman-lenovo.yml]
 
 env:
-  MODE: smoke
+  MODE: full
   LENOVO: DESKTOP-SR5GKKA
   UPSTREAM: 85bf2911ddadbb40bd41b1a18b4b247536bb33ab
   PATCH_SHA256: e22990c96942286304f538b844ed2697a917c4e8b235f970731824b90ae8e347
