@@ -43,6 +43,10 @@ Usage:
   python field_followup_analyse.py --root DIR [--root DIR] --commit SHA --status [--mode smoke]
   python field_followup_analyse.py --root DIR [--root DIR] --commit SHA --json OUT.json --md OUT.md
                                    [--collection-closed "who, and the evidence"]
+
+  Acquisition amendment 1 (the two cells cut by the 3 h timeout, run again at a later commit): add
+  --rerun-root DIR [--rerun-root DIR] --rerun-commit SHA to either form. A-port and B-pgcc at 150 MeV are then
+  read from the rerun roots only, verified against SHA, and the interrupted cells are not read.
 """
 
 from __future__ import annotations
@@ -58,7 +62,7 @@ import statistics as st
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import apples_analyse as aa
@@ -90,6 +94,11 @@ _SEED_DIR = re.compile(r"^s(\d{6})$")
 _RUN_NAME = re.compile(r"^s\d")  # named like a run directory, whatever follows
 _RUN_FILES = ("run.json", "Dose.raw")  # a directory holding either, at any depth, holds run data
 CELL_ENTRIES = ("snapshot", "snapshot_sha256.txt", "fcase", "fcase_sha256.txt", "run_root.txt", "inputs.tar")  # beside the runs
+# Acquisition amendment 1 (docs/field_100_150_plan.md): these two cells were stopped at the runners' 3 h job timeout and
+# were run again in full at a later commit. With --rerun-root/--rerun-commit they are read from the rerun and only from it.
+RERUN_CELLS = (("A-port", 150), ("B-pgcc", 150))
+# All a rerun commit may change relative to the acquisition commit: the two run requests and the plan.
+RERUN_MAY_CHANGE = (".gitea/workflows/field-e-linux.yml", ".gitea/workflows/field-e-windows.yml", "docs/field_100_150_plan.md")
 _COUNT_LABEL = "Nbr primaries simulated"
 _COUNT_LINE = re.compile(r"Nbr primaries simulated: (\d+)(?: \(\d+ generated outside the geometry\))?")  # compute_simulation.c
 _SHA_LINE = re.compile(r"^([0-9a-f]{64})  (\S+)$")
@@ -192,6 +201,33 @@ def expected(commit: str, mode: str, repo: Path = REPO) -> Expected:
             plan = f"{fr.plan_name(e)}.txt"
             case_text[e] = {"cube.mhd": Path("cube.mhd").read_bytes(), plan: Path(plan).read_bytes()}
     return Expected(commit, mode, blobs, inputs, case_text, cube_raw)
+
+
+def rerun_commit_problems(acquisition: str, rerun: str, repo: Path = REPO) -> list[str]:
+    """Why `rerun` cannot stand in for the acquisition commit, if it cannot: it must descend from it and change nothing
+    but RERUN_MAY_CHANGE. Then the inputs, run lists, seeds and binaries the rerun ran are the acquisition's."""
+    if not aa.FULL_SHA.match(rerun):
+        return [f"rerun commit must be a full 40-hex sha, got {rerun!r}"]
+    if rerun == acquisition:
+        return ["the rerun commit is the acquisition commit"]
+    anc = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", acquisition, rerun],
+                         capture_output=True, text=True, check=False)
+    if anc.returncode != 0:
+        return [f"{rerun} does not descend from the acquisition commit {acquisition}" + (f" ({anc.stderr.strip()})" if anc.stderr.strip() else "")]
+    diff = subprocess.run(["git", "-C", str(repo), "diff", "--name-only", acquisition, rerun],
+                          capture_output=True, text=True, check=False)
+    if diff.returncode != 0:
+        return [f"cannot compare {acquisition} with {rerun}: {diff.stderr.strip()}"]
+    extra = sorted(set(diff.stdout.split()) - set(RERUN_MAY_CHANGE))
+    return [f"the rerun commit changes files other than the run requests and the plan: {extra[:5]}"] if extra else []
+
+
+@dataclass
+class Rerun:
+    """Acquisition amendment 1: the roots holding the rerun of RERUN_CELLS, and what its runs are verified against."""
+
+    roots: list[Path]
+    want: Expected
 
 
 def expected_cfg(arm: str, energy: int, seed: int, mode: str) -> list[str]:
@@ -411,13 +447,16 @@ def _stray(entries: list[Path], where: str, notes: list[str]) -> list[str]:
     return issues
 
 
-def load(roots: list[Path], want: Expected) -> tuple[Cells, Issues, aa.Ledger, list[str]]:
-    """Every run of the frozen lists, VERIFIED. No dose value is read here. Refuses if an arm is in no root."""
-    for root in roots:
+def load(roots: list[Path], want: Expected, rerun: Rerun | None = None) -> tuple[Cells, Issues, aa.Ledger, list[str]]:
+    """Every run of the frozen lists, VERIFIED. No dose value is read here. Refuses if an arm is in no root.
+
+    With `rerun`, the cells of RERUN_CELLS come from the rerun roots, verified against the rerun commit, and the
+    interrupted cells of the original roots are not read. Anything else in a rerun root is a population issue."""
+    for root in [*roots, *(rerun.roots if rerun else [])]:
         if not root.is_dir():
             msg = f"{root} is not a directory"
             raise InputError(msg)
-    base = Path(os.path.commonpath([str(r.resolve()) for r in roots]))
+    base = Path(os.path.commonpath([str(r.resolve()) for r in [*roots, *(rerun.roots if rerun else [])]]))
     ledger = aa.Ledger(base)
     home: dict[str, Path] = {}
     for arm, spec in fr.ARMS.items():
@@ -438,11 +477,40 @@ def load(roots: list[Path], want: Expected) -> tuple[Cells, Issues, aa.Ledger, l
     for arm in fr.ARMS:
         inside = [e for e in sorted(home[arm].iterdir()) if not (e.name in cell_names and e.is_dir())]
         outside.setdefault(arm, []).extend(_stray(inside, f"{arm} ({home[arm].name})", notes))
+    rerun_home: dict[str, Path] = {}
+    rerun_outside: dict[str, list[str]] = {}
+    if rerun is not None:
+        rerun_arms = {a for a, _ in RERUN_CELLS}
+        for arm in sorted(rerun_arms):
+            holders = [r.resolve() for r in rerun.roots if (r / fr.ARMS[arm].directory).is_dir()]
+            if len(holders) != 1:
+                msg = f"rerun arm {arm} is in {len(holders)} of the rerun roots, need exactly 1"
+                raise InputError(msg)
+            rerun_home[arm] = holders[0] / fr.ARMS[arm].directory
+        own = {fr.ARMS[a].directory for a in rerun_arms}
+        for root in rerun.roots:
+            stray = _stray([e for e in sorted(root.iterdir()) if e.name not in own], f"rerun {root}", notes)
+            stray += [f"rerun {root}: {e.name} is not a rerun arm" for e in sorted(root.iterdir())
+                      if e.name in arm_dirs - own and e.is_dir()]
+            for arm in (a for a in rerun_arms if rerun_home[a].parent == root.resolve()):
+                rerun_outside.setdefault(arm, []).extend(stray)
+        for arm in sorted(rerun_arms):
+            mine = {f"e{e}" for a, e in RERUN_CELLS if a == arm}
+            inside = [e for e in sorted(rerun_home[arm].iterdir()) if not (e.name in mine and e.is_dir())]
+            rerun_outside.setdefault(arm, []).extend(_stray(inside, f"rerun {arm} ({rerun_home[arm].name})", notes))
+            rerun_outside[arm] += [f"rerun {arm}: {e.name} is not a rerun cell" for e in inside if e.name in cell_names]
     cells: Cells = {}
     issues: Issues = {}
     for arm in fr.ARMS:
         for energy in fr.ENERGIES:
-            cell, runs, why = home[arm] / f"e{energy}", [], list(outside[arm])
+            w = want
+            if rerun is not None and (arm, energy) in RERUN_CELLS:
+                w = rerun.want
+                cell, runs, why = rerun_home[arm] / f"e{energy}", [], list(outside[arm]) + rerun_outside.get(arm, [])
+                notes.append(f"{arm} {energy} MeV: read from the rerun at {w.commit[:12]} (acquisition amendment 1); "
+                             f"the cell of {want.commit[:12]} is not read")
+            else:
+                cell, runs, why = home[arm] / f"e{energy}", [], list(outside[arm])
             seeds = fr.seeds(arm, energy, want.mode)
             entries = sorted(cell.iterdir()) if cell.is_dir() else []
             present = {int(m[1]) for e in entries if e.is_dir() and (m := _SEED_DIR.match(e.name))}
@@ -452,13 +520,13 @@ def load(roots: list[Path], want: Expected) -> tuple[Cells, Issues, aa.Ledger, l
             why += _stray([e for e in others if e.name not in CELL_ENTRIES or _run_like(e)], f"{arm} {energy} MeV", notes)
             for rel in RUN_LIST_FILES:
                 snap = cell / "snapshot" / rel
-                if not snap.is_file() or blob_id(ledger.read_bytes(snap)) != want.blobs[rel]:
+                if not snap.is_file() or blob_id(ledger.read_bytes(snap)) != w.blobs[rel]:
                     why.append(f"{arm} {energy} MeV: the run host's snapshot of {rel} is not the acquisition commit's")
             for s in seeds:
                 if s not in present:
                     continue
                 run = Run(arm, energy, s, cell / f"s{s}")
-                verify_run(run, want, ledger)
+                verify_run(run, w, ledger)
                 why += [f"{run.label}: {p}" for p in run.problems]
                 runs.append(run)
             cells[(arm, energy)], issues[(arm, energy)] = runs, why
@@ -657,13 +725,29 @@ def _own_blobs(repo: Path, at_acquisition: dict[str, str]) -> dict[str, object]:
     return out
 
 
-def run(roots: list[Path], commit: str, *, closed: str | None = None, repo: Path = REPO) -> dict[str, object]:
+def make_rerun(commit: str, want: Expected, rerun_roots: list[Path] | None, rerun_commit: str | None,
+               repo: Path = REPO) -> Rerun | None:
+    """The rerun of acquisition amendment 1, or None. Refuses a rerun commit that is not the acquisition's inputs."""
+    if (rerun_roots is None) != (rerun_commit is None):
+        msg = "--rerun-root and --rerun-commit go together"
+        raise InputError(msg)
+    if rerun_roots is None or rerun_commit is None:
+        return None
+    bad = rerun_commit_problems(commit, rerun_commit, repo)
+    if bad:
+        raise InputError("; ".join(bad))
+    return Rerun(list(rerun_roots), replace(want, commit=rerun_commit))
+
+
+def run(roots: list[Path], commit: str, *, closed: str | None = None, repo: Path = REPO,
+        rerun_roots: list[Path] | None = None, rerun_commit: str | None = None) -> dict[str, object]:
     """Verify the whole population, and only then read dose values.
 
     With any population issue the analysis refuses before a dose value is read, unless `closed` states who declares the
     acquisition closed and on what evidence. That statement is a declaration this script cannot check; it is recorded."""
     want = expected(commit, "full", repo)
-    cells, issues, ledger, notes = load(roots, want)
+    rerun = make_rerun(commit, want, rerun_roots, rerun_commit, repo)
+    cells, issues, ledger, notes = load(roots, want, rerun)
     before = [why for cell in issues.values() for why in cell]
     if closed is not None and not closed.strip():
         msg = "--collection-closed needs a statement: who declares the acquisition closed, and the evidence"
@@ -676,6 +760,8 @@ def run(roots: list[Path], commit: str, *, closed: str | None = None, repo: Path
     measure_all(cells, issues)
     return {
         "label": LABEL, "plan": "docs/field_100_150_plan.md", "acquisition_commit": commit, "notes": notes,
+        "rerun": None if rerun is None else {"amendment": "acquisition amendment 1", "commit": rerun.want.commit,
+                                             "cells": [f"{a} {e} MeV" for a, e in RERUN_CELLS]},
         "collection": {"state": "closed by declaration, with population issues" if before else "complete and verified",
                        "population_issues_before_any_dose_was_read": len(before), "declared_closed": closed},
         "analysis_files": _own_blobs(repo, want.blobs), "dataset_fingerprint": ledger.fingerprint(),
@@ -689,10 +775,12 @@ def run(roots: list[Path], commit: str, *, closed: str | None = None, repo: Path
     }
 
 
-def status(roots: list[Path], commit: str, mode: str, *, repo: Path = REPO) -> tuple[bool, list[str]]:
+def status(roots: list[Path], commit: str, mode: str, *, repo: Path = REPO,
+           rerun_roots: list[Path] | None = None, rerun_commit: str | None = None) -> tuple[bool, list[str]]:
     """Verification only: no dose value is read. Returns (every run of the frozen list verified, report lines)."""
     want = expected(commit, mode, repo)
-    cells, issues, _ledger, notes = load(roots, want)
+    rerun = make_rerun(commit, want, rerun_roots, rerun_commit, repo)
+    cells, issues, _ledger, notes = load(roots, want, rerun)
     n = len(fr.seeds(next(iter(fr.ARMS)), fr.ENERGIES[0], mode))
     lines = [f"{a} {e} MeV: {sum(r.usable for r in runs)} of {n} verified" for (a, e), runs in cells.items()]
     lines += [f"  {why}" for cell in issues.values() for why in cell] + [f"note: {x}" for x in notes]
@@ -705,6 +793,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--commit", required=True, help="the acquisition commit, full sha")
     p.add_argument("--mode", choices=sorted(fr.HISTORIES), default="full")
     p.add_argument("--status", action="store_true", help="verify the runs only; no dose value is read")
+    p.add_argument("--rerun-root", type=Path, action="append",
+                   help="directory holding the rerun of the cells cut by the timeout (acquisition amendment 1); repeatable")
+    p.add_argument("--rerun-commit", help="the commit the rerun ran at, full sha (with --rerun-root)")
     p.add_argument("--json", type=Path)
     p.add_argument("--md", type=Path)
     p.add_argument("--collection-closed", metavar="STATEMENT",
@@ -713,7 +804,7 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     try:
         if a.status:
-            ok, lines = status(a.root, a.commit, a.mode)
+            ok, lines = status(a.root, a.commit, a.mode, rerun_roots=a.rerun_root, rerun_commit=a.rerun_commit)
             print("\n".join(lines))
             print(f"{'VERIFIED' if ok else 'NOT VERIFIED'}: mode {a.mode}; no dose value was read")
             return 0 if ok else 1
@@ -721,7 +812,7 @@ def main(argv: list[str] | None = None) -> int:
             p.error("smoke runs are checked for completion only: use --status")
         if a.json is None or a.md is None:
             p.error("--json and --md are required unless --status is given")
-        doc = run(a.root, a.commit, closed=a.collection_closed)
+        doc = run(a.root, a.commit, closed=a.collection_closed, rerun_roots=a.rerun_root, rerun_commit=a.rerun_commit)
     except InputError as e:
         print(f"field_followup_analyse.py: REFUSED: {e}", file=sys.stderr)
         return 2
