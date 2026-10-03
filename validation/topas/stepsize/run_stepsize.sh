@@ -9,6 +9,7 @@ MODE=${1:?smoke|full}; THREADS=${2:-12}
 REPO=/Users/stuartswerdloff/ai/liberated/kimi-kindled/kindled_projects/MCsquare-portable
 SHA=$(/usr/bin/git -C "$REPO" rev-parse origin/main) || exit 3
 TOP="/Volumes/T7 Shield/SMBWritable/topas/stepsize/${SHA:0:12}"
+# shellcheck disable=SC2034  # SEEDS_* are read through eval below
 case "$MODE" in
   smoke) N=10000;   SEEDS_ctrl="913901"; SEEDS_ms0p5="913911"; SEEDS_ms0p1="913921"; ROOT="$TOP/smoke" ;;
   full)  N=1000000; SEEDS_ctrl="913001 913002"; SEEDS_ms0p5="913011 913012"; SEEDS_ms0p1="913021 913022"; ROOT="$TOP/full" ;;
