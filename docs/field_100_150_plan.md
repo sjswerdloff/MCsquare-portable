@@ -255,3 +255,36 @@ made after the freeze and why, and the commit of the analysis that produced the 
   file's status and chronology, nothing else. The run lists, seeds, histories, endpoints, margins and the analysis
   are those of `891dd34e`. A change to the analysis that a later review requires is made as a recorded amendment,
   in a new commit, before any endpoint is read (#60, a display matter, is open).
+- 2026-10-02 17:32 NZDT: full run from `df2fabbd2566fc38d36dfd32daecc3147fa2403c` (workflow runs 429, Linux, and 430,
+  Windows). 8 of the 10 run jobs succeeded. "Run A-port at 150 MeV" (task 10860, Lenovo) and "Run B-pgcc at 150 MeV"
+  (task 10861, HP) were stopped at 180 minutes; the job log ends "Job failed / context deadline exceeded". That is the
+  runners' default job timeout of 3 h, which caps a workflow's `timeout-minutes`; the Gitea server's
+  `ENDLESS_TASK_TIMEOUT` is also 3 h by default. The smoke runs were too short to show it. Each of the two cells has 6
+  complete runs; the 7th (s961057, s963057) has no `run.json` and no dose file, and the 8th (s961058, s963058) never
+  started. Pack, upload and cleanup ran as designed: `field_e_A_df2fabbd2566_full.tar.gz` (sha256
+  `f6e42b7b8b47e52dba76a116373e26a393660472542051bc7b050f4eb787d94e`) and `field_e_B_df2fabbd2566_full.tar.gz`
+  (sha256 `20a77f25651a6102758782a47be98af7622b845f1ec35fc9945cbd964bb95002`) are on the share and match; both run
+  trees were removed from the PCs.
+- 2026-10-03 20:38 NZDT: `field_followup_analyse.py --mode full --status` on both extracted trees: 76 of 80 runs
+  verified, NOT VERIFIED (the four runs above). No dose value was read.
+- 2026-10-04: sjswerdloff raised the job timeouts of the runners and the server to 12 h and approved rerunning the two
+  cells.
+- **Acquisition amendment 1**, 2026-10-04, recorded in the run request that makes it (this commit), before any
+  dose value of the full run has been read:
+  - The two interrupted cells are run again **in full**: A-port at 150 MeV on the Lenovo and B-pgcc at 150 MeV on
+    the HP, 8 runs each, with the cell's frozen seeds, histories, threads and binary (all still read from
+    `field_followup_runs.py`, which is unchanged). Whole cells rather than the four missing runs, so that every cell
+    the analysis reads comes from one job, and no run of an interrupted cell is read at all.
+  - Which cells are rerun was decided by the timeout alone.
+  - The run request differs from the acquisition commit only in the two run workflows (the matrix restricted to the
+    cell, a new line under "Run requests", and on the HP the run tree is written on the Windows drive,
+    `/mnt/c/fe-study/fe`, so that WSL's virtual disk does not grow: sjswerdloff, 2026-10-02 and 2026-10-04) and in
+    this file.
+  - Smoke first, at this commit; then full, at the next. The HP's smoke run uses the same seed, binary and inputs as
+    the smoke run of `52d6aa33`, which wrote inside WSL. Its dose sha256 is compared with that run's. Equal shows that
+    the output location changed nothing. A difference is not evidence about the location, because the run may not be
+    deterministic for a seed with 3 threads; that question is then left open and stated.
+  - The analysis is amended before any endpoint is read, in a reviewed change, so that it takes these two cells from
+    the rerun archives and only from them: it verifies their runs against the rerun commit, checks that the rerun
+    commit differs from the acquisition commit only in the files named above, and does not read the interrupted
+    cells.
