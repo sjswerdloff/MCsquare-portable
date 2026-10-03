@@ -304,3 +304,110 @@ def test_ring_fraction_extract_reads_only_seed_directories_of_the_upstream_arms(
     doc = rf.document(tmp_path)
     assert doc["mean_fraction"] == {"P100/ring_40_40_80": pytest.approx(0.003)}
     assert doc["n_runs_per_endpoint"] == 2
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Table 6: TOPAS against Portable (descriptive), from the document validation/topas_halo_compare.py wrote
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+def halo_row(**over: object) -> dict[str, object]:
+    base = {"endpoint": "R80", "status": "difference", "estimate": -0.42478, "ci95": [-0.42617, -0.42340], "uncertainty": "welch"}
+    return {**base, **over}
+
+
+def test_a_topas_difference_cell_is_signed_to_four_decimals() -> None:
+    assert rt.topas_halo_cell(halo_row()) == "−0.4248 [−0.4262, −0.4234]"
+
+
+def test_a_topas_ratio_cell_is_unsigned_to_three_decimals() -> None:
+    assert rt.topas_halo_cell(halo_row(endpoint="ring_60_40_80", status="ratio", estimate=0.4481, ci95=[0.4283, 0.4689])) == (
+        "0.448 [0.428, 0.469]"
+    )
+
+
+def test_a_ring_with_a_zero_run_gives_the_run_counts_and_no_number() -> None:
+    row = {
+        "endpoint": "ring_40_80_200",
+        "status": rt.TOPAS_NO_RATIO,
+        "mcsquare": {"n": 8, "n_nonzero": 0, "mean_fraction": 0.0},
+        "topas": {"n": 8, "n_nonzero": 3, "mean_fraction": 1e-9},
+    }
+    assert rt.topas_halo_cell(row) == "no ratio: non-zero in 0 of 8 MCsquare and 3 of 8 TOPAS runs"
+
+
+def test_a_row_whose_precision_was_not_estimated_keeps_its_estimate_and_gets_no_interval() -> None:
+    text = "not estimated: zero sample variance in both codes"
+    assert rt.topas_halo_cell(halo_row(estimate=-0.5, ci95=None, uncertainty=text)) == f"−0.5000 ({text})"
+
+
+def test_an_interval_beside_a_not_estimated_precision_is_refused() -> None:
+    with pytest.raises(rt.ReportError, match="an interval beside"):
+        rt.topas_halo_cell(halo_row(ci95=[-0.5, -0.5], uncertainty="not estimated: zero sample variance in both codes"))
+
+
+def test_an_unknown_topas_row_status_is_refused() -> None:
+    with pytest.raises(rt.ReportError, match="unknown status"):
+        rt.topas_halo_cell(halo_row(status="equivalent"))
+
+
+def test_table_6_has_one_row_per_endpoint_and_every_cell_is_the_documents_number() -> None:
+    rows = rt.load_topas_halo(rt.TOPAS_HALO_JSON)
+    assert len(rows) == 117  # 3 energies x (R80 + 2 slabs x (sigma + 5 rings)) x 3 arms
+    lines = rt.topas_halo_table(rows)
+    assert len(lines) - 2 == 39
+    r = rows[(150, "ring_125_80_200", "B-picc")]
+    wanted = f"{r['estimate']:.3f} [{r['ci95'][0]:.3f}, {r['ci95'][1]:.3f}]"
+    line = next(x for x in lines if "80–200 mm annulus at 125 mm" in x)
+    assert line.split(" | ")[4] == wanted
+    assert sum("no ratio: non-zero in 0 of 8 MCsquare and 0 of 8 TOPAS runs" in x for x in lines) == 2
+
+
+def test_td_bands_appear_only_where_the_document_carries_them() -> None:
+    lines = rt.topas_halo_table(rt.load_topas_halo(rt.TOPAS_HALO_JSON))
+    banded = [x for x in lines[2:] if not x.endswith("|  |")]
+    assert len(banded) == 9
+    assert all(x in lines[-13:] for x in banded)  # the 200 MeV rows
+    assert lines[-13].endswith("| [−0.30, +0.30] |")
+    assert lines[-1].endswith("| [0.75, 1.25] |")
+
+
+@pytest.mark.parametrize("change", ["drop", "duplicate", "extra", "arms"])
+def test_a_topas_document_that_is_not_exactly_the_tables_rows_is_refused(tmp_path: Path, change: str) -> None:
+    doc = json.loads(rt.TOPAS_HALO_JSON.read_text(encoding="utf-8"))
+    if change == "drop":
+        doc["rows"].pop()
+    elif change == "duplicate":
+        doc["rows"].append(doc["rows"][0])
+    elif change == "extra":
+        doc["rows"].append({**doc["rows"][0], "endpoint": "sigma_3"})
+    else:
+        doc["mcsquare"]["arms"] = ["A-port", "B-pgcc"]
+    path = tmp_path / "h.json"
+    path.write_text(json.dumps(doc))
+    with pytest.raises(rt.ReportError):
+        rt.load_topas_halo(path)
+    assert rt.main(["--check", "--topas-halo-json", str(path)]) == 2
+
+
+def test_check_fails_when_a_table_6_cell_is_edited(tmp_path: Path) -> None:
+    text = rt.REPORT.read_text(encoding="utf-8")
+    assert text.count("| −0.4253 [−0.4260, −0.4247] |") == 1
+    edited = tmp_path / "report.md"
+    edited.write_text(text.replace("| −0.4253 [−0.4260, −0.4247] |", "| −0.0253 [−0.4260, −0.4247] |"), encoding="utf-8")
+    assert rt.main(["--check", "--report", str(edited)]) == 1
+
+
+def test_render_without_the_topas_document_has_no_table_6() -> None:
+    assert "table-6-topas-halo" not in rt.render(rt.load(rt.ANALYSIS_JSON))
+
+
+def test_check_names_the_block_that_is_out_of_date(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    text = rt.REPORT.read_text(encoding="utf-8")
+    edited = tmp_path / "report.md"
+    edited.write_text(text.replace("| −0.4253 [−0.4260, −0.4247] |", "| −0.0253 [−0.4260, −0.4247] |"), encoding="utf-8")
+    assert rt.main(["--check", "--report", str(edited)]) == 1
+    assert "(blocks: table-6-topas-halo)" in capsys.readouterr().err
+    edited.write_text(text.replace("| A | not established | 46 / 46 |", "| A | holds | 52 / 52 |"), encoding="utf-8")
+    assert rt.main(["--check", "--report", str(edited)]) == 1
+    assert "(blocks: confirmatory-summary)" in capsys.readouterr().err

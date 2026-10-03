@@ -109,7 +109,9 @@ TOST at one-sided α = 0.05; three outcomes (equivalent, not equivalent, inconcl
   (intersection–union; no multiplicity adjustment).
 - **Individual claims:** Holm within each confirmatory contrast, a family of 34.
 - **A complete, verified population only.** A missing, duplicated, unexpected or unverifiable run makes the
-  contrast PARTIAL: descriptive estimates, no joint claim, no Holm decisions.
+  contrast PARTIAL: descriptive estimates, no joint claim, no Holm decisions. No dose value is read until every
+  run of both hosts has been verified; with any such issue the analysis refuses, and proceeds only on a recorded
+  statement that the acquisition is closed (analysis amendment 1).
 - **Invalid values.** A non-finite or non-positive central-axis dose, an R80 or R20 without exactly one crossing,
   or a non-finite lateral value (it is a percentage of the same run's central-axis dose at that depth, so it is
   undefined when that dose is not finite and positive) in any run makes that endpoint not established. No run is
@@ -122,10 +124,14 @@ TOST at one-sided α = 0.05; three outcomes (equivalent, not equivalent, inconcl
   counts against the joint claim. Eight runs that are all zero can miss a rare contribution, and the sample alone
   cannot bound it (#55 review 7098). The table marks such a row "all runs zero in both arms" and gives each arm's
   simulated histories.
-- **Secondary joint claim, fixed now.** Because an all-zero row is foreseeable at 100 MeV, 70 mm (the 80–200 mm
-  annulus scored nothing there in parts A and B), each confirmatory contrast also reports: equivalent on every
-  endpoint other than rows where every run of both arms is exactly zero. It is reported beside the primary joint
-  claim, never in its place, with the excluded rows listed.
+- **Secondary joint claim.** Because an all-zero row is foreseeable at 100 MeV, 70 mm (the 80–200 mm
+  annulus scored nothing there in parts A and B), each confirmatory contrast also reports: every endpoint other
+  than rows where every run of both arms is exactly zero is equivalent **after Holm adjustment over the full
+  family of 34** (analysis amendment 1; as first frozen it used the unadjusted outcomes). The rows set aside are
+  chosen by the data, so the intersection–union argument that covers the primary claim does not cover this one;
+  Holm over the fixed family of 34 bounds the chance of any false equivalence at 0.05 whichever rows are set
+  aside, and the all-zero and invalid rows stay in that family as non-rejections. It is reported beside the
+  primary joint claim, never in its place, with the excluded rows listed.
 - **What the lateral rows report.** Each arm's mean, in points, beside the difference and its intervals, so that
   a reader can see when a row is equivalent because both doses are very small.
 - **Descriptive ratio at 50 and 70 mm.** For those rows the table also gives the ratio of the arm means (arm /
@@ -208,23 +214,93 @@ the programme before anything runs:
 ## Analysis inputs and what is verified
 
 `validation/field_followup_analyse.py` reads the two extracted trees. It refuses if an arm's directory is absent,
-so one host's endpoints are never read without the other's. For every run of the frozen lists it checks, and marks
+so one host's endpoints are never read without the other's. It verifies the whole population first and reads no
+dose value until that is done (analysis amendment 1). For every run of the frozen lists it checks, and marks
 the contrast PARTIAL otherwise:
 
 - the run lists themselves: `validation/field_followup_runs.py` (which the workflows take their seeds, histories,
   threads and binaries from) and `field_edge_make_cases.py`, as the analysis imports them, must be the files of
   the acquisition commit, and so must the copies each run job snapshotted;
 - `run.json` against the frozen seed, energy, threads, histories, host, mode, commit and the binary hash above;
-  `cfg.txt` line for line; the log's simulated count against `run.json`, and no unrecognised config tag;
+  `cfg.txt` line for line; the log's simulated count against `run.json` (exactly one count line, in the form
+  MCsquare prints, compared as a whole), and no unrecognised config tag;
 - the plan and CT against what `field_edge_make_cases.py` writes (text files compared after CRLF to LF: the Lenovo
   writes CRLF), and every materials, scanner and beam-model file against the committed blob, with no file added
   or missing;
 - `Dose.raw` and `Dose.mhd` against the sha256 written beside them on the run host, `Dose.mhd` against the grid
   the analysis assumes when it reads `Dose.raw` (150 voxels of 2 mm per side, 32-bit little-endian), and the size
-  of `Dose.raw`. The dose is hashed again when it is read, and the bytes analysed are the bytes hashed.
+  of `Dose.raw`. The dose is hashed again when it is read, and the bytes analysed are the bytes hashed;
+- the layout: anything under a root that looks like run data (a name beginning `s` and a digit, or a directory
+  holding a `run.json` or a `Dose.raw`) and is not a run of the frozen lists is a population issue for the arm or
+  host it sits in. Other entries are listed as ignored.
 
 **It then computes every endpoint itself, from those dose files.** No endpoint value written on a run host is
 used, which closes for this part the limit that #52 records for parts A and B.
+
+## Analysis amendments after the freeze, before any endpoint was read
+
+### Analysis amendment 1, 2026-10-02 (alden-ec2221c7, #59 review 7116; silas-397300f6 concurring)
+
+**State of the data.** The full runs started at 17:32 NZDT from the acquisition commit and were in progress on
+both hosts. No run tree of the full set had reached the share, and no dose value of it had been read. The
+acquisition (run lists, seeds, histories, workflows, binaries) is not changed.
+
+**What the frozen analysis did and should not have:**
+
+1. **Secondary joint claim.** It was declared from the unadjusted outcomes of the rows left after setting aside
+   the all-zero rows. Fixing the rule in advance makes it reproducible; it does not make it calibrated, because
+   which rows are set aside depends on the data. alden-ec2221c7's example: one all-zero row set aside, and a
+   retained row equivalent at p = 0.030 (Holm p = 0.061), gave "established". The claim now requires the Holm
+   decision, over the full family of 34, of every retained row.
+2. **Reading before the population was known to be complete.** Verification and measurement were interleaved, so
+   with one frozen run missing and both hosts' trees present the script measured the other 79. That withheld the
+   claims but did not keep the rule under "How it runs", item 5. The script now verifies the whole population
+   first. With any population issue it refuses before a dose value is read. It proceeds only when given a
+   statement of who declares the acquisition closed and on what evidence; the statement is written into the
+   output, and the script does not check it. A directory being present is not treated as evidence of completion.
+3. **The simulated count in the log.** `60000000garbage` was accepted as 60000000, and of two different count
+   lines the first was used. Every line carrying the label is now counted; exactly one is required, and the whole
+   line must be the form MCsquare prints.
+4. **Run data outside the frozen lists.** A directory `s9610417` holding a `run.json` was not seen at all, since
+   only names of the form `s` and six digits were considered. Anything that looks like run data and is not a
+   frozen run is now a population issue, at any level under a root.
+
+**What does not change.** The endpoints, margins, the primary joint claim, the Holm family and decisions, the
+zero-variance and invalid-value rules, the descriptive quantities. Each change makes the analysis refuse more or
+claim less; none depends on a dose value.
+
+Also in this amendment's branch, earlier the same evening: very small table values print with three significant
+figures (#60); display only.
+
+### Analysis amendment 2, 2026-10-04: the two rerun cells (acquisition amendment 1)
+
+**State of the data.** The full run of the acquisition commit is on the share; `--status` verified 76 of 80 runs
+and read no dose value. A-port and B-pgcc at 150 MeV were stopped at the runners' 3 h job timeout with 6 of 8 runs.
+Acquisition amendment 1, recorded on `connor/field-e-run` in the run requests that made it, reruns both cells in
+full at a later commit. When this amendment was written that rerun was running, and no dose value of any full run
+had been read.
+
+**The change.** With `--rerun-root` (one or more) and `--rerun-commit`, the script:
+
+1. refuses unless the rerun commit descends from the acquisition commit and changes nothing but the two run
+   workflows and this plan, so its inputs, run lists, seeds, histories, threads and binaries are the acquisition's;
+2. takes the cells A-port 150 MeV and B-pgcc 150 MeV from the rerun roots, and only from them, verifying every run
+   as before but against the rerun commit (the `commit` in `run.json`);
+3. does not read the interrupted cells of the original roots at all;
+4. treats anything else in a rerun root (another arm, another energy, run data outside those cells) as a
+   population issue, as in the original roots, and refuses any root, original or rerun, that holds none of the
+   arms it is given for, since nothing would check its contents (found in review of #66);
+5. records the rerun commit and the two cells in its output.
+
+Without those two arguments it behaves as before.
+
+**What does not change.** Everything else: the population rule (complete and verified before any dose value is
+read), the endpoints, margins, claims and decisions. Which cells are rerun was decided by the timeout, before any
+dose value was read.
+
+**Checked on real data before the full rerun finished.** The original smoke trees of `52d6aa33` with the rerun
+smoke trees: each rerun smoke run verifies against its own commit (`8b3312ef` on the Lenovo, `b89e5e6d` on the HP)
+and is refused against the other's.
 
 ## Compute
 

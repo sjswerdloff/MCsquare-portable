@@ -3,6 +3,8 @@
 The input is the document validation/apples_analyse.py wrote for the collection at the acquisition commit
 (validation/report_data/apples_analysis_2f9dab40.json), and, for the descriptive tables (1b, 2, 5), the document
 validation/report_dose_descriptives.py wrote from the Dose files (validation/report_data/apples_descriptive_2f9dab40.json).
+Table 6 (TOPAS against Portable, descriptive) is rendered from the document validation/topas_halo_compare.py wrote
+(validation/report_data/halo_868d1910.json); its direction is MCsquare minus TOPAS (ratios MCsquare / TOPAS).
 Nothing is recomputed here: every number in a table is a field of one of those documents, formatted. The tables live in the report between marker comments
 
     <!-- BEGIN GENERATED: <name> -->  ...  <!-- END GENERATED: <name> -->
@@ -32,6 +34,7 @@ DESCRIPTIVE_JSON = REPO / "validation" / "report_data" / "apples_descriptive_2f9
 DESCRIPTIVE_SCHEMA = "apples_descriptive/1"
 FRACTIONS_JSON = REPO / "validation" / "report_data" / "apples_ring_fractions_2f9dab40.json"
 FRACTIONS_SCHEMA = "apples_ring_fractions/1"
+TOPAS_HALO_JSON = REPO / "validation" / "report_data" / "halo_868d1910.json"
 REPORT = REPO / "docs" / "validation_report_draft.md"
 
 # report label -> the analysis's contrast name
@@ -40,6 +43,8 @@ DESCRIPTIVE = "B-pgcc vs B-picc (descriptive)"
 SLABS = {100: (40, 60), 150: (80, 125), 200: (100, 200)}
 RINGS = ("5_10", "10_20", "20_40", "40_80", "80_200")
 OUTCOME_MARK = {"equivalent": "E", "inconclusive": "I", "not_equivalent": "NE"}
+TOPAS_ARMS = ("A-port", "B-pgcc", "B-picc")
+TOPAS_NO_RATIO = "no ratio (zero runs)"
 # case-F endpoint -> (row label, unit of the estimate, decimals)
 F_ROWS = {
     "F/lateral_127_5": ("127 mm depth, 5 mm outside the edge", "points", 3),
@@ -316,7 +321,7 @@ def halo_bound_table(contrasts: dict[str, dict[str, object]], fractions: dict[st
     constrain the slab's absolute energy), the share's own uncertainty is not propagated, and an all-zero annulus has
     no interval (stated as such)."""
     out = [
-        "| endpoint | share of the slab's energy (upstream mean) | largest \|ratio − 1\| within the three 95% intervals | product (illustrative) |",
+        "| endpoint | share of the slab's energy (upstream mean) | largest \\|ratio − 1\\| within the three 95% intervals | product (illustrative) |",
         "|---|---|---|---|",
     ]
     order = list(next(iter(contrasts.values()))["rows"])
@@ -337,15 +342,92 @@ def halo_bound_table(contrasts: dict[str, dict[str, object]], fractions: dict[st
     return out
 
 
+def topas_halo_endpoints(energy: int) -> list[tuple[str, str]]:
+    """The endpoints of one energy in table order, each with its label: R80, then sigma and the annuli per slab."""
+    out = [("R80", "R80 (mm)")]
+    for depth in SLABS[energy]:
+        out.append((f"sigma_{depth}", f"σ at {depth} mm (mm)"))
+        out += [(f"ring_{depth}_{r}", f"{r.replace('_', '–')} mm annulus at {depth} mm") for r in RINGS]
+    return out
+
+
+def load_topas_halo(path: Path) -> dict[tuple[int, str, str], dict[str, object]]:
+    """The rows of the TOPAS halo document (validation/topas_halo_compare.py) by (energy, endpoint, arm).
+
+    Refused unless the document holds exactly the rows the table prints, each once: a missing row would leave a
+    cell that cannot be rendered, and a row outside the table would be a result the report does not show.
+    """
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if tuple(doc["mcsquare"]["arms"]) != TOPAS_ARMS:
+        msg = f"{path}: arms are {doc['mcsquare']['arms']}, not {list(TOPAS_ARMS)}"
+        raise ReportError(msg)
+    rows: dict[tuple[int, str, str], dict[str, object]] = {}
+    for r in doc["rows"]:
+        key = (int(r["energy"]), str(r["endpoint"]), str(r["arm"]))
+        if key in rows:
+            msg = f"{path}: {key} appears more than once"
+            raise ReportError(msg)
+        rows[key] = r
+    wanted = {(e, ep, a) for e in SLABS for ep, _ in topas_halo_endpoints(e) for a in TOPAS_ARMS}
+    if set(rows) != wanted:
+        missing, extra = sorted(wanted - set(rows)), sorted(set(rows) - wanted)
+        msg = f"{path}: rows are not the table's: missing {missing[:3]}, not in the table {extra[:3]}"
+        raise ReportError(msg)
+    return rows
+
+
+def topas_halo_cell(row: dict[str, object]) -> str:
+    """One row of the TOPAS halo document: estimate and 95% interval, or why there is none.
+
+    A ring that is zero in some run has no ratio: the cell gives the non-zero run counts of both codes. A row whose
+    precision was not estimated (zero sample variance in both codes) keeps its estimate and says so; it is never
+    printed with an interval.
+    """
+    if row["status"] == TOPAS_NO_RATIO:
+        m, t = row["mcsquare"], row["topas"]
+        return f"no ratio: non-zero in {m['n_nonzero']} of {m['n']} MCsquare and {t['n_nonzero']} of {t['n']} TOPAS runs"
+    if row["status"] not in ("difference", "ratio"):
+        msg = f"{row['endpoint']}: unknown status {row['status']!r}"
+        raise ReportError(msg)
+    signed = row["status"] == "difference"
+    decimals = 4 if signed else 3
+    est = num(float(row["estimate"]), decimals, signed=signed)
+    if row["uncertainty"] != "welch":
+        if row.get("ci95") is not None:
+            msg = f"{row['endpoint']}: an interval beside {row['uncertainty']!r}"
+            raise ReportError(msg)
+        return f"{est} ({row['uncertainty']})"
+    lo, hi = row["ci95"]
+    return f"{est} [{num(lo, decimals, signed=signed)}, {num(hi, decimals, signed=signed)}]"
+
+
+def topas_halo_table(rows: dict[tuple[int, str, str], dict[str, object]]) -> list[str]:
+    out = [f"| energy | endpoint | {' | '.join(TOPAS_ARMS)} | TD band |", "|---|---|" + "---|" * (len(TOPAS_ARMS) + 1)]
+    for energy in SLABS:
+        for i, (endpoint, label) in enumerate(topas_halo_endpoints(energy)):
+            cells = [topas_halo_cell(rows[(energy, endpoint, arm)]) for arm in TOPAS_ARMS]
+            bands = {json.dumps(rows[(energy, endpoint, arm)]["td_reference_band"]) for arm in TOPAS_ARMS}
+            if len(bands) != 1:
+                msg = f"{energy} MeV {endpoint}: the arms carry different TD bands"
+                raise ReportError(msg)
+            band = json.loads(bands.pop())
+            signed = endpoint == "R80" or endpoint.startswith("sigma")
+            shown = "" if band is None else f"[{num(band[0], 2, signed=signed)}, {num(band[1], 2, signed=signed)}]"
+            first = f"{energy} MeV" if i == 0 else ""
+            out.append(f"| {first} | {label} | {' | '.join(cells)} | {shown} |")
+    return out
+
+
 def render(
     contrasts: dict[str, dict[str, object]],
     descriptive: dict[str, object] | None = None,
     fractions: dict[str, float] | None = None,
+    topas_halo: dict[tuple[int, str, str], dict[str, object]] | None = None,
 ) -> dict[str, list[str]]:
     """Every generated block of the report, by marker name.
 
-    The descriptive blocks (Tables 1b, 2 and 5) are rendered when the descriptive document is given, and the
-    far-halo bound when the annulus fractions are.
+    The descriptive blocks (Tables 1b, 2 and 5) are rendered when the descriptive document is given, the
+    far-halo bound when the annulus fractions are, and Table 6 when the TOPAS halo document is.
     """
     blocks = {
         "confirmatory-summary": summary_table(contrasts),
@@ -363,6 +445,8 @@ def render(
         }
     if fractions is not None:
         blocks["halo-bound"] = halo_bound_table(contrasts, fractions)
+    if topas_halo is not None:
+        blocks["table-6-topas-halo"] = topas_halo_table(topas_halo)
     return blocks
 
 
@@ -379,17 +463,28 @@ def splice(report: str, blocks: dict[str, list[str]]) -> str:
     return report
 
 
+def stale_blocks(report: str, blocks: dict[str, list[str]]) -> list[str]:
+    """The names of the blocks whose text in the report is not what was rendered."""
+    return [name for name, lines in blocks.items() if splice(report, {name: lines}) != report]
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     ap.add_argument("--json", type=Path, default=ANALYSIS_JSON, help="the analysis document")
     ap.add_argument("--descriptive-json", type=Path, default=DESCRIPTIVE_JSON, help="the descriptive document")
+    ap.add_argument("--topas-halo-json", type=Path, default=TOPAS_HALO_JSON, help="the TOPAS halo document")
     ap.add_argument("--report", type=Path, default=REPORT)
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--write", action="store_true", help="splice the blocks into the report")
     mode.add_argument("--check", action="store_true", help="exit 1 if the report differs from the rendered blocks")
     args = ap.parse_args(argv)
     try:
-        blocks = render(load(args.json), load_descriptive(args.descriptive_json), load_fractions(FRACTIONS_JSON))
+        blocks = render(
+            load(args.json),
+            load_descriptive(args.descriptive_json),
+            load_fractions(FRACTIONS_JSON),
+            load_topas_halo(args.topas_halo_json),
+        )
         if not (args.write or args.check):
             for name, lines in blocks.items():
                 print(f"## {name}\n\n" + "\n".join(lines) + "\n")
@@ -401,7 +496,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.check:
         if wanted != current:
-            print(f"{args.report} is not what {args.json.name} renders; run with --write", file=sys.stderr)
+            stale = ", ".join(stale_blocks(current, blocks))
+            print(f"{args.report} is not what the committed documents render (blocks: {stale}); run with --write", file=sys.stderr)
             return 1
         return 0
     args.report.write_text(wanted, encoding="utf-8")

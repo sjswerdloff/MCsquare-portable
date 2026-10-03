@@ -1,0 +1,4 @@
+2026-10-03 20:28:09 arm=ctrl maxstep=none seed=913901 n=10000 threads=12 rc=0 wall=8s
+2026-10-03 20:28:17 arm=ms0p5 maxstep=0.5 seed=913911 n=10000 threads=12 rc=0 wall=9s
+2026-10-03 20:28:27 arm=ms0p1 maxstep=0.1 seed=913921 n=10000 threads=12 rc=0 wall=9s
+ALL DONE 2026-10-03 20:28:27

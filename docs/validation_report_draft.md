@@ -2,9 +2,9 @@
 
 **DRAFT, 2026-10-02, in the form of the published MCsquare validations (Souris et al. 2016; Huang et al. 2018). Not
 a publication.** The confirmatory same-host acquisition (commit `2f9dab40`, §4) is complete and its endpoint results
-are in §5.0–§5.2, with figures and gamma tables made from the dose files. Results marked PRELIMINARY
-(§5.4) come from planning runs made before the confirmatory designs were frozen; they are not confirmatory and must
-not be quoted as final.
+are in §5.0–§5.2, with figures and gamma tables made from the dose files. The TOPAS comparison
+(§5.4) is a pre-specified descriptive comparison at 100, 150 and 200 MeV; it is not confirmatory and carries no
+margin or outcome.
 
 Sources are cited compactly: `#N` = an issue or PR on MCsquare-portable; `UR` = the upstream report,
 [OpenMCsquare work item 42](https://gitlab.com/openmcsquare/MCsquare/-/work_items/42); `TD` = `validation/topas_design.md`;
@@ -450,37 +450,92 @@ as reference, 16 runs per platform, margins set before acquisition (#31):
 Largest point estimates: off-axis within ±0.03 points (margins ±0.2 / ±0.5), central axis within −0.08% (margin ±0.5%),
 R80/R20 within ±0.01 mm (margin ±0.5 mm). The claim is against the Linux reference, for one field.
 
-### 5.4 Portable MCsquare against TOPAS (PRELIMINARY)
+### 5.4 Portable MCsquare against TOPAS (descriptive)
 
 OpenTOPAS 4.3.0 / Geant4 11.3.2, EM option 0; the TOPAS dose scorer excludes neutrons, gammas and their descendants.
-Pencil beam (§3.1), 200 MeV, 4 × 1e7 per code (TD; #32). Difference Portable − TOPAS, 95% intervals:
+Pencil beam (§3.1) at 100, 150 and 200 MeV. TOPAS: 8 runs × 1e7 per energy on the Mac Studio, acquisition frozen at
+commit `5aedf3ac` (`validation/topas_halo_addendum.md`, #54). MCsquare: the three Portable arms of the same-host
+acquisition (§4), 8 runs × 1e7 each, unchanged.
 
-| endpoint | difference | 95% |
-|---|---|---|
-| R80 | **−0.512 mm** | [−0.520, −0.504] |
-| σ at 3 mm depth | −0.0021 mm | [−0.0038, −0.0004] |
-| σ at 100 mm | +0.0026 mm | [+0.0008, +0.0044] |
-| σ at 200 mm | +0.0037 mm | [−0.0003, +0.0077] |
+**This comparison is descriptive.** The MCsquare endpoints had been read before its design was fixed, and the
+Portable arms ran on other hosts and with other compilers than TOPAS. There is no margin and no outcome. Intervals
+are pointwise 95% (Welch). The three Portable columns share one TOPAS arm, so they are not three independent
+comparisons. The analysis script was amended twice after the freeze and before any TOPAS dose file was opened; both
+amendments are recorded in the addendum. TD's bands are shown at 200 MeV for reference only: they belong to TD's
+confirmatory design, which has not been run.
 
-Annulus energy-fraction ratios, Portable/TOPAS:
+**Table 6. Pencil beam, MCsquare against TOPAS: R80 and spot σ differences, MCsquare − TOPAS (mm), and annulus
+energy-fraction ratios, MCsquare / TOPAS (fractions of each code's own slab energy). Estimate [95% interval], 8 runs
+per arm. Descriptive: no margin, no outcome.**
 
-| depth | 5–10 mm | 10–20 | 20–40 | 40–80 | 80–200 |
+<!-- BEGIN GENERATED: table-6-topas-halo -->
+| energy | endpoint | A-port | B-pgcc | B-picc | TD band |
 |---|---|---|---|---|---|
-| 100 mm | 0.9956 | 1.0346 | 1.0671 | 0.9720 | 0.7947 |
-| 200 mm | 1.0304 | 0.9404 | 0.9048 | 0.8887 | 0.8898 |
+| 100 MeV | R80 (mm) | −0.4248 [−0.4262, −0.4234] | −0.4248 [−0.4260, −0.4236] | −0.4253 [−0.4260, −0.4247] |  |
+|  | σ at 40 mm (mm) | −0.0107 [−0.0115, −0.0100] | −0.0105 [−0.0115, −0.0094] | −0.0105 [−0.0112, −0.0097] |  |
+|  | 5–10 mm annulus at 40 mm | 0.994 [0.993, 0.994] | 0.994 [0.993, 0.995] | 0.994 [0.993, 0.994] |  |
+|  | 10–20 mm annulus at 40 mm | 0.950 [0.947, 0.953] | 0.949 [0.947, 0.951] | 0.949 [0.946, 0.953] |  |
+|  | 20–40 mm annulus at 40 mm | 0.926 [0.920, 0.933] | 0.927 [0.918, 0.935] | 0.929 [0.922, 0.937] |  |
+|  | 40–80 mm annulus at 40 mm | 1.001 [0.966, 1.037] | 1.016 [0.979, 1.054] | 0.977 [0.937, 1.019] |  |
+|  | 80–200 mm annulus at 40 mm | no ratio: non-zero in 0 of 8 MCsquare and 0 of 8 TOPAS runs | no ratio: non-zero in 0 of 8 MCsquare and 0 of 8 TOPAS runs | no ratio: non-zero in 0 of 8 MCsquare and 0 of 8 TOPAS runs |  |
+|  | σ at 60 mm (mm) | −0.0352 [−0.0361, −0.0343] | −0.0347 [−0.0359, −0.0335] | −0.0347 [−0.0357, −0.0338] |  |
+|  | 5–10 mm annulus at 60 mm | 0.991 [0.991, 0.991] | 0.991 [0.990, 0.992] | 0.991 [0.991, 0.992] |  |
+|  | 10–20 mm annulus at 60 mm | 0.826 [0.825, 0.827] | 0.827 [0.825, 0.828] | 0.826 [0.825, 0.828] |  |
+|  | 20–40 mm annulus at 60 mm | 0.793 [0.788, 0.797] | 0.794 [0.791, 0.797] | 0.795 [0.791, 0.798] |  |
+|  | 40–80 mm annulus at 60 mm | 0.448 [0.428, 0.469] | 0.454 [0.435, 0.473] | 0.455 [0.433, 0.479] |  |
+|  | 80–200 mm annulus at 60 mm | no ratio: non-zero in 0 of 8 MCsquare and 0 of 8 TOPAS runs | no ratio: non-zero in 0 of 8 MCsquare and 0 of 8 TOPAS runs | no ratio: non-zero in 0 of 8 MCsquare and 0 of 8 TOPAS runs |  |
+| 150 MeV | R80 (mm) | −0.5397 [−0.5407, −0.5388] | −0.5401 [−0.5415, −0.5386] | −0.5399 [−0.5417, −0.5382] |  |
+|  | σ at 80 mm (mm) | −0.0047 [−0.0058, −0.0035] | −0.0048 [−0.0055, −0.0041] | −0.0042 [−0.0053, −0.0030] |  |
+|  | 5–10 mm annulus at 80 mm | 0.995 [0.995, 0.996] | 0.995 [0.995, 0.996] | 0.995 [0.995, 0.996] |  |
+|  | 10–20 mm annulus at 80 mm | 1.031 [1.029, 1.034] | 1.032 [1.029, 1.035] | 1.034 [1.031, 1.036] |  |
+|  | 20–40 mm annulus at 80 mm | 1.005 [1.001, 1.008] | 1.006 [1.002, 1.009] | 1.005 [1.000, 1.010] |  |
+|  | 40–80 mm annulus at 80 mm | 0.784 [0.776, 0.792] | 0.784 [0.777, 0.790] | 0.788 [0.780, 0.797] |  |
+|  | 80–200 mm annulus at 80 mm | 0.487 [0.462, 0.514] | 0.505 [0.483, 0.527] | 0.505 [0.488, 0.522] |  |
+|  | σ at 125 mm (mm) | −0.0341 [−0.0354, −0.0328] | −0.0338 [−0.0350, −0.0326] | −0.0333 [−0.0348, −0.0319] |  |
+|  | 5–10 mm annulus at 125 mm | 1.016 [1.015, 1.016] | 1.016 [1.015, 1.016] | 1.016 [1.015, 1.017] |  |
+|  | 10–20 mm annulus at 125 mm | 0.850 [0.848, 0.851] | 0.851 [0.849, 0.852] | 0.850 [0.849, 0.851] |  |
+|  | 20–40 mm annulus at 125 mm | 0.882 [0.879, 0.884] | 0.882 [0.880, 0.885] | 0.881 [0.878, 0.884] |  |
+|  | 40–80 mm annulus at 125 mm | 0.855 [0.849, 0.862] | 0.853 [0.848, 0.858] | 0.853 [0.849, 0.857] |  |
+|  | 80–200 mm annulus at 125 mm | 0.332 [0.313, 0.352] | 0.326 [0.304, 0.349] | 0.317 [0.293, 0.343] |  |
+| 200 MeV | R80 (mm) | −0.5117 [−0.5147, −0.5087] | −0.5111 [−0.5139, −0.5083] | −0.5093 [−0.5126, −0.5060] | [−0.30, +0.30] |
+|  | σ at 100 mm (mm) | +0.0020 [+0.0009, +0.0031] | +0.0015 [+0.0003, +0.0027] | +0.0020 [+0.0008, +0.0032] | [−0.10, +0.10] |
+|  | 5–10 mm annulus at 100 mm | 0.995 [0.995, 0.996] | 0.995 [0.995, 0.996] | 0.995 [0.995, 0.996] |  |
+|  | 10–20 mm annulus at 100 mm | 1.032 [1.030, 1.035] | 1.031 [1.027, 1.034] | 1.033 [1.030, 1.035] |  |
+|  | 20–40 mm annulus at 100 mm | 1.063 [1.061, 1.065] | 1.064 [1.061, 1.066] | 1.064 [1.062, 1.065] | [0.90, 1.10] |
+|  | 40–80 mm annulus at 100 mm | 0.969 [0.966, 0.973] | 0.969 [0.966, 0.973] | 0.969 [0.962, 0.975] | [0.90, 1.10] |
+|  | 80–200 mm annulus at 100 mm | 0.812 [0.797, 0.828] | 0.797 [0.782, 0.812] | 0.801 [0.784, 0.818] | [0.75, 1.25] |
+|  | σ at 200 mm (mm) | +0.0040 [+0.0020, +0.0060] | +0.0043 [+0.0026, +0.0060] | +0.0030 [+0.0012, +0.0047] | [−0.15, +0.15] |
+|  | 5–10 mm annulus at 200 mm | 1.031 [1.030, 1.032] | 1.031 [1.030, 1.031] | 1.031 [1.030, 1.031] |  |
+|  | 10–20 mm annulus at 200 mm | 0.939 [0.938, 0.941] | 0.939 [0.938, 0.940] | 0.938 [0.937, 0.939] |  |
+|  | 20–40 mm annulus at 200 mm | 0.906 [0.903, 0.908] | 0.906 [0.903, 0.908] | 0.905 [0.903, 0.907] | [0.90, 1.10] |
+|  | 40–80 mm annulus at 200 mm | 0.887 [0.883, 0.891] | 0.886 [0.883, 0.890] | 0.888 [0.884, 0.892] | [0.90, 1.10] |
+|  | 80–200 mm annulus at 200 mm | 0.896 [0.884, 0.908] | 0.898 [0.884, 0.913] | 0.898 [0.884, 0.912] | [0.75, 1.25] |
+<!-- END GENERATED: table-6-topas-halo -->
 
-Portable's range is about 0.5 mm shorter than TOPAS's at 200 MeV, and about 0.43 mm at 100 MeV (2 × 1e6). The shift is
-close to rigid: peak −0.46, R90 −0.46, R80 −0.51, R50 −0.56, R20 −0.57 mm (#32). The water stopping power used by
-MCsquare matches Geant4's option 0 table to within 0.006% over 50–400 MeV, and the integrated ranges agree within
-about 0.01 mm (TD stage 0), so the gap is **not yet explained**. It persists with nuclear interactions off in both
-codes (−0.56 mm; #32). In the annuli far from the axis, Portable's normalised energy fractions are 10–20% lower
-than TOPAS's at 200 mm depth; these are fractions of each code's own slab energy, not absolute deposited energy.
+- **Range.** MCsquare's R80 is shorter than TOPAS's by 0.42 mm at 100 MeV, 0.54 mm at 150 MeV and 0.51 mm at
+  200 MeV; the three arms agree within 0.003 mm at each energy. At 200 MeV the difference lies outside TD's ±0.30 mm
+  band. In the planning runs at 200 MeV (4 × 1e7 per code, #32) the shift was close to rigid: peak −0.46, R90 −0.46,
+  R80 −0.51, R50 −0.56, R20 −0.57 mm, and it persisted with nuclear interactions off in both codes (−0.56 mm). The
+  water stopping power used by MCsquare matches Geant4's option 0 table to within 0.006% over 50–400 MeV, and the
+  integrated ranges agree within about 0.01 mm (TD stage 0), so the gap is **not yet explained**.
+- **Spot size.** σ differs by at most 0.036 mm. At 200 MeV the differences are at most 0.005 mm and inside TD's
+  bands; the largest are at the deeper slab at 100 and 150 MeV (about −0.035 and −0.034 mm).
+- **Annuli at 200 MeV.** The ratios that have a TD band are inside it except the 40–80 mm annulus at 200 mm depth (0.886 to
+  0.888, intervals entirely below 0.90). The 20–40 mm annulus at that depth is 0.905 to 0.906, and the 80–200 mm
+  annulus is 0.80 to 0.81 at 100 mm and 0.90 at 200 mm. Each is within 0.02 of the planning value it replaces.
+- **Annuli at 100 and 150 MeV.** At the deeper slab every ratio beyond 10 mm is below 0.9, and the lowest is in the
+  outermost annulus that holds energy: 0.45 (100 MeV, 60 mm depth, 40–80 mm) and 0.32 to 0.33 (150 MeV, 125 mm, 80–200 mm).
+  At the shallower slab the 80–200 mm annulus at 150 MeV is 0.49 to 0.51, and the 40–80 mm annulus at 100 MeV is
+  consistent with 1 (0.98 to 1.02, intervals about ±4%). These annuli hold a small share of the slab energy (§5.0),
+  and the ratios are of fractions of each code's own slab energy, not of absolute deposited energy.
+- **No energy scored.** The 80–200 mm annulus at 100 MeV is zero in every run of both codes at both depths, so it
+  has no ratio.
 
 At 200 MeV, upstream with the fix and Portable are equivalent in every annulus, including the two outer ones
 (Table 3). So, by inference from two separate comparisons, the lower far-halo fractions against TOPAS are common
-to both MCsquare code lines and were not introduced by the port. That inference says nothing about the cause:
-physics models, scoring, estimators, and geometry or source conditions all remain possible. The TOPAS ratios above
-are point estimates from 4 runs per code, without intervals, at 200 MeV only.
+to both MCsquare code lines and were not introduced by the port. That inference is not available for the 40–80 mm
+annulus at 100 MeV and the 80–200 mm annulus at 150 MeV, where the same-host comparison is inconclusive (§5.0). None of this says anything about the
+cause: physics models, scoring, estimators, and geometry or source conditions all remain possible.
 
 ## 6. Discussion
 
@@ -504,7 +559,9 @@ are point estimates from 4 runs per code, without intervals, at 200 MeV only.
    need not depend on Intel compilers.
 4. **The TOPAS differences.** The 0.5 mm range offset and the lower far-halo fractions (§5.4) are open. By
    inference they are common to the two code lines and not introduced by the port; their cause is not established.
-   A pre-specified comparison with intervals at 100, 150 and 200 MeV is drafted (#54) and not authorised.
+   The pre-specified descriptive comparison with intervals at 100, 150 and 200 MeV (#54, Table 6) shows the range
+   offset at all three energies (0.42 to 0.54 mm) and, at 100 and 150 MeV, outer-annulus fractions down to about a
+   third of TOPAS's. TD's confirmatory arms on one host have not been run.
 5. **Speed.** Run time per 1e7 histories by arm and host is in the run records and will be tabulated as resource
    information, not as a performance claim.
 
@@ -525,15 +582,19 @@ are point estimates from 4 runs per code, without intervals, at 200 MeV only.
    most directly. No aperture is modelled.
 5. **Energies and fields.** Pencil beams at 100, 150 and 200 MeV and one 200 MeV, 15 × 15 cm field. Nothing outside
    that range is tested.
-6. The TOPAS comparison is preliminary and covers the pencil beam at 200 MeV only; there is no comparison with
-   measurement.
+6. The TOPAS comparison is descriptive and covers the pencil beam only (100, 150 and 200 MeV); TOPAS and the
+   Portable arms ran on different hosts, and the MCsquare endpoints had been read before its design was fixed.
+   There is no comparison with measurement.
 7. The broad-field phantom is Schneider_AT_AG_SI4 rather than water (§3.2).
 8. **Provenance.** The collector verifies the Dose files against their recorded hashes but does not tie the endpoint
    values to them; for this collection a reviewer's recomputation on all 160 runs does (§4; #52). Each run's binary
    hash is checked against the snapshot of its own job, and the five arms carry five distinct binaries; nothing in
    the collection ties a hash to the build record.
-9. Published agreement figures (Huang 2018) are to be checked against the paper itself before any comparison with
-   them.
+9. Published agreement figures (Huang 2018): the four that the TOPAS design quotes were checked against the paper's
+   full text (PMC6123159) on 2026-10-02 and are as quoted. Three are TOPAS against measurement (R80 differences
+   generally under 0.1 mm on average; range within 0.6 mm; spot size 0.1 ± 0.1 mm). The fourth is MCsquare against
+   TOPAS on one lung plan: 99.2% of iCTV voxels within 3% of the prescription dose. No comparison with them is
+   made here.
 
 ## 8. Reproducibility and data
 
@@ -551,6 +612,10 @@ Portable MCsquare repository.
   `docs/figures/`, written by `validation/report_dose_descriptives.py` from the run trees (pymedphys 0.41.0 for
   gamma). The annulus shares in §5.0 are in `validation/report_data/apples_ring_fractions_2f9dab40.json`, written by
   `validation/report_ring_fractions.py` from the collected records.
+- **TOPAS halo document:** `validation/report_data/halo_868d1910.json` (and its table, `halo_868d1910.md`), written
+  by `validation/topas_halo_compare.py` at commit `868d1910` from the 24 TOPAS runs frozen at `5aedf3ac` and the
+  collected records above (321 files, dataset fingerprint sha256
+  `0d5be975b294e0b77860e0ddbce5807caa526a0ca56481df5056effff40033ba`).
 - **Tables:** `python validation/report_confirmatory_tables.py --check` confirms that the tables in this report are
   what those documents render.
 

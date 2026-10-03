@@ -7,14 +7,20 @@ Inputs: the run trees the two workflows packed, extracted. Each --root is the di
 (aup, apt, bup, bpg, bpi): <root>/<arm dir>/e<energy>/s<seed>/. An arm missing from every root is a refusal, so that
 one host's endpoints are never read while the other host's tree is absent.
 
+No dose value is read until the WHOLE frozen population (every run of both hosts) has been verified. If any run is
+missing, unexpected, duplicated or unverified, the analysis refuses, unless --collection-closed states who declares
+the acquisition closed and on what evidence; that statement is written into the output, and the contrasts the issues
+touch are PARTIAL. A directory being present is not evidence that its host has finished.
+
 Order of work:
   1. the run lists and the case generator this script imports must be the files of the acquisition commit.
   2. every run of the frozen lists is VERIFIED without reading a dose value: run.json against the frozen seed, energy,
      threads, histories, host, commit and pinned binary; cfg.txt line for line; the log's simulated count; the plan
      and CT against what field_edge_make_cases.py writes; every Materials, scanner and beam-model file against the
      committed blob, with no file added or missing; Dose.raw and Dose.mhd against the sha256 written beside them on
-     the run host; Dose.mhd against the grid this analysis assumes. --status stops here.
-  3. every endpoint is COMPUTED HERE from the verified Dose.raw (platform_study_metrics.field_endpoints). No endpoint
+     the run host; Dose.mhd against the grid this analysis assumes. An entry that looks like a run but is not a run
+     of the frozen lists, anywhere under a root, is a population issue. --status stops here.
+  3. only then, every endpoint is COMPUTED HERE from the verified Dose.raw (platform_study_metrics.field_endpoints). No endpoint
      value written on a run host is used.
   4. per endpoint: difference of run-level means (lateral, range) or geometric-mean ratio (central-axis doses), arm -
      reference; Welch SE and df; TOST at one-sided alpha 0.05; equivalent / not equivalent / inconclusive.
@@ -27,13 +33,20 @@ Rules fixed in the plan:
   - zero sample variance in both arms makes the endpoint NOT ESTABLISHED (no interval, no p-value; it stays in the
     Holm family as a non-rejection and counts against the joint claim).
   - joint claim: all 34 equivalent, unadjusted. Individual claims: Holm over the 34.
-  - secondary joint claim: all endpoints other than those where every run of both arms is exactly zero.
+  - secondary joint claim: every endpoint other than those where every run of both arms is exactly zero is
+    equivalent AFTER Holm over all 34. The rows set aside are chosen by the data, so the unadjusted tests give no
+    error control for this claim; Holm over the fixed family does, whichever rows are set aside.
   - descriptive only: each arm's mean; at 50 and 70 mm the ratio of arm means with a 95% interval (delta method on
     the log of each mean); the ratio of the three-row mean around each run's maximum row, beside the maximum.
 
 Usage:
   python field_followup_analyse.py --root DIR [--root DIR] --commit SHA --status [--mode smoke]
   python field_followup_analyse.py --root DIR [--root DIR] --commit SHA --json OUT.json --md OUT.md
+                                   [--collection-closed "who, and the evidence"]
+
+  Acquisition amendment 1 (the two cells cut by the 3 h timeout, run again at a later commit): add
+  --rerun-root DIR [--rerun-root DIR] --rerun-commit SHA to either form. A-port and B-pgcc at 150 MeV are then
+  read from the rerun roots only, verified against SHA, and the interrupted cells are not read.
 """
 
 from __future__ import annotations
@@ -49,7 +62,7 @@ import statistics as st
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import apples_analyse as aa
@@ -78,7 +91,16 @@ LABEL = ("Same host, same thread count, and the same fix in both codes. Margins 
          "One field (15 x 15 cm) in a uniform medium, no range shifter. Every endpoint was computed by the analysis from "
          "hash-verified dose files.")
 _SEED_DIR = re.compile(r"^s(\d{6})$")
-_PRIMARIES = re.compile(r"Nbr primaries simulated: (\d+)")
+_RUN_NAME = re.compile(r"^s\d")  # named like a run directory, whatever follows
+_RUN_FILES = ("run.json", "Dose.raw")  # a directory holding either, at any depth, holds run data
+CELL_ENTRIES = ("snapshot", "snapshot_sha256.txt", "fcase", "fcase_sha256.txt", "run_root.txt", "inputs.tar")  # beside the runs
+# Acquisition amendment 1 (docs/field_100_150_plan.md): these two cells were stopped at the runners' 3 h job timeout and
+# were run again in full at a later commit. With --rerun-root/--rerun-commit they are read from the rerun and only from it.
+RERUN_CELLS = (("A-port", 150), ("B-pgcc", 150))
+# All a rerun commit may change relative to the acquisition commit: the two run requests and the plan.
+RERUN_MAY_CHANGE = (".gitea/workflows/field-e-linux.yml", ".gitea/workflows/field-e-windows.yml", "docs/field_100_150_plan.md")
+_COUNT_LABEL = "Nbr primaries simulated"
+_COUNT_LINE = re.compile(r"Nbr primaries simulated: (\d+)(?: \(\d+ generated outside the geometry\))?")  # compute_simulation.c
 _SHA_LINE = re.compile(r"^([0-9a-f]{64})  (\S+)$")
 InputError = aa.InputError
 Spec = aa.Spec
@@ -181,6 +203,33 @@ def expected(commit: str, mode: str, repo: Path = REPO) -> Expected:
     return Expected(commit, mode, blobs, inputs, case_text, cube_raw)
 
 
+def rerun_commit_problems(acquisition: str, rerun: str, repo: Path = REPO) -> list[str]:
+    """Why `rerun` cannot stand in for the acquisition commit, if it cannot: it must descend from it and change nothing
+    but RERUN_MAY_CHANGE. Then the inputs, run lists, seeds and binaries the rerun ran are the acquisition's."""
+    if not aa.FULL_SHA.match(rerun):
+        return [f"rerun commit must be a full 40-hex sha, got {rerun!r}"]
+    if rerun == acquisition:
+        return ["the rerun commit is the acquisition commit"]
+    anc = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", acquisition, rerun],
+                         capture_output=True, text=True, check=False)
+    if anc.returncode != 0:
+        return [f"{rerun} does not descend from the acquisition commit {acquisition}" + (f" ({anc.stderr.strip()})" if anc.stderr.strip() else "")]
+    diff = subprocess.run(["git", "-C", str(repo), "diff", "--name-only", acquisition, rerun],
+                          capture_output=True, text=True, check=False)
+    if diff.returncode != 0:
+        return [f"cannot compare {acquisition} with {rerun}: {diff.stderr.strip()}"]
+    extra = sorted(set(diff.stdout.split()) - set(RERUN_MAY_CHANGE))
+    return [f"the rerun commit changes files other than the run requests and the plan: {extra[:5]}"] if extra else []
+
+
+@dataclass
+class Rerun:
+    """Acquisition amendment 1: the roots holding the rerun of RERUN_CELLS, and what its runs are verified against."""
+
+    roots: list[Path]
+    want: Expected
+
+
 def expected_cfg(arm: str, energy: int, seed: int, mode: str) -> list[str]:
     """cfg.txt as both workflows write it."""
     return [
@@ -274,6 +323,20 @@ def _mhd_problems(text: str) -> list[str]:
     return bad
 
 
+def simulated_count(log: str) -> tuple[int | None, str]:
+    """(count, "") from the one line MCsquare prints when a simulation completes, or (None, why).
+
+    Every line that carries the label is counted, and the whole line must be what compute_simulation.c prints: a
+    numeric prefix of something else, or a second and different count, is not resolved in favour of either."""
+    lines = [line.strip() for line in log.splitlines() if _COUNT_LABEL in line]
+    if len(lines) != 1:
+        return None, f"{len(lines)} '{_COUNT_LABEL}' lines, expected exactly 1"
+    hit = _COUNT_LINE.fullmatch(lines[0])
+    if hit is None:
+        return None, f"a malformed '{_COUNT_LABEL}' line: {lines[0][:80]!r}"
+    return int(hit[1]), ""
+
+
 def _sha256_stream(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -300,9 +363,11 @@ def verify_run(run: Run, want: Expected, ledger: aa.Ledger) -> None:
     if _text(ledger.read_bytes(d / "cfg.txt")).splitlines() != expected_cfg(run.arm, run.energy, run.seed, want.mode):
         bad.append("cfg.txt is not the configuration the workflow writes for this run")
     log = _text(ledger.read_bytes(d / "log.txt"))
-    hit = _PRIMARIES.search(log)
-    if hit is None or int(hit[1]) != run.record.get("simulated"):
-        bad.append(f"log.txt reports {hit[1] if hit else 'no'} primaries simulated, run.json {run.record.get('simulated')!r}")
+    count, why = simulated_count(log)
+    if count is None:
+        bad.append(f"log.txt has {why}")
+    elif count != run.record.get("simulated"):
+        bad.append(f"log.txt reports {count} primaries simulated, run.json {run.record.get('simulated')!r}")
     if "Unknown tag" in log:
         bad.append("log.txt reports a configuration tag MCsquare did not recognise")
     for name, text in want.case_text[run.energy].items():
@@ -365,13 +430,41 @@ Cells = dict[tuple[str, int], list[Run]]
 Issues = dict[tuple[str, int], list[str]]
 
 
-def load(roots: list[Path], want: Expected, *, status_only: bool) -> tuple[Cells, Issues, aa.Ledger, list[str]]:
-    """Every run of the frozen lists, verified (and, unless status_only, measured). Refuses if an arm is in no root."""
-    for root in roots:
+def _run_like(entry: Path) -> bool:
+    """Looks like run data: named s<digit>..., or a directory with a run's files anywhere beneath it."""
+    return bool(_RUN_NAME.match(entry.name)) or (entry.is_dir() and any(p.name in _RUN_FILES for p in entry.rglob("*")))
+
+
+def _stray(entries: list[Path], where: str, notes: list[str]) -> list[str]:
+    """Entries that have no place in the layout: those that look like run data are returned as population issues
+    (a run that is not a run of the frozen lists must not be silently left out), the rest are noted as ignored."""
+    issues = []
+    for e in entries:
+        if _run_like(e):
+            issues.append(f"{where}: {e.name} looks like run data and is not a run of the frozen lists")
+        else:
+            notes.append(f"{where}: entry {e.name} is ignored (not run data)")
+    return issues
+
+
+def _refuse_armless(roots: list[Path], homes: set[Path], what: str) -> None:
+    """Refuse a root that is the home of no arm: nothing would attribute its contents to a cell."""
+    armless = [str(r) for r in roots if r not in homes]
+    if armless:
+        msg = f"{what} {armless[0]} holds none of the arms it is given for; its contents would be checked by nobody"
+        raise InputError(msg)
+
+
+def load(roots: list[Path], want: Expected, rerun: Rerun | None = None) -> tuple[Cells, Issues, aa.Ledger, list[str]]:
+    """Every run of the frozen lists, VERIFIED. No dose value is read here. Refuses if an arm is in no root.
+
+    With `rerun`, the cells of RERUN_CELLS come from the rerun roots, verified against the rerun commit, and the
+    interrupted cells of the original roots are not read. Anything else in a rerun root is a population issue."""
+    for root in [*roots, *(rerun.roots if rerun else [])]:
         if not root.is_dir():
             msg = f"{root} is not a directory"
             raise InputError(msg)
-    base = Path(os.path.commonpath([str(r.resolve()) for r in roots]))
+    base = Path(os.path.commonpath([str(r.resolve()) for r in [*roots, *(rerun.roots if rerun else [])]]))
     ledger = aa.Ledger(base)
     home: dict[str, Path] = {}
     for arm, spec in fr.ARMS.items():
@@ -381,28 +474,71 @@ def load(roots: list[Path], want: Expected, *, status_only: bool) -> tuple[Cells
                    "trees must be present before any run is read")
             raise InputError(msg)
         home[arm] = holders[0] / spec.directory
-    notes = [f"{r}: entry {e.name} is not an arm directory" for r in roots for e in sorted(r.iterdir())
-             if e.name not in {a.directory for a in fr.ARMS.values()}]
+    # A root that holds no arm would have its contents attributed to no cell, and so checked by nobody (alden-ec2221c7,
+    # review of #66). Refuse it rather than let an unenumerated input pass.
+    _refuse_armless([r.resolve() for r in roots], {h.parent for h in home.values()}, "root")
+    notes: list[str] = []
+    arm_dirs = {a.directory for a in fr.ARMS.values()}
+    cell_names = {f"e{e}" for e in fr.ENERGIES}
+    outside: dict[str, list[str]] = {}  # arm -> issues from entries outside its cells; they touch both energies
+    for root in roots:
+        stray = _stray([e for e in sorted(root.iterdir()) if e.name not in arm_dirs], str(root), notes)
+        for arm in (a for a in fr.ARMS if home[a].parent == root.resolve()):
+            outside.setdefault(arm, []).extend(stray)
+    for arm in fr.ARMS:
+        inside = [e for e in sorted(home[arm].iterdir()) if not (e.name in cell_names and e.is_dir())]
+        outside.setdefault(arm, []).extend(_stray(inside, f"{arm} ({home[arm].name})", notes))
+    rerun_home: dict[str, Path] = {}
+    rerun_outside: dict[str, list[str]] = {}
+    if rerun is not None:
+        rerun_arms = {a for a, _ in RERUN_CELLS}
+        for arm in sorted(rerun_arms):
+            holders = [r.resolve() for r in rerun.roots if (r / fr.ARMS[arm].directory).is_dir()]
+            if len(holders) != 1:
+                msg = f"rerun arm {arm} is in {len(holders)} of the rerun roots, need exactly 1"
+                raise InputError(msg)
+            rerun_home[arm] = holders[0] / fr.ARMS[arm].directory
+        _refuse_armless([r.resolve() for r in rerun.roots], {h.parent for h in rerun_home.values()}, "rerun root")
+        own ={fr.ARMS[a].directory for a in rerun_arms}
+        for root in rerun.roots:
+            stray = _stray([e for e in sorted(root.iterdir()) if e.name not in own], f"rerun {root}", notes)
+            stray += [f"rerun {root}: {e.name} is not a rerun arm" for e in sorted(root.iterdir())
+                      if e.name in arm_dirs - own and e.is_dir()]
+            for arm in (a for a in rerun_arms if rerun_home[a].parent == root.resolve()):
+                rerun_outside.setdefault(arm, []).extend(stray)
+        for arm in sorted(rerun_arms):
+            mine = {f"e{e}" for a, e in RERUN_CELLS if a == arm}
+            inside = [e for e in sorted(rerun_home[arm].iterdir()) if not (e.name in mine and e.is_dir())]
+            rerun_outside.setdefault(arm, []).extend(_stray(inside, f"rerun {arm} ({rerun_home[arm].name})", notes))
+            rerun_outside[arm] += [f"rerun {arm}: {e.name} is not a rerun cell" for e in inside if e.name in cell_names]
     cells: Cells = {}
     issues: Issues = {}
     for arm in fr.ARMS:
         for energy in fr.ENERGIES:
-            cell, runs, why = home[arm] / f"e{energy}", [], []
+            w = want
+            if rerun is not None and (arm, energy) in RERUN_CELLS:
+                w = rerun.want
+                cell, runs, why = rerun_home[arm] / f"e{energy}", [], list(outside[arm]) + rerun_outside.get(arm, [])
+                notes.append(f"{arm} {energy} MeV: read from the rerun at {w.commit[:12]} (acquisition amendment 1); "
+                             f"the cell of {want.commit[:12]} is not read")
+            else:
+                cell, runs, why = home[arm] / f"e{energy}", [], list(outside[arm])
             seeds = fr.seeds(arm, energy, want.mode)
-            present = {int(m[1]) for e in (cell.iterdir() if cell.is_dir() else []) if e.is_dir() and (m := _SEED_DIR.match(e.name))}
+            entries = sorted(cell.iterdir()) if cell.is_dir() else []
+            present = {int(m[1]) for e in entries if e.is_dir() and (m := _SEED_DIR.match(e.name))}
             why += [f"{arm} {energy} MeV: run s{s} is missing" for s in seeds if s not in present]
             why += [f"{arm} {energy} MeV: run s{s} is not in the frozen list" for s in sorted(present - set(seeds))]
+            others = [e for e in entries if not (e.is_dir() and _SEED_DIR.match(e.name))]  # a known entry holding run data is stray too
+            why += _stray([e for e in others if e.name not in CELL_ENTRIES or _run_like(e)], f"{arm} {energy} MeV", notes)
             for rel in RUN_LIST_FILES:
                 snap = cell / "snapshot" / rel
-                if not snap.is_file() or blob_id(ledger.read_bytes(snap)) != want.blobs[rel]:
+                if not snap.is_file() or blob_id(ledger.read_bytes(snap)) != w.blobs[rel]:
                     why.append(f"{arm} {energy} MeV: the run host's snapshot of {rel} is not the acquisition commit's")
             for s in seeds:
                 if s not in present:
                     continue
                 run = Run(arm, energy, s, cell / f"s{s}")
-                verify_run(run, want, ledger)
-                if run.usable and not status_only:
-                    measure(run)
+                verify_run(run, w, ledger)
                 why += [f"{run.label}: {p}" for p in run.problems]
                 runs.append(run)
             cells[(arm, energy)], issues[(arm, energy)] = runs, why
@@ -413,6 +549,14 @@ def load(roots: list[Path], want: Expected, *, status_only: bool) -> tuple[Cells
             for r in (run, other):
                 issues[(r.arm, r.energy)].append(f"{run.label} and {other.label} have the same Dose.raw")
     return cells, issues, ledger, notes
+
+
+def measure_all(cells: Cells, issues: Issues) -> None:
+    """Compute the endpoints of every verified run. Called only after load() has seen the whole population."""
+    for (arm, energy), runs in cells.items():
+        for run in (r for r in runs if r.usable):
+            measure(run)
+            issues[(arm, energy)] += [f"{run.label}: {p}" for p in run.problems]  # only what measuring found
 
 
 # --------------------------------------------------------------------------------------------------- statistics
@@ -498,7 +642,7 @@ def analyse_contrast(cells: Cells, issues: Issues, arm: str, ref: str, *, confir
         zero = [r["endpoint"] for r in rows if r["all_runs_zero"]]
         claims = {
             "joint_claim_equivalent_on_all_endpoints": all(r["outcome"] == "equivalent" for r in rows),
-            "secondary_joint_claim_excluding_all_zero_rows": all(r["outcome"] == "equivalent" for r in rows if not r["all_runs_zero"]),
+            "secondary_joint_claim_holm_excluding_all_zero_rows": all(r["holm_decision"] == "equivalent" for r in rows if not r["all_runs_zero"]),
             "all_zero_rows_excluded_from_the_secondary_claim": zero,
             "n_equivalent_unadjusted": sum(r["outcome"] == "equivalent" for r in rows),
             "n_equivalent_holm": sum(r["holm_decision"] == "equivalent" for r in rows),
@@ -525,15 +669,25 @@ def analyse_contrast(cells: Cells, issues: Issues, arm: str, ref: str, *, confir
 
 # ----------------------------------------------------------------------------------------------------- reporting
 def _num(x: object, digits: int = 4) -> str:
-    return "" if not isinstance(x, (int, float)) or isinstance(x, bool) else f"{x:.{digits}f}"
+    """A number for the table: `digits` decimals, or three significant figures where that many decimals would show
+    fewer than three, so that a very small mean is not printed as 0.0000 (#60). Only an exact zero prints as 0."""
+    if not isinstance(x, (int, float)) or isinstance(x, bool):
+        return ""
+    if x == 0:
+        return "0"
+    return f"{x:.{digits}f}" if abs(x) >= 10.0 ** (2 - digits) else f"{x:.3g}"
 
 
 def _pair(ci: object, digits: int = 4) -> str:
-    return f"[{ci[0]:.{digits}f}, {ci[1]:.{digits}f}]" if isinstance(ci, list) else ""
+    return f"[{_num(ci[0], digits)}, {_num(ci[1], digits)}]" if isinstance(ci, list) else ""
 
 
 def markdown(doc: dict[str, object]) -> list[str]:
     md = [f"# Same-host comparison, part E: field edge at 100 and 150 MeV ({doc['acquisition_commit']})", "", str(doc["label"]), ""]
+    col = doc["collection"]
+    if col["population_issues_before_any_dose_was_read"]:  # type: ignore[index]
+        md += [(f"**The population was not complete and verified ({col['population_issues_before_any_dose_was_read']} issue(s)). "  # type: ignore[index]
+                f"The collection was declared closed: {col['declared_closed']}** The contrasts the issues touch are PARTIAL."), ""]  # type: ignore[index]
     for c in doc["contrasts"]:  # type: ignore[union-attr]
         kind = "confirmatory" if c["confirmatory"] else "descriptive"
         md += [f"## {c['arm']} against {c['reference']} ({kind})", ""]
@@ -543,8 +697,9 @@ def markdown(doc: dict[str, object]) -> list[str]:
         elif c["confirmatory"]:
             k = c["claims"]
             md += [f"- Joint claim (all {FAMILY_SIZE} endpoints equivalent): **{'ESTABLISHED' if k['joint_claim_equivalent_on_all_endpoints'] else 'NOT ESTABLISHED'}**",
-                   (f"- Secondary joint claim (all endpoints other than rows where every run of both arms is zero): "
-                   f"**{'ESTABLISHED' if k['secondary_joint_claim_excluding_all_zero_rows'] else 'NOT ESTABLISHED'}**; "
+                   (f"- Secondary joint claim (every endpoint other than rows where every run of both arms is zero is equivalent "
+                   f"after Holm over all {FAMILY_SIZE}): "
+                   f"**{'ESTABLISHED' if k['secondary_joint_claim_holm_excluding_all_zero_rows'] else 'NOT ESTABLISHED'}**; "
                    f"rows excluded: {', '.join(k['all_zero_rows_excluded_from_the_secondary_claim']) or 'none'}"),
                    (f"- Equivalent: {k['n_equivalent_unadjusted']} of {FAMILY_SIZE} unadjusted, {k['n_equivalent_holm']} after Holm; "
                    f"not established: {k['n_not_established']}"), ""]
@@ -582,11 +737,45 @@ def _own_blobs(repo: Path, at_acquisition: dict[str, str]) -> dict[str, object]:
     return out
 
 
-def run(roots: list[Path], commit: str, *, repo: Path = REPO) -> dict[str, object]:
+def make_rerun(commit: str, want: Expected, rerun_roots: list[Path] | None, rerun_commit: str | None,
+               repo: Path = REPO) -> Rerun | None:
+    """The rerun of acquisition amendment 1, or None. Refuses a rerun commit that is not the acquisition's inputs."""
+    if (rerun_roots is None) != (rerun_commit is None):
+        msg = "--rerun-root and --rerun-commit go together"
+        raise InputError(msg)
+    if rerun_roots is None or rerun_commit is None:
+        return None
+    bad = rerun_commit_problems(commit, rerun_commit, repo)
+    if bad:
+        raise InputError("; ".join(bad))
+    return Rerun(list(rerun_roots), replace(want, commit=rerun_commit))
+
+
+def run(roots: list[Path], commit: str, *, closed: str | None = None, repo: Path = REPO,
+        rerun_roots: list[Path] | None = None, rerun_commit: str | None = None) -> dict[str, object]:
+    """Verify the whole population, and only then read dose values.
+
+    With any population issue the analysis refuses before a dose value is read, unless `closed` states who declares the
+    acquisition closed and on what evidence. That statement is a declaration this script cannot check; it is recorded."""
     want = expected(commit, "full", repo)
-    cells, issues, ledger, notes = load(roots, want, status_only=False)
+    rerun = make_rerun(commit, want, rerun_roots, rerun_commit, repo)
+    cells, issues, ledger, notes = load(roots, want, rerun)
+    before = [why for cell in issues.values() for why in cell]
+    if closed is not None and not closed.strip():
+        msg = "--collection-closed needs a statement: who declares the acquisition closed, and the evidence"
+        raise InputError(msg)
+    if before and closed is None:
+        msg = (f"the frozen population is not complete and verified ({len(before)} issue(s)); no dose value was read. "
+               "If the acquisition is closed and this is what it left, say so with --collection-closed: "
+               + "; ".join(before[:6]) + (" ..." if len(before) > 6 else ""))
+        raise InputError(msg)
+    measure_all(cells, issues)
     return {
         "label": LABEL, "plan": "docs/field_100_150_plan.md", "acquisition_commit": commit, "notes": notes,
+        "rerun": None if rerun is None else {"amendment": "acquisition amendment 1", "commit": rerun.want.commit,
+                                             "cells": [f"{a} {e} MeV" for a, e in RERUN_CELLS]},
+        "collection": {"state": "closed by declaration, with population issues" if before else "complete and verified",
+                       "population_issues_before_any_dose_was_read": len(before), "declared_closed": closed},
         "analysis_files": _own_blobs(repo, want.blobs), "dataset_fingerprint": ledger.fingerprint(),
         "histories_per_run": fr.HISTORIES["full"], "runs_per_cell": fr.RUNS_PER_CELL,
         "binaries": {a: s.binary_sha256 for a, s in fr.ARMS.items()},
@@ -598,10 +787,12 @@ def run(roots: list[Path], commit: str, *, repo: Path = REPO) -> dict[str, objec
     }
 
 
-def status(roots: list[Path], commit: str, mode: str, *, repo: Path = REPO) -> tuple[bool, list[str]]:
+def status(roots: list[Path], commit: str, mode: str, *, repo: Path = REPO,
+           rerun_roots: list[Path] | None = None, rerun_commit: str | None = None) -> tuple[bool, list[str]]:
     """Verification only: no dose value is read. Returns (every run of the frozen list verified, report lines)."""
     want = expected(commit, mode, repo)
-    cells, issues, _ledger, notes = load(roots, want, status_only=True)
+    rerun = make_rerun(commit, want, rerun_roots, rerun_commit, repo)
+    cells, issues, _ledger, notes = load(roots, want, rerun)
     n = len(fr.seeds(next(iter(fr.ARMS)), fr.ENERGIES[0], mode))
     lines = [f"{a} {e} MeV: {sum(r.usable for r in runs)} of {n} verified" for (a, e), runs in cells.items()]
     lines += [f"  {why}" for cell in issues.values() for why in cell] + [f"note: {x}" for x in notes]
@@ -614,12 +805,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--commit", required=True, help="the acquisition commit, full sha")
     p.add_argument("--mode", choices=sorted(fr.HISTORIES), default="full")
     p.add_argument("--status", action="store_true", help="verify the runs only; no dose value is read")
+    p.add_argument("--rerun-root", type=Path, action="append",
+                   help="directory holding the rerun of the cells cut by the timeout (acquisition amendment 1); repeatable")
+    p.add_argument("--rerun-commit", help="the commit the rerun ran at, full sha (with --rerun-root)")
     p.add_argument("--json", type=Path)
     p.add_argument("--md", type=Path)
+    p.add_argument("--collection-closed", metavar="STATEMENT",
+                   help="needed to analyse a population with issues: who declares the acquisition closed and the evidence "
+                        "(workflow run ids, archive hashes); written into the output")
     a = p.parse_args(argv)
     try:
         if a.status:
-            ok, lines = status(a.root, a.commit, a.mode)
+            ok, lines = status(a.root, a.commit, a.mode, rerun_roots=a.rerun_root, rerun_commit=a.rerun_commit)
             print("\n".join(lines))
             print(f"{'VERIFIED' if ok else 'NOT VERIFIED'}: mode {a.mode}; no dose value was read")
             return 0 if ok else 1
@@ -627,7 +824,7 @@ def main(argv: list[str] | None = None) -> int:
             p.error("smoke runs are checked for completion only: use --status")
         if a.json is None or a.md is None:
             p.error("--json and --md are required unless --status is given")
-        doc = run(a.root, a.commit)
+        doc = run(a.root, a.commit, closed=a.collection_closed, rerun_roots=a.rerun_root, rerun_commit=a.rerun_commit)
     except InputError as e:
         print(f"field_followup_analyse.py: REFUSED: {e}", file=sys.stderr)
         return 2
