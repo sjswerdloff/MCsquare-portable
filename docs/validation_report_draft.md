@@ -608,10 +608,11 @@ existed, and frozen with the acquisition.
 **Acquisition and amendments.** The full run was at commit `df2fabbd`. Two cells, A-port and B-pgcc at 150 MeV, were
 stopped at 6 of 8 runs by the runners' default 3 h job timeout. With the timeout raised, both cells were rerun in full
 at commit `b4b3bce3`, which differs from `df2fabbd` only in the two run requests and the plan (acquisition amendment
-1). The analysis takes those two cells from the rerun only and verifies each rerun run against its own commit
-(analysis amendment 2, #66). Both amendments were made, reviewed and merged before any dose value of the full run was
-read. All 80 runs verified, and only then were endpoints computed (analysis at `26a93235`; document
-`validation/report_data/field_e_analysis_26a93235.json`).
+1). That amendment was recorded in the run request that made it (on the run branch, merged with this report), before any
+dose value of the full run was read. The analysis takes those two cells from the rerun only and verifies each rerun
+run against its own commit (analysis amendment 2, #66). It was reviewed and merged into main (`26a93235`) before any dose
+value was read. Then all 80 runs verified (`--status`), and only then were endpoints computed, at `26a93235` (document
+`validation/report_data/field_e_analysis_26a93235.json`). The order is recorded in the plan's chronology.
 
 **Table 7. Part E, confirmatory contrasts: claims and counts.**
 
@@ -674,8 +675,9 @@ mm outside the field edge at D mm depth, as a difference in percentage points of
   points at 5 mm and ±0.2 points further out. Central-axis ratios are within 0.12% of 1 (intervals within 0.27%),
   and R80 and R20 differ by at most 0.003 and 0.005 mm.
 - **Runs are not byte-reproducible for a seed.** Two runs with the same seed, binary and host gave different dose
-  files (`docs/field_100_150_plan.md`, chronology), so the analysis treats runs as independent draws, as it does
-  throughout.
+  files (`docs/field_100_150_plan.md`, chronology). That is a fact about reproducibility, not about independence. The
+  analysis assumes that runs are independent draws, as it does throughout; the run lists' seed screen
+  (`field_followup_runs.py`) is a screen, not a proof of independence.
 
 ## 6. Discussion
 
@@ -709,10 +711,11 @@ mm outside the field edge at D mm depth, as a difference in percentage points of
    its cause is not established. TD's confirmatory arms on one host have not been run.
 5. **Speed.** Table 9 gives the wall time per 1e7 histories of every run in the confirmatory acquisitions, from the
    runs' own records. It is resource information, not a performance claim: one run at a time per host, each host's
-   thread count, no tuning. **Portable built with the free compilers (gcc on Linux, MinGW-w64 gcc on Windows) takes
-   2.4 to 2.7 times as long as the Intel-built codes, on the same host, case and energy.** Portable built with icc runs
-   at about upstream's speed (B-picc against B-up), so the cost is the compiler's, not the port's. Dropping the dependence on
-   Intel compilers is therefore possible at that cost in run time, or with icc where it is available.
+   thread count, no tuning. **On these hosts, cases, energies and thread counts, the Portable builds made with the free
+   compilers (gcc on Linux, MinGW-w64 gcc on Windows) took 2.4 to 2.7 times as long as the Intel-built codes.** The
+   Portable build made with icc took about as long as upstream (B-picc against B-up). Each arm is a whole build: source,
+   compiler, flags and libraries together. So this compares these builds as they ran, and does not isolate the
+   compiler's share or rule out a contribution from the port's changes.
 
    **Table 9. Wall time per 1e7 histories, seconds: median (range) over 8 runs. Pencil beam and the 200 MeV field:
    acquisition `2f9dab40` (§4). Field at 100 and 150 MeV: part E (§5.5), 6e7 histories per run. Lenovo: Core

@@ -430,11 +430,25 @@ def load_part_e(path: Path) -> dict[str, dict[str, object]]:
 
     Refuses a document in which a confirmatory contrast is missing, partial, has its claims withheld or lacks rows.
     """
+    import field_followup_analyse as ffa  # the frozen endpoint family (docs/field_100_150_plan.md)
+
+    frozen = [f"E{e}/{k}" for e in sorted(ffa.DEPTHS_MM) for k in ffa.endpoint_keys(e)]
     doc = json.loads(path.read_text(encoding="utf-8"))
     out: dict[str, dict[str, object]] = {}
     for c in doc["contrasts"]:
-        if c["confirmatory"]:
-            out[f"{c['arm']} vs {c['reference']}"] = {**c, "rows": {r["endpoint"]: r for r in c["rows"]}}
+        if not c["confirmatory"]:
+            continue
+        name = f"{c['arm']} vs {c['reference']}"
+        if name in out:
+            msg = f"{path}: confirmatory contrast {name} appears twice"
+            raise ReportError(msg)
+        ids = [r["endpoint"] for r in c["rows"]]
+        if ids != frozen:
+            msg = (f"{path}: {name} does not carry the frozen 34 endpoints in order "
+                   f"(unexpected {sorted(set(ids) - set(frozen))[:3]}, missing {sorted(set(frozen) - set(ids))[:3]}, "
+                   f"{len(ids) - len(set(ids))} duplicate(s))")
+            raise ReportError(msg)
+        out[name] = {**c, "rows": {r["endpoint"]: r for r in c["rows"]}}
     missing = [n for n in CONFIRMATORY.values() if n not in out]
     if missing:
         msg = f"{path}: confirmatory contrast(s) missing: {', '.join(missing)}"

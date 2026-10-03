@@ -426,7 +426,8 @@ def test_part_e_tables_show_every_endpoint_of_every_confirmatory_contrast_with_t
         assert f"{claims['n_equivalent_unadjusted']} of 34" in line and f"{claims['n_equivalent_holm']} of 34" in line
 
 
-@pytest.mark.parametrize("damage", ["withheld", "partial", "missing", "short"])
+@pytest.mark.parametrize("damage", ["withheld", "partial", "missing", "short", "renamed", "duplicate_endpoint",
+                                    "duplicate_contrast"])
 def test_part_e_load_refuses_an_incomplete_confirmatory_contrast(tmp_path: Path, damage: str) -> None:
     doc = json.loads(rt.PART_E_JSON.read_text(encoding="utf-8"))
     c = next(x for x in doc["contrasts"] if x["confirmatory"])
@@ -436,8 +437,16 @@ def test_part_e_load_refuses_an_incomplete_confirmatory_contrast(tmp_path: Path,
         c["partial_reasons"] = ["a run is missing"]
     elif damage == "missing":
         doc["contrasts"].remove(c)
-    else:
+    elif damage == "short":
         c["rows"] = c["rows"][:-1]
+    elif damage == "renamed":  # same size, wrong identity, in every confirmatory contrast (alden-ec2221c7, #72)
+        for x in doc["contrasts"]:
+            if x["confirmatory"]:
+                x["rows"][0]["endpoint"] = "NOT_A_STUDY_ENDPOINT"
+    elif damage == "duplicate_endpoint":
+        c["rows"][-1] = dict(c["rows"][0])
+    else:
+        doc["contrasts"].append(json.loads(json.dumps(c)))
     path = tmp_path / "e.json"
     path.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(rt.ReportError):
