@@ -1,0 +1,11 @@
+2026-10-03 21:06:05 E=200 arm=ms0p05 maxstep=0.05 seed=913031 rc=0 wall=451s
+2026-10-03 21:13:20 E=200 arm=ms0p05 maxstep=0.05 seed=913032 rc=0 wall=435s
+2026-10-03 21:14:08 E=100 arm=ctrl maxstep=- seed=913101 rc=0 wall=48s
+2026-10-03 21:14:57 E=100 arm=ctrl maxstep=- seed=913102 rc=0 wall=49s
+2026-10-03 21:16:30 E=100 arm=ms0p1 maxstep=0.1 seed=913121 rc=0 wall=93s
+2026-10-03 21:18:02 E=100 arm=ms0p1 maxstep=0.1 seed=913122 rc=0 wall=92s
+2026-10-03 21:19:32 E=150 arm=ctrl maxstep=- seed=913201 rc=0 wall=90s
+2026-10-03 21:21:03 E=150 arm=ctrl maxstep=- seed=913202 rc=0 wall=91s
+2026-10-03 21:24:00 E=150 arm=ms0p1 maxstep=0.1 seed=913221 rc=0 wall=177s
+2026-10-03 21:26:55 E=150 arm=ms0p1 maxstep=0.1 seed=913222 rc=0 wall=175s
+ALL DONE 2026-10-03 21:26:55
