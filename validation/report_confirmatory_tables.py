@@ -35,6 +35,7 @@ DESCRIPTIVE_SCHEMA = "apples_descriptive/1"
 FRACTIONS_JSON = REPO / "validation" / "report_data" / "apples_ring_fractions_2f9dab40.json"
 FRACTIONS_SCHEMA = "apples_ring_fractions/1"
 TOPAS_HALO_JSON = REPO / "validation" / "report_data" / "halo_868d1910.json"
+PART_E_JSON = REPO / "validation" / "report_data" / "field_e_analysis_26a93235.json"
 REPORT = REPO / "docs" / "validation_report_draft.md"
 
 # report label -> the analysis's contrast name
@@ -81,6 +82,7 @@ FIELD_GAMMA_COLUMNS = (
 # the upstream arm whose split halves are the noise control of each contrast
 CONTROL_ARM = {"A": "A-up", "B1": "B-up", "B2": "B-up"}
 PENCIL_PASS_DECIMALS = 3  # one failing point of the largest pencil-beam analysis (55 838 points) is 0.002 percentage points
+PART_E_ENDPOINTS = 34  # 17 per energy at 100 and 150 MeV (docs/field_100_150_plan.md)
 FIELD_PASS_DECIMALS = 4  # one failing point of the case-F analyses (about 7.7e5 to 1.0e6 points) is 0.0001 percentage points
 
 
@@ -418,11 +420,65 @@ def topas_halo_table(rows: dict[tuple[int, str, str], dict[str, object]]) -> lis
     return out
 
 
+def load_part_e(path: Path) -> dict[str, dict[str, object]]:
+    """The part E analysis document's three confirmatory contrasts by name, rows keyed by endpoint id.
+
+    Refuses a document in which a confirmatory contrast is missing, partial, has its claims withheld or lacks rows.
+    """
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    out: dict[str, dict[str, object]] = {}
+    for c in doc["contrasts"]:
+        if c["confirmatory"]:
+            out[f"{c['arm']} vs {c['reference']}"] = {**c, "rows": {r["endpoint"]: r for r in c["rows"]}}
+    missing = [n for n in CONFIRMATORY.values() if n not in out]
+    if missing:
+        msg = f"{path}: confirmatory contrast(s) missing: {', '.join(missing)}"
+        raise ReportError(msg)
+    for name in CONFIRMATORY.values():
+        c = out[name]
+        if c["claims_withheld"] or c["partial_reasons"] or len(c["rows"]) != PART_E_ENDPOINTS:
+            msg = f"{path}: {name} is partial or withheld; the report's part E tables do not cover that"
+            raise ReportError(msg)
+    if [list(out[n]["rows"]) for n in CONFIRMATORY.values()].count(list(out[CONFIRMATORY["A"]]["rows"])) != 3:
+        msg = f"{path}: the confirmatory contrasts do not carry the same endpoints in the same order"
+        raise ReportError(msg)
+    return out
+
+
+def part_e_cell(row: dict[str, object]) -> str:
+    """One part E endpoint: estimate, 95% interval and the TOST outcome mark, as in Tables 3 and 4."""
+    return cell({**row, "estimate_reported_scale": row.get("estimate"), "ci95_reported_scale": row.get("ci95")})
+
+
+def part_e_summary_table(part_e: dict[str, dict[str, object]]) -> list[str]:
+    out = [
+        "| contrast | joint claim (all 34 equivalent) | secondary joint claim | equivalent, unadjusted | equivalent, Holm |",
+        "|---|---|---|---|---|",
+    ]
+    for key, name in CONFIRMATORY.items():
+        cl = part_e[name]["claims"]
+        joint = "established" if cl["joint_claim_equivalent_on_all_endpoints"] else "not established"
+        second = "established" if cl["secondary_joint_claim_holm_excluding_all_zero_rows"] else "not established"
+        n = len(part_e[name]["rows"])
+        out.append(f"| {key}: {name} | {joint} | {second} | {cl['n_equivalent_unadjusted']} of {n} | "
+                   f"{cl['n_equivalent_holm']} of {n} |")
+    return out
+
+
+def part_e_endpoint_table(part_e: dict[str, dict[str, object]]) -> list[str]:
+    out = ["| endpoint | scale | A | B1 | B2 |", "|---|---|---|---|---|"]
+    for eid, row in part_e[CONFIRMATORY["A"]]["rows"].items():
+        cells = [part_e_cell(part_e[name]["rows"][eid]) for name in CONFIRMATORY.values()]
+        out.append(f"| {eid} | {row['scale']} | " + " | ".join(cells) + " |")
+    return out
+
+
 def render(
     contrasts: dict[str, dict[str, object]],
     descriptive: dict[str, object] | None = None,
     fractions: dict[str, float] | None = None,
     topas_halo: dict[tuple[int, str, str], dict[str, object]] | None = None,
+    part_e: dict[str, dict[str, object]] | None = None,
 ) -> dict[str, list[str]]:
     """Every generated block of the report, by marker name.
 
@@ -447,6 +503,9 @@ def render(
         blocks["halo-bound"] = halo_bound_table(contrasts, fractions)
     if topas_halo is not None:
         blocks["table-6-topas-halo"] = topas_halo_table(topas_halo)
+    if part_e is not None:
+        blocks["table-7-part-e-summary"] = part_e_summary_table(part_e)
+        blocks["table-8-part-e-endpoints"] = part_e_endpoint_table(part_e)
     return blocks
 
 
@@ -473,6 +532,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", type=Path, default=ANALYSIS_JSON, help="the analysis document")
     ap.add_argument("--descriptive-json", type=Path, default=DESCRIPTIVE_JSON, help="the descriptive document")
     ap.add_argument("--topas-halo-json", type=Path, default=TOPAS_HALO_JSON, help="the TOPAS halo document")
+    ap.add_argument("--part-e-json", type=Path, default=PART_E_JSON, help="the part E analysis document")
     ap.add_argument("--report", type=Path, default=REPORT)
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--write", action="store_true", help="splice the blocks into the report")
@@ -484,6 +544,7 @@ def main(argv: list[str] | None = None) -> int:
             load_descriptive(args.descriptive_json),
             load_fractions(FRACTIONS_JSON),
             load_topas_halo(args.topas_halo_json),
+            load_part_e(args.part_e_json),
         )
         if not (args.write or args.check):
             for name, lines in blocks.items():

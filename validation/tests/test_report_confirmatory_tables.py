@@ -411,3 +411,34 @@ def test_check_names_the_block_that_is_out_of_date(tmp_path: Path, capsys: pytes
     edited.write_text(text.replace("| A | not established | 46 / 46 |", "| A | holds | 52 / 52 |"), encoding="utf-8")
     assert rt.main(["--check", "--report", str(edited)]) == 1
     assert "(blocks: confirmatory-summary)" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------------------------- part E (§5.5)
+def test_part_e_tables_show_every_endpoint_of_every_confirmatory_contrast_with_the_documents_counts() -> None:
+    part_e = rt.load_part_e(rt.PART_E_JSON)
+    blocks = rt.render(rt.load(rt.ANALYSIS_JSON), part_e=part_e)
+    rows = blocks["table-8-part-e-endpoints"][2:]
+    assert len(rows) == rt.PART_E_ENDPOINTS == 34
+    assert all(row.count(" E") >= 3 or "not established" in row or " I" in row or " NE" in row for row in rows)
+    summary = blocks["table-7-part-e-summary"][2:]
+    for line, name in zip(summary, rt.CONFIRMATORY.values(), strict=True):
+        claims = part_e[name]["claims"]
+        assert f"{claims['n_equivalent_unadjusted']} of 34" in line and f"{claims['n_equivalent_holm']} of 34" in line
+
+
+@pytest.mark.parametrize("damage", ["withheld", "partial", "missing", "short"])
+def test_part_e_load_refuses_an_incomplete_confirmatory_contrast(tmp_path: Path, damage: str) -> None:
+    doc = json.loads(rt.PART_E_JSON.read_text(encoding="utf-8"))
+    c = next(x for x in doc["contrasts"] if x["confirmatory"])
+    if damage == "withheld":
+        c["claims_withheld"] = True
+    elif damage == "partial":
+        c["partial_reasons"] = ["a run is missing"]
+    elif damage == "missing":
+        doc["contrasts"].remove(c)
+    else:
+        c["rows"] = c["rows"][:-1]
+    path = tmp_path / "e.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(rt.ReportError):
+        rt.load_part_e(path)

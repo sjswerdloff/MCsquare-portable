@@ -1,10 +1,11 @@
 # Portable MCsquare: depth-dose and off-axis comparison with upstream OpenMCsquare and TOPAS
 
-**DRAFT, 2026-10-02, in the form of the published MCsquare validations (Souris et al. 2016; Huang et al. 2018). Not
+**DRAFT, 2026-10-04, in the form of the published MCsquare validations (Souris et al. 2016; Huang et al. 2018). Not
 a publication.** The confirmatory same-host acquisition (commit `2f9dab40`, §4) is complete and its endpoint results
 are in §5.0–§5.2, with figures and gamma tables made from the dose files. The TOPAS comparison
 (§5.4) is a pre-specified descriptive comparison at 100, 150 and 200 MeV; it is not confirmatory and carries no
-margin or outcome.
+margin or outcome. The broad field at 100 and 150 MeV (part E, §5.5) is a confirmatory follow-up acquisition and is
+complete.
 
 Sources are cited compactly: `#N` = an issue or PR on MCsquare-portable; `UR` = the upstream report,
 [OpenMCsquare work item 42](https://gitlab.com/openmcsquare/MCsquare/-/work_items/42); `TD` = `validation/topas_design.md`;
@@ -265,7 +266,7 @@ of scale, not a bound on dose, for these reasons:
 
 **The clinical impact of the unresolved endpoints is therefore not established by this comparison.** The direct
 test is the one made at 200 MeV: the broad-field case, whose out-of-field dose endpoints were all equivalent
-(Table 4). It has not been run at 100 or 150 MeV.
+(Table 4). Part E ran the same case at 100 and 150 MeV: every endpoint is equivalent in every contrast (§5.5).
 
 ### 5.1 Depth dose
 
@@ -537,6 +538,91 @@ to both MCsquare code lines and were not introduced by the port. That inference 
 annulus at 100 MeV and the 80–200 mm annulus at 150 MeV, where the same-host comparison is inconclusive (§5.0). None of this says anything about the
 cause: physics models, scoring, estimators, and geometry or source conditions all remain possible.
 
+### 5.5 Broad field at 100 and 150 MeV (part E, confirmatory)
+
+§5.0 left open whether the field-edge agreement at 200 MeV holds at lower energies. Part E answers that with a
+follow-up acquisition named before it ran (`docs/field_100_150_plan.md`).
+
+**Design.** The broad-field model of §3.2 (15 × 15 cm, no range shifter) at 100 and 150 MeV. Each arm ran 8 runs per
+energy at 6e7 histories, with the hosts, thread counts and code lines of §4: A-up and A-port on the Lenovo; B-up,
+B-pgcc and B-picc on the HP. There are 17 endpoints per energy and 34 per contrast. Lateral dose is taken at 5, 10, 20,
+30, 50 and 70 mm outside the field edge, at two depths per energy, in percentage points of the central dose of the same
+profile. Central-axis dose is taken at those depths and at the maximum, as ratios, and R80 and R20 as differences in
+mm. The margins are those of the 200 MeV field (#31). The analysis was written and reviewed before any part E run
+existed, and frozen with the acquisition.
+
+**Acquisition and amendments.** The full run was at commit `df2fabbd`. Two cells, A-port and B-pgcc at 150 MeV, were
+stopped at 6 of 8 runs by the runners' default 3 h job timeout. With the timeout raised, both cells were rerun in full
+at commit `b4b3bce3`, which differs from `df2fabbd` only in the two run requests and the plan (acquisition amendment
+1). The analysis takes those two cells from the rerun only and verifies each rerun run against its own commit
+(analysis amendment 2, #66). Both amendments were made, reviewed and merged before any dose value of the full run was
+read. All 80 runs verified, and only then were endpoints computed (analysis at `26a93235`; document
+`validation/report_data/field_e_analysis_26a93235.json`).
+
+**Table 7. Part E, confirmatory contrasts: claims and counts.**
+
+<!-- BEGIN GENERATED: table-7-part-e-summary -->
+| contrast | joint claim (all 34 equivalent) | secondary joint claim | equivalent, unadjusted | equivalent, Holm |
+|---|---|---|---|---|
+| A: A-port vs A-up | established | established | 34 of 34 | 34 of 34 |
+| B1: B-pgcc vs B-up | established | established | 34 of 34 | 34 of 34 |
+| B2: B-picc vs B-up | established | established | 34 of 34 | 34 of 34 |
+<!-- END GENERATED: table-7-part-e-summary -->
+
+**Table 8. Part E, every endpoint: estimate [95% interval] and TOST outcome (90% interval). `lateral_D_X` is the dose X
+mm outside the field edge at D mm depth, as a difference in percentage points of the central dose. `cax_D` and
+`cax_max` are central-axis dose ratios, and `r80_mm` and `r20_mm` are differences in mm.**
+
+<!-- BEGIN GENERATED: table-8-part-e-endpoints -->
+| endpoint | scale | A | B1 | B2 |
+|---|---|---|---|---|
+| E100/lateral_39_5 | difference | −0.0202 [−0.0401, −0.0003] E | +0.0011 [−0.0239, +0.0261] E | −0.0072 [−0.0291, +0.0146] E |
+| E100/lateral_39_10 | difference | +0.0175 [+0.0054, +0.0297] E | +0.0045 [−0.0125, +0.0215] E | +0.0037 [−0.0127, +0.0201] E |
+| E100/lateral_39_20 | difference | +0.0013 [−0.0114, +0.0139] E | +0.0006 [−0.0121, +0.0132] E | +0.0090 [−0.0046, +0.0226] E |
+| E100/lateral_39_30 | difference | +0.0010 [−0.0143, +0.0162] E | −0.0033 [−0.0097, +0.0030] E | −0.0008 [−0.0073, +0.0057] E |
+| E100/lateral_39_50 | difference | −0.0023 [−0.0063, +0.0017] E | −0.0008 [−0.0056, +0.0040] E | +0.0008 [−0.0035, +0.0051] E |
+| E100/lateral_39_70 | difference | +0.0002 [−0.0031, +0.0035] E | +0.0025 [−0.0015, +0.0066] E | +0.0008 [−0.0024, +0.0040] E |
+| E100/lateral_61_5 | difference | −0.0274 [−0.0483, −0.0064] E | +0.0034 [−0.0283, +0.0351] E | −0.0022 [−0.0284, +0.0240] E |
+| E100/lateral_61_10 | difference | +0.0021 [−0.0152, +0.0194] E | +0.0059 [−0.0126, +0.0244] E | +0.0039 [−0.0134, +0.0212] E |
+| E100/lateral_61_20 | difference | −0.0039 [−0.0181, +0.0103] E | −0.0075 [−0.0183, +0.0034] E | +0.0043 [−0.0070, +0.0156] E |
+| E100/lateral_61_30 | difference | −0.0003 [−0.0099, +0.0094] E | +0.0022 [−0.0068, +0.0113] E | +0.0128 [+0.0036, +0.0220] E |
+| E100/lateral_61_50 | difference | −0.0024 [−0.0082, +0.0034] E | +0.0045 [+0.0002, +0.0088] E | +0.0037 [−0.0005, +0.0080] E |
+| E100/lateral_61_70 | difference | −0.0010 [−0.0050, +0.0030] E | +0.0014 [−0.0021, +0.0049] E | +0.0017 [−0.0021, +0.0056] E |
+| E100/cax_39 | ratio | 0.9990 [0.9981, 1.0000] E | 1.0001 [0.9989, 1.0014] E | 1.0002 [0.9991, 1.0014] E |
+| E100/cax_61 | ratio | 1.0000 [0.9987, 1.0014] E | 1.0001 [0.9988, 1.0013] E | 1.0003 [0.9989, 1.0017] E |
+| E100/cax_max | ratio | 1.0000 [0.9988, 1.0011] E | 1.0000 [0.9987, 1.0014] E | 1.0008 [0.9994, 1.0022] E |
+| E100/r80_mm | difference | +0.0004 [−0.0010, +0.0017] E | −0.0001 [−0.0013, +0.0011] E | 0.0000 [−0.0011, +0.0010] E |
+| E100/r20_mm | difference | 0.0000 [−0.0014, +0.0014] E | +0.0001 [−0.0013, +0.0015] E | +0.0002 [−0.0010, +0.0015] E |
+| E150/lateral_79_5 | difference | +0.0184 [−0.0098, +0.0466] E | −0.0154 [−0.0416, +0.0108] E | −0.0113 [−0.0392, +0.0166] E |
+| E150/lateral_79_10 | difference | +0.0007 [−0.0229, +0.0242] E | −0.0040 [−0.0267, +0.0186] E | −0.0224 [−0.0445, −0.0002] E |
+| E150/lateral_79_20 | difference | +0.0012 [−0.0122, +0.0146] E | +0.0004 [−0.0145, +0.0153] E | −0.0038 [−0.0192, +0.0117] E |
+| E150/lateral_79_30 | difference | +0.0027 [−0.0039, +0.0092] E | −0.0013 [−0.0101, +0.0074] E | +0.0046 [−0.0037, +0.0128] E |
+| E150/lateral_79_50 | difference | −0.0008 [−0.0032, +0.0016] E | −0.0012 [−0.0047, +0.0024] E | +0.0009 [−0.0022, +0.0039] E |
+| E150/lateral_79_70 | difference | +0.0001 [−0.0015, +0.0016] E | +0.0001 [−0.0009, +0.0011] E | +0.0001 [−0.0012, +0.0014] E |
+| E150/lateral_125_5 | difference | −0.0058 [−0.0425, +0.0310] E | +0.0113 [−0.0198, +0.0424] E | −0.0111 [−0.0411, +0.0189] E |
+| E150/lateral_125_10 | difference | −0.0206 [−0.0471, +0.0059] E | −0.0116 [−0.0364, +0.0132] E | −0.0109 [−0.0310, +0.0092] E |
+| E150/lateral_125_20 | difference | −0.0021 [−0.0163, +0.0121] E | +0.0050 [−0.0073, +0.0174] E | −0.0007 [−0.0123, +0.0109] E |
+| E150/lateral_125_30 | difference | −0.0038 [−0.0117, +0.0042] E | −0.0025 [−0.0124, +0.0075] E | −0.0034 [−0.0131, +0.0063] E |
+| E150/lateral_125_50 | difference | −0.0008 [−0.0025, +0.0010] E | −0.0002 [−0.0023, +0.0019] E | +0.0007 [−0.0021, +0.0035] E |
+| E150/lateral_125_70 | difference | −0.0001 [−0.0008, +0.0006] E | +0.0001 [−0.0008, +0.0009] E | +0.0001 [−0.0005, +0.0006] E |
+| E150/cax_79 | ratio | 1.0000 [0.9987, 1.0013] E | 0.9996 [0.9982, 1.0010] E | 0.9997 [0.9981, 1.0014] E |
+| E150/cax_125 | ratio | 1.0005 [0.9993, 1.0017] E | 1.0001 [0.9983, 1.0019] E | 0.9996 [0.9980, 1.0013] E |
+| E150/cax_max | ratio | 1.0012 [0.9997, 1.0027] E | 1.0000 [0.9987, 1.0013] E | 1.0001 [0.9990, 1.0011] E |
+| E150/r80_mm | difference | −0.0029 [−0.0067, +0.0009] E | +0.0004 [−0.0033, +0.0042] E | −0.0027 [−0.0078, +0.0025] E |
+| E150/r20_mm | difference | −0.0054 [−0.0118, +0.0011] E | +0.0013 [−0.0033, +0.0059] E | +0.0012 [−0.0042, +0.0065] E |
+<!-- END GENERATED: table-8-part-e-endpoints -->
+
+- **Every endpoint is equivalent in every confirmatory contrast, before and after Holm adjustment,** so the joint
+  claim holds for Portable MCsquare on the Lenovo (Windows) and with both compilers on the HP (Linux). This is the
+  claim that §5.0 could not establish for the pencil beam's far halo at these energies. The broad field's endpoints
+  are better determined at 6e7 histories, and they are a different quantity.
+- The largest lateral difference is 0.027 percentage points (95% intervals within ±0.05), against margins of ±0.5
+  points at 5 mm and ±0.2 points further out. Central-axis ratios are within 0.12% of 1 (intervals within 0.27%),
+  and R80 and R20 differ by at most 0.003 and 0.005 mm.
+- **Runs are not byte-reproducible for a seed.** Two runs with the same seed, binary and host gave different dose
+  files (`docs/field_100_150_plan.md`, chronology), so the analysis treats runs as independent draws, as it does
+  throughout.
+
 ## 6. Discussion
 
 1. **Agreement between the code lines.** On the same host, and with the same fix in both, upstream OpenMCsquare and
@@ -571,8 +657,9 @@ cause: physics models, scoring, estimators, and geometry or source conditions al
    uniform 3% dose difference in 3D (§5.1). The pencil-beam comparison rests on the endpoint tables. All gamma
    values compare means of Monte Carlo runs, so they include statistical noise in both distributions.
 2. **The joint equivalence claim is not established** in any contrast, because the far halo at 100 and 150 MeV lacks
-   precision at 1e7 histories per run (§5.0). The clinical impact of those unresolved endpoints is not established;
-   the broad-field case has not been run at 100 or 150 MeV.
+   precision at 1e7 histories per run (§5.0). For the pencil beam, the clinical impact of those unresolved endpoints
+   is not established. The broad field, which tests out-of-field dose directly, is equivalent at 100, 150 and 200 MeV
+   (Table 4, §5.5).
 3. **Homogeneous phantoms only.** Neither case has a density interface. Differences in lateral scattering and in the
    nuclear halo matter most clinically behind low-density tissue and at bone–air interfaces, and none of that is
    tested here. Planned as future work: a lung-density slab; a sinus-like cavity of air in bone; and the same cavity
@@ -580,7 +667,7 @@ cause: physics models, scoring, estimators, and geometry or source conditions al
 4. **Neither confirmatory case has a beam-line device in the beam.** The upstream defect was found with a range
    shifter in, where nuclear secondaries from the shifter reach the phantom, so a range-shifter-in case would test it
    most directly. No aperture is modelled.
-5. **Energies and fields.** Pencil beams at 100, 150 and 200 MeV and one 200 MeV, 15 × 15 cm field. Nothing outside
+5. **Energies and fields.** Pencil beams and one 15 × 15 cm field, each at 100, 150 and 200 MeV. Nothing outside
    that range is tested.
 6. The TOPAS comparison is descriptive and covers the pencil beam only (100, 150 and 200 MeV); TOPAS and the
    Portable arms ran on different hosts, and the MCsquare endpoints had been read before its design was fixed.
@@ -616,6 +703,14 @@ Portable MCsquare repository.
   by `validation/topas_halo_compare.py` at commit `868d1910` from the 24 TOPAS runs frozen at `5aedf3ac` and the
   collected records above (321 files, dataset fingerprint sha256
   `0d5be975b294e0b77860e0ddbce5807caa526a0ca56481df5056effff40033ba`).
+- **Part E** (§5.5): plan, amendments and chronology in `docs/field_100_150_plan.md`. Run trees: the full run of
+  `df2fabbd`, archives part A sha256 `f6e42b7b8b47e52dba76a116373e26a393660472542051bc7b050f4eb787d94e` and part B
+  sha256 `20a77f25651a6102758782a47be98af7622b845f1ec35fc9945cbd964bb95002`; the rerun of the two 150 MeV cells at
+  `b4b3bce3`, part A sha256 `3bc98527d1cdde66242c6777bdb39ea450c72766d1902bb9a7b859913fa7d205` and part B sha256
+  `da834d923894d6574fb95229b45aa8bcba5852b3ead85b9ee84b2c803fa37c16`. Analysis document
+  `validation/report_data/field_e_analysis_26a93235.json` (and its table, `.md`), written by
+  `validation/field_followup_analyse.py` at `26a93235` from all four (dataset fingerprint sha256
+  `891933e22ce1e126076f22346a2bdf752e2c4008d60d6877710121d82fab0685`, 24,020 files).
 - **Tables:** `python validation/report_confirmatory_tables.py --check` confirms that the tables in this report are
   what those documents render.
 

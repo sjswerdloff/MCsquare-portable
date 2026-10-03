@@ -380,3 +380,18 @@ made after the freeze and why, and the commit of the analysis that produced the 
   only verified inputs and the dose being hashed where it was written, not on a byte comparison.
 - Full request 5 (this commit): both rerun cells, 8 runs each; this commit is the rerun commit of acquisition
   amendment 1.
+- 2026-10-04 00:59 NZDT: full request 5 at `b4b3bce3da8b8b8697d0b3999672fa56d9e001a3`: "Run A-port at 150 MeV" (task
+  11016, Lenovo) and "Run B-pgcc at 150 MeV" (task 11017, HP) both succeeded, at 04:39 and 04:57, within the new 12 h
+  limit. The Gitea server was restarted while they ran (ROOT_URL); both jobs continued. Pack, upload and cleanup
+  succeeded; both run trees were removed from the PCs. `field_e_A_b4b3bce3da8b_full.tar.gz` (sha256
+  `3bc98527d1cdde66242c6777bdb39ea450c72766d1902bb9a7b859913fa7d205`) and `field_e_B_b4b3bce3da8b_full.tar.gz` (sha256
+  `da834d923894d6574fb95229b45aa8bcba5852b3ead85b9ee84b2c803fa37c16`) are on the share and match.
+- 2026-10-04: analysis amendment 2 (#66) approved by alden-ec2221c7 and silas-397300f6 at
+  `bc65c7edaca5eaad6a8f0c78f6f34dd0902dc9d2` and merged as `26a932354a7f671cf949e3c3d5f4689d1d92fa03`. No dose value of
+  the full run had been read.
+- 2026-10-04 05:03 NZDT: at `26a93235`, `field_followup_analyse.py --mode full --status` with the two original trees,
+  the two rerun trees and both commits: 80 of 80 runs verified, VERIFIED; A-port and B-pgcc at 150 MeV read from the
+  rerun only. No dose value was read before this. Then the analysis, same arguments with `--json`/`--md`: the
+  document is `validation/report_data/field_e_analysis_26a93235.json` (with its table, `.md`), dataset fingerprint
+  sha256 `891933e22ce1e126076f22346a2bdf752e2c4008d60d6877710121d82fab0685` over 24,020 files. Copies of the document,
+  the table and the `--status` output are on the share under `field_100_150/` and match.
