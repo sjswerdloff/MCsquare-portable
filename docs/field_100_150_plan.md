@@ -294,3 +294,13 @@ made after the freeze and why, and the commit of the analysis that produced the 
   The pack, upload and cleanup jobs ran; `field_e_A_8b3312ef05d8_smoke.tar.gz` and `field_e_B_8b3312ef05d8_smoke.tar.gz`
   are on the share. Request 4 extracts with `tar -m` (the bytes are unchanged; the analysis compares bytes only) and
   repeats the HP smoke.
+- 2026-10-04 00:57 NZDT: smoke request 4 at `b89e5e6d64b93c05cb03ac5fd0abd4e54f1fba77` (HP): all jobs succeeded, with the
+  run tree on `/mnt/c`; `field_e_B_b89e5e6d64b9_smoke.tar.gz` is on the share and matches. The amended analysis
+  (`--mode smoke --status`, the smoke trees of `52d6aa33` as the original population) verifies the rerun smoke run of
+  each cell against its own commit and refuses it against the other (run.json commit), which is the intended control.
+- The location check planned above cannot be made: the A-port smoke run of `8b3312ef` and that of `52d6aa33` (same
+  seed, binary and Lenovo, 4 threads) have different `Dose.raw` (sha256 `c9f304e3...` against `42643f1e...`), so a run
+  is not byte-reproducible for a seed. That the HP output location changes nothing therefore rests on the run reading
+  only verified inputs and the dose being hashed where it was written, not on a byte comparison.
+- Full request 5 (this commit): both rerun cells, 8 runs each; this commit is the rerun commit of acquisition
+  amendment 1.
