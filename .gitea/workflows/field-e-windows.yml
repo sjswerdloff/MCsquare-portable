@@ -17,6 +17,11 @@
 #            the SMBWritable"). It runs even when a run job failed, so the failure records reach the share.
 # Upstream 85bf2911 reads the MHD ElementDataFile and Materials\ relative to the WORKING directory and has short fixed
 # path buffers: each run directory is the cwd, every config path is relative and short (as part A).
+# Run requests (one line per push that asks for runs):
+#   1  2026-10-02  smoke
+#   2  2026-10-02  full (the acquisition commit)
+#   3  2026-10-04  smoke, acquisition amendment 1: A-port at 150 MeV only
+#   5  2026-10-04  full, acquisition amendment 1: A-port at 150 MeV, 8 runs (the rerun commit)
 
 name: Same-host comparison, part E (Windows, Lenovo)
 
@@ -26,7 +31,7 @@ on:
     paths: [.gitea/workflows/field-e-windows.yml]
 
 env:
-  MODE: smoke
+  MODE: full
   UPSTREAM: 85bf2911ddadbb40bd41b1a18b4b247536bb33ab
   PATCH_SHA256: e22990c96942286304f538b844ed2697a917c4e8b235f970731824b90ae8e347
   TARGET: icl-avx2
@@ -43,8 +48,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arm: [A-up, A-port]
-        energy: ["100", "150"]
+        arm: [A-port]
+        energy: ["150"]
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
