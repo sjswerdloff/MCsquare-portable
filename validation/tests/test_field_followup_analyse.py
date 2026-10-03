@@ -16,6 +16,7 @@ import os
 import random
 import shutil
 import statistics as st
+import subprocess
 import sys
 from pathlib import Path
 
@@ -925,3 +926,179 @@ def test_main_writes_the_document_and_the_table(trees: list[Path], tmp_path: Pat
     assert "not_established (all runs zero in both arms (simulated histories: arm 480000000, reference 480000024))" in text_md
     assert fa.main(["--root", str(trees[0]), "--commit", COMMIT, "--status"]) == 2
     assert "REFUSED" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------------------------------------ acquisition amendment 1
+RERUN = "cd" * 20
+
+
+@pytest.fixture(scope="session")
+def rerun_trees(template: Template, tmp_path_factory: pytest.TempPathFactory) -> list[Path]:
+    """The rerun of the two cells cut by the timeout, as the two workflows write it at the rerun commit."""
+    home = tmp_path_factory.mktemp("field_e_rerun")
+    roots = [home / "lenovo", home / "hp"]
+    for arm, energy in fa.RERUN_CELLS:
+        cell = roots[0 if arm in WINDOWS else 1] / fr.ARMS[arm].directory / f"e{energy}"
+        for rel in fa.RUN_LIST_FILES:
+            (cell / "snapshot" / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO / rel, cell / "snapshot" / rel)
+        for seed in fr.seeds(arm, energy, "full"):
+            write_run(template, cell, arm, energy, seed, "full", dose(energy, random.Random(seed + 7)), {"commit": RERUN})
+    return roots
+
+
+class Interrupted:
+    """The original trees as the timeout left them: in each rerun cell the 8th run absent and the 7th without run.json
+    or dose. What is taken out is parked beside the roots, outside both; restored on exit."""
+
+    def __init__(self, trees: list[Path]) -> None:
+        self.moves: list[tuple[Path, Path]] = []
+        park = trees[0].parent / "held"
+        park.mkdir(exist_ok=True)
+        for arm, energy in fa.RERUN_CELLS:
+            cell = trees[0 if arm in WINDOWS else 1] / fr.ARMS[arm].directory / f"e{energy}"
+            *_, seventh, eighth = fr.seeds(arm, energy, "full")
+            self.moves.append((cell / f"s{eighth}", park / f"s{eighth}"))
+            for name in ("run.json", "out_seed"):
+                self.moves.append((cell / f"s{seventh}" / name, park / f"{seventh}_{name}"))
+
+    def __enter__(self) -> None:
+        for src, dst in self.moves:
+            src.rename(dst)
+
+    def __exit__(self, *_exc: object) -> None:
+        for src, dst in reversed(self.moves):
+            dst.rename(src)
+
+
+@pytest.fixture
+def rerun_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fa, "rerun_commit_problems", lambda *_a: [])
+
+
+def test_without_the_rerun_the_interrupted_population_is_not_verified(trees: list[Path]) -> None:
+    with Interrupted(trees):
+        ok, lines = fa.status(trees, COMMIT, "full")
+    assert not ok
+    assert "  A-port 150 MeV: run s961058 is missing" in lines and "B-pgcc 150 MeV: 6 of 8 verified" in lines
+
+
+@pytest.mark.usefixtures("rerun_ok")
+def test_the_rerun_cells_come_from_the_rerun_and_only_from_it(trees: list[Path], rerun_trees: list[Path]) -> None:
+    with Interrupted(trees):
+        ok, lines = fa.status(trees, COMMIT, "full", rerun_roots=rerun_trees, rerun_commit=RERUN)
+    assert ok, lines
+    assert "A-port 150 MeV: 8 of 8 verified" in lines and "B-pgcc 150 MeV: 8 of 8 verified" in lines
+    assert any(x.startswith("note: A-port 150 MeV: read from the rerun at cdcdcdcdcdcd") for x in lines)
+
+
+@pytest.mark.usefixtures("rerun_ok")
+def test_a_rerun_run_at_the_acquisition_commit_and_an_original_run_at_the_rerun_commit_are_problems(
+        trees: list[Path], rerun_trees: list[Path]) -> None:
+    # The rerun's runs are checked against the rerun commit: the original roots, read as the rerun, fail the commit check.
+    ok, lines = fa.status(trees, COMMIT, "full", rerun_roots=trees, rerun_commit=RERUN)
+    assert not ok
+    assert any("A-port 150 MeV s961051: run.json commit is" in x and "expected 'cdcd" in x for x in lines)
+    # and the rerun's runs, read under the acquisition commit, fail it
+    ok, lines = fa.status(trees, COMMIT, "full", rerun_roots=rerun_trees, rerun_commit=COMMIT[:-1] + "c")
+    assert not ok and any("B-pgcc 150 MeV s963051: run.json commit is 'cdcd" in x for x in lines)
+
+
+@pytest.mark.usefixtures("rerun_ok")
+@pytest.mark.parametrize("extra", ["apt/e100", "aup/e150", "bpg/e100/s963001"])
+def test_anything_but_the_rerun_cells_in_a_rerun_root_is_a_population_issue(
+        trees: list[Path], rerun_trees: list[Path], tmp_path: Path, extra: str) -> None:
+    roots = [tmp_path / "lenovo", tmp_path / "hp"]
+    for src, dst in zip(rerun_trees, roots, strict=True):
+        shutil.copytree(src, dst, copy_function=os.link)
+    host = roots[0] if extra.startswith("a") else roots[1]
+    (host / extra).mkdir(parents=True)
+    with Interrupted(trees):
+        ok, lines = fa.status(trees, COMMIT, "full", rerun_roots=roots, rerun_commit=RERUN)
+    assert not ok
+    assert any(("is not a rerun" in x or "run data" in x) for x in lines), lines
+
+
+def test_rerun_root_and_rerun_commit_go_together(trees: list[Path]) -> None:
+    with pytest.raises(fa.InputError, match="go together"):
+        fa.status(trees, COMMIT, "full", rerun_roots=trees)
+    with pytest.raises(fa.InputError, match="go together"):
+        fa.status(trees, COMMIT, "full", rerun_commit=RERUN)
+
+
+def _third_root(tmp_path: Path, content: str) -> Path:
+    """A further root holding `content` and no arm of its own: known-arm run data, or an unrecognised run directory."""
+    third = tmp_path / "third"
+    if content == "known-arm run":
+        (third / "aup" / "e150" / "s960051").mkdir(parents=True)
+        (third / "aup" / "e150" / "s960051" / "run.json").write_text("{}")
+    else:
+        (third / "stuff" / "x").mkdir(parents=True)
+        for name in ("run.json", "Dose.raw"):
+            (third / "stuff" / "x" / name).write_bytes(b"0")
+    return third
+
+
+@pytest.mark.usefixtures("rerun_ok")
+@pytest.mark.parametrize("content", ["known-arm run", "unrecognised run"])
+def test_a_rerun_root_that_holds_no_rerun_arm_is_refused(
+        trees: list[Path], rerun_trees: list[Path], tmp_path: Path, content: str) -> None:
+    """alden-ec2221c7, review of #66: its contents were attributed to no arm and so reported by nobody."""
+    third = _third_root(tmp_path, content)
+    with Interrupted(trees), pytest.raises(fa.InputError, match="rerun root .*third holds none of the arms"):
+        fa.status(trees, COMMIT, "full", rerun_roots=[*rerun_trees, third], rerun_commit=RERUN)
+
+
+@pytest.mark.parametrize("content", ["known-arm run", "unrecognised run"])
+def test_an_original_root_that_holds_no_arm_is_refused(trees: list[Path], tmp_path: Path, content: str) -> None:
+    third = _third_root(tmp_path, content)
+    # Known-arm data puts that arm in two roots, which the one-home check already refuses; anything else is armless.
+    message = "arm A-up .* is in 2 of the roots" if content == "known-arm run" else "root .*third holds none of the arms"
+    with pytest.raises(fa.InputError, match=message):
+        fa.status([*trees, third], COMMIT, "full")
+
+
+@pytest.mark.usefixtures("rerun_ok")
+def test_with_the_rerun_the_analysis_measures_80_runs_none_from_an_interrupted_cell(
+        trees: list[Path], rerun_trees: list[Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    measured: list[Path] = []
+    measure = fa.measure
+    monkeypatch.setattr(fa, "measure", lambda run: (measured.append(run.path), measure(run))[1])
+    with Interrupted(trees):
+        doc = fa.run(trees, COMMIT, rerun_roots=rerun_trees, rerun_commit=RERUN)
+    assert len(measured) == 80
+    rerun_base = {Path(r).resolve() for r in rerun_trees}
+    from_rerun = [p for p in measured if any(b in p.resolve().parents for b in rerun_base)]
+    assert len(from_rerun) == 16
+    assert all(p.resolve().parent.parent.name in {"apt", "bpg"} and p.resolve().parent.name == "e150" for p in from_rerun)
+    assert doc["collection"]["state"] == "complete and verified"
+    assert doc["rerun"] == {"amendment": "acquisition amendment 1", "commit": RERUN, "cells": ["A-port 150 MeV", "B-pgcc 150 MeV"]}
+
+
+def test_rerun_commit_problems_reads_the_repository(tmp_path: Path) -> None:
+    """A real repository: descent, the files changed, the commit form."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(tmp_path), *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    git("init", "-q"); git("config", "user.email", "t@t"); git("config", "user.name", "t")
+    for rel in (*fa.RERUN_MAY_CHANGE, "validation/field_followup_runs.py"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("v1\n")
+    git("add", "-A"); git("commit", "-q", "-m", "acq"); acq = git("rev-parse", "HEAD")
+    (tmp_path / fa.RERUN_MAY_CHANGE[0]).write_text("v2\n")
+    git("commit", "-q", "-am", "request"); good = git("rev-parse", "HEAD")
+    assert fa.rerun_commit_problems(acq, good, tmp_path) == []
+    (tmp_path / "validation/field_followup_runs.py").write_text("v2\n")
+    git("commit", "-q", "-am", "seeds"); bad = git("rev-parse", "HEAD")
+    assert "other than the run requests" in fa.rerun_commit_problems(acq, bad, tmp_path)[0]
+    assert "does not descend" in fa.rerun_commit_problems(good, acq, tmp_path)[0]
+    assert "is the acquisition commit" in fa.rerun_commit_problems(acq, acq, tmp_path)[0]
+    assert "full 40-hex" in fa.rerun_commit_problems(acq, good[:12], tmp_path)[0]
+
+
+def test_a_rerun_commit_with_problems_is_refused_before_any_run_is_read(trees: list[Path], rerun_trees: list[Path],
+                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fa, "rerun_commit_problems", lambda *_a: ["the rerun commit changes files other than the run requests"])
+    monkeypatch.setattr(fa, "verify_run", lambda *_a: pytest.fail("a run was read although the rerun commit is refused"))
+    with pytest.raises(fa.InputError, match="other than the run requests"):
+        fa.status(trees, COMMIT, "full", rerun_roots=rerun_trees, rerun_commit=RERUN)
