@@ -567,12 +567,18 @@ Diagnostic.**
   converged. Two step sizes cannot bound what remains below 0.05 mm. At 0.05 mm the gap is 0.04 to 0.13 mm.
 - **No mechanism is claimed.** The Geant4 11.3.2 source applies a linear energy-loss approximation when a step loses
   less than 1% of the kinetic energy (`linLossLimit` 0.01, not changed by option 0 or TOPAS). In this phantom, steps
-  end at 1 mm voxel boundaries, so that branch acts above about 83 MeV. It predicted a shift of only −0.10 mm at
-  100 MeV, where −0.27 mm was measured. So it does not account for all of the effect.
-- **The halo is not a step-size effect where it was checked.** At 200 MeV the spot σ and the 40–80 mm annulus at
-  200 mm depth do not change with the step limit. Other annuli and energies were not checked. The deficit is not a
-  scorer-filter leak either: in the far rings TOPAS's `Dose` is charged-particle dose, and its `DoseAll` (with
-  neutrons and gammas) is 2 to 15 times larger there.
+  end at 1 mm voxel boundaries, so that branch acts above about 83 MeV. An approximate model of it predicted a shift
+  of −0.10 mm at 100 MeV, where −0.27 mm was measured, so that model does not account for the result quantitatively.
+  The branch was not varied on its own, and other step-dependent processes are not excluded.
+- **Where it was checked, the halo did not respond to the step limit.** At 200 MeV no appreciable change was
+  observed in the spot σ or in the 40–80 mm annulus fraction at 200 mm depth, against a large change in R80. Other
+  annuli and energies were not checked.
+- **The deficit is in the scored charged-particle channel.** TOPAS's `Dose` scorer excludes neutrons, gammas and
+  their descendants; its unfiltered `DoseAll`, run alongside, gives larger far-ring fractions of the slab energy in
+  these runs (geometric-mean ratio over four runs: 1.09 for the 40–80 mm annulus at 200 MeV, 1.20–1.21 at 150 MeV,
+  2.5–3.0 at 100 MeV, and 2.0–15 for the 80–200 mm annulus where `Dose` scored energy; at 100 MeV `Dose` scored none
+  there). These are ratios of normalized fractions, not of absolute dose. They show that the deficit remains in the
+  channel compared here; they do not validate the scorer's particle classification.
 
 *Nuclear elastic.* At 200 MeV, TOPAS was run without hadronic elastic scattering (`g4h-elastic_HP` removed), 1e7
 histories × 2, against the addendum's 8 runs. Without it the 20–40 and 40–80 mm annuli at 200 mm depth fall to 0.39
