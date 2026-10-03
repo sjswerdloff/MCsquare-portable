@@ -563,8 +563,8 @@ Diagnostic.**
 
 - **Most of the R80 gap depends on the reference code's step size.** With a 0.1 mm step limit the gap falls from
   0.43–0.54 mm to 0.08–0.16 mm at all three energies. Going from 0.1 mm to 0.05 mm moves R80 by a further −0.033,
-  −0.055 and −0.044 mm (100, 150 and 200 MeV), so the effect is near convergence at 0.1 mm. At 0.05 mm the gap is
-  0.04 to 0.13 mm.
+  −0.055 and −0.044 mm (100, 150 and 200 MeV), within the small change predicted for an effect that has nearly
+  converged. Two step sizes cannot bound what remains below 0.05 mm. At 0.05 mm the gap is 0.04 to 0.13 mm.
 - **No mechanism is claimed.** The Geant4 11.3.2 source applies a linear energy-loss approximation when a step loses
   less than 1% of the kinetic energy (`linLossLimit` 0.01, not changed by option 0 or TOPAS). In this phantom, steps
   end at 1 mm voxel boundaries, so that branch acts above about 83 MeV. It predicted a shift of only −0.10 mm at
@@ -577,10 +577,12 @@ Diagnostic.**
 *Nuclear elastic.* At 200 MeV, TOPAS was run without hadronic elastic scattering (`g4h-elastic_HP` removed), 1e7
 histories × 2, against the addendum's 8 runs. Without it the 20–40 and 40–80 mm annuli at 200 mm depth fall to 0.39
 and 0.52 of their values with it, and the 40–80 mm annulus at 100 mm to 0.73. R80 moves +0.31 mm and σ at 200 mm
-−0.18 mm. So in TOPAS, elastic scattering carries about half of the 20–80 mm halo at this energy. MCsquare's
-40–80 mm annulus at 200 mm is 0.887 of TOPAS's (Table 6), a much smaller deficit than the whole elastic share. A
-difference in how the two codes model elastic scattering is therefore a candidate for the halo gap. This test removes
-elastic scattering. It does not match it to MCsquare's model, so it does not show that elastic modelling is the cause.
+−0.18 mm. These ratios are of annulus fractions of the slab energy, not of absolute annular dose, and removing a
+process changes transport as a whole, so they measure how sensitive the halo fractions are to elastic scattering, not
+the share of the halo that elastic scattering deposits. That sensitivity is large next to MCsquare's 0.887 of TOPAS's
+fraction in the 40–80 mm annulus at 200 mm (Table 6). A difference in how the two codes model elastic scattering is
+therefore a candidate for the halo gap. This test removes elastic scattering rather than matching it to MCsquare's
+model, so it does not show that elastic modelling is the cause.
 It also does not explain the range gap: removing elastic makes TOPAS's range longer, and it is already the longer one.
 
 ## 6. Discussion
@@ -607,11 +609,12 @@ It also does not explain the range gap: removing elastic makes TOPAS's range lon
    a range offset at all three energies (0.42 to 0.54 mm) and, at 100 and 150 MeV, outer-annulus fractions down to
    about a third of TOPAS's. By inference both are common to the two code lines and not introduced by the port.
    **Range:** most of the offset depends on TOPAS's step size. With a 0.1 mm step limit it falls to 0.08–0.16 mm,
-   and to 0.04–0.13 mm at 0.05 mm, near convergence (Table 6b, diagnostic). The offset in Table 6 therefore says more
+   and to 0.04–0.13 mm at 0.05 mm (Table 6b, diagnostic); the change between those two step sizes is small, but two
+   step sizes do not bound the remainder. The offset in Table 6 therefore says more
    about the reference calculation's default stepping in a 1 mm voxel phantom than about MCsquare. No mechanism is
-   claimed. **Far halo:** the step limit did not change the one annulus checked. In TOPAS, hadronic elastic scattering
-   carries about half of the 20–80 mm halo at 200 MeV, so elastic modelling is a candidate for the gap; its cause is
-   not established. TD's confirmatory arms on one host have not been run.
+   claimed. **Far halo:** the step limit did not change the one annulus checked. In TOPAS the 20–80 mm halo fractions
+   at 200 MeV are strongly sensitive to hadronic elastic scattering, so elastic modelling is a candidate for the gap;
+   its cause is not established. TD's confirmatory arms on one host have not been run.
 5. **Speed.** Run time per 1e7 histories by arm and host is in the run records and will be tabulated as resource
    information, not as a performance claim.
 
