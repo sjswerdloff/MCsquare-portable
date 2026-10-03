@@ -1026,6 +1026,38 @@ def test_rerun_root_and_rerun_commit_go_together(trees: list[Path]) -> None:
         fa.status(trees, COMMIT, "full", rerun_commit=RERUN)
 
 
+def _third_root(tmp_path: Path, content: str) -> Path:
+    """A further root holding `content` and no arm of its own: known-arm run data, or an unrecognised run directory."""
+    third = tmp_path / "third"
+    if content == "known-arm run":
+        (third / "aup" / "e150" / "s960051").mkdir(parents=True)
+        (third / "aup" / "e150" / "s960051" / "run.json").write_text("{}")
+    else:
+        (third / "stuff" / "x").mkdir(parents=True)
+        for name in ("run.json", "Dose.raw"):
+            (third / "stuff" / "x" / name).write_bytes(b"0")
+    return third
+
+
+@pytest.mark.usefixtures("rerun_ok")
+@pytest.mark.parametrize("content", ["known-arm run", "unrecognised run"])
+def test_a_rerun_root_that_holds_no_rerun_arm_is_refused(
+        trees: list[Path], rerun_trees: list[Path], tmp_path: Path, content: str) -> None:
+    """alden-ec2221c7, review of #66: its contents were attributed to no arm and so reported by nobody."""
+    third = _third_root(tmp_path, content)
+    with Interrupted(trees), pytest.raises(fa.InputError, match="rerun root .*third holds none of the arms"):
+        fa.status(trees, COMMIT, "full", rerun_roots=[*rerun_trees, third], rerun_commit=RERUN)
+
+
+@pytest.mark.parametrize("content", ["known-arm run", "unrecognised run"])
+def test_an_original_root_that_holds_no_arm_is_refused(trees: list[Path], tmp_path: Path, content: str) -> None:
+    third = _third_root(tmp_path, content)
+    # Known-arm data puts that arm in two roots, which the one-home check already refuses; anything else is armless.
+    message = "arm A-up .* is in 2 of the roots" if content == "known-arm run" else "root .*third holds none of the arms"
+    with pytest.raises(fa.InputError, match=message):
+        fa.status([*trees, third], COMMIT, "full")
+
+
 @pytest.mark.usefixtures("rerun_ok")
 def test_with_the_rerun_the_analysis_measures_80_runs_none_from_an_interrupted_cell(
         trees: list[Path], rerun_trees: list[Path], monkeypatch: pytest.MonkeyPatch) -> None:

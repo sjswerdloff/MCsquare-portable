@@ -287,7 +287,8 @@ had been read.
    as before but against the rerun commit (the `commit` in `run.json`);
 3. does not read the interrupted cells of the original roots at all;
 4. treats anything else in a rerun root (another arm, another energy, run data outside those cells) as a
-   population issue, as in the original roots;
+   population issue, as in the original roots, and refuses any root, original or rerun, that holds none of the
+   arms it is given for, since nothing would check its contents (found in review of #66);
 5. records the rerun commit and the two cells in its output.
 
 Without those two arguments it behaves as before.

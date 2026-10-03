@@ -447,6 +447,14 @@ def _stray(entries: list[Path], where: str, notes: list[str]) -> list[str]:
     return issues
 
 
+def _refuse_armless(roots: list[Path], homes: set[Path], what: str) -> None:
+    """Refuse a root that is the home of no arm: nothing would attribute its contents to a cell."""
+    armless = [str(r) for r in roots if r not in homes]
+    if armless:
+        msg = f"{what} {armless[0]} holds none of the arms it is given for; its contents would be checked by nobody"
+        raise InputError(msg)
+
+
 def load(roots: list[Path], want: Expected, rerun: Rerun | None = None) -> tuple[Cells, Issues, aa.Ledger, list[str]]:
     """Every run of the frozen lists, VERIFIED. No dose value is read here. Refuses if an arm is in no root.
 
@@ -466,6 +474,9 @@ def load(roots: list[Path], want: Expected, rerun: Rerun | None = None) -> tuple
                    "trees must be present before any run is read")
             raise InputError(msg)
         home[arm] = holders[0] / spec.directory
+    # A root that holds no arm would have its contents attributed to no cell, and so checked by nobody (alden-ec2221c7,
+    # review of #66). Refuse it rather than let an unenumerated input pass.
+    _refuse_armless([r.resolve() for r in roots], {h.parent for h in home.values()}, "root")
     notes: list[str] = []
     arm_dirs = {a.directory for a in fr.ARMS.values()}
     cell_names = {f"e{e}" for e in fr.ENERGIES}
@@ -487,7 +498,8 @@ def load(roots: list[Path], want: Expected, rerun: Rerun | None = None) -> tuple
                 msg = f"rerun arm {arm} is in {len(holders)} of the rerun roots, need exactly 1"
                 raise InputError(msg)
             rerun_home[arm] = holders[0] / fr.ARMS[arm].directory
-        own = {fr.ARMS[a].directory for a in rerun_arms}
+        _refuse_armless([r.resolve() for r in rerun.roots], {h.parent for h in rerun_home.values()}, "rerun root")
+        own ={fr.ARMS[a].directory for a in rerun_arms}
         for root in rerun.roots:
             stray = _stray([e for e in sorted(root.iterdir()) if e.name not in own], f"rerun {root}", notes)
             stray += [f"rerun {root}: {e.name} is not a rerun arm" for e in sorted(root.iterdir())
