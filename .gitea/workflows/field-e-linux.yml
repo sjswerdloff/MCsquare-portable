@@ -12,14 +12,20 @@
 #   smoke  1 run per arm and energy, 1e5 histories, under a smoke/ subdirectory
 #   full   8 runs per arm and energy, 6e7 histories
 #   run      linux: one job per arm x energy. Every run gets a new directory; nothing is overwritten.
-#   pack     linux, after every run job (also when one failed): gzip tar of $HOME/fe-study/fe/<sha12> into
+#   pack     linux, after every run job (also when one failed): gzip tar of $FE_BASE/<sha12> into
 #            C:\mcsq-collect (from WSL, /mnt/c/mcsq-collect), with its sha256.
 #   upload   windows: copy the tar to \\192.168.1.212\SMBWritable\field_100_150\, hash the share copy, compare, then
 #            write <tar>.uploaded holding the verified hash and remove the local tar. Queued several times because the
 #            'windows' label may be served by more than one PC: a copy that lands off the HP, or after another copy
 #            uploaded, does nothing.
-#   cleanup  linux: removes the run tree from WSL only when <tar>.uploaded holds the hash pack recorded
+#   cleanup  linux: removes the run tree only when <tar>.uploaded holds the hash pack recorded
 #            (sjswerdloff, 2026-10-02: "move the run data off the pcs, on to the SMBWritable").
+# Run requests (one line per push that asks for runs):
+#   1  2026-10-02  smoke
+#   2  2026-10-02  full (the acquisition commit)
+#   3  2026-10-04  smoke, acquisition amendment 1: B-pgcc at 150 MeV only; run tree on the Windows drive (FE_BASE)
+#   4  2026-10-04  smoke again: request 3 stopped extracting the snapshot on /mnt/c (tar: Cannot utime); tar -m
+#   5  2026-10-04  full, acquisition amendment 1: B-pgcc at 150 MeV, 8 runs (the rerun commit)
 
 name: Same-host comparison, part E (Linux, HP)
 
@@ -29,11 +35,13 @@ on:
     paths: [.gitea/workflows/field-e-linux.yml]
 
 env:
-  MODE: smoke
+  MODE: full
   UPSTREAM: 85bf2911ddadbb40bd41b1a18b4b247536bb33ab
   PATCH_SHA256: e22990c96942286304f538b844ed2697a917c4e8b235f970731824b90ae8e347
   SOURCE_COMMIT: 2f9dab404cea02f5072352f7ae5773dca27eb2a1
   HP: DESKTOP-5H86O9N
+  # Run trees on the Windows drive, not in WSL's virtual disk (acquisition amendment 1; sjswerdloff, 2026-10-02).
+  FE_BASE: /mnt/c/fe-study/fe
 
 jobs:
   run:
@@ -43,8 +51,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arm: [B-up, B-pgcc, B-picc]
-        energy: ["100", "150"]
+        arm: [B-pgcc]
+        energy: ["150"]
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -96,17 +104,18 @@ jobs:
           # Every arm uses this commit's data; it must equal upstream's for every file the case reads.
           git diff --quiet "$UPSTREAM" HEAD -- Materials Scanners/default BDL/BDL_default_DN_RangeShifter.txt \
             || { echo "Materials/Scanners/BDL differ from upstream ${UPSTREAM:0:12}: refusing"; exit 1; }
-          FREE_GB=$(df -Pk "$HOME" | awk 'NR==2 {print int($4 / 1048576)}')
-          echo "free under $HOME: ${FREE_GB} GB"
-          [ "$FREE_GB" -ge 10 ] || { echo "only ${FREE_GB} GB free under $HOME: refusing"; exit 1; }
-          ROOT="$HOME/fe-study/fe/$SHA12/$SUB$AD/e$E"
+          mkdir -p "$FE_BASE"
+          FREE_GB=$(df -Pk "$FE_BASE" | awk 'NR==2 {print int($4 / 1048576)}')
+          echo "free under $FE_BASE: ${FREE_GB} GB"
+          [ "$FREE_GB" -ge 10 ] || { echo "only ${FREE_GB} GB free under $FE_BASE: refusing"; exit 1; }
+          ROOT="$FE_BASE/$SHA12/$SUB$AD/e$E"
           mkdir -p "$(dirname "$ROOT")"
           mkdir "$ROOT" || { echo "cannot create $ROOT (exists, or not writable): refusing"; exit 1; }
           echo "$ARM $E MeV mode $MODE, commit $GITHUB_SHA, run $GITHUB_RUN_ID" > "$ROOT/run_root.txt"
           # Snapshot: the committed bytes of every script and data file the runs use, with sha256.
           SNAP="$ROOT/snapshot"; mkdir "$SNAP"
           git archive HEAD Materials Scanners BDL validation/apples_seeds_check.py validation/field_followup_runs.py \
-            validation/field_edge_make_cases.py | tar -x -C "$SNAP"
+            validation/field_edge_make_cases.py | tar -x -m -C "$SNAP"   # -m: drvfs (/mnt/c) refuses utime; bytes are unchanged
           cp "$B/build.txt" "$SNAP/build.txt"; cp "$B/sha256.txt" "$SNAP/binary_sha256.txt"
           V="$SNAP/validation"
           (cd "$SNAP" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$ROOT/snapshot_sha256.txt"
@@ -169,7 +178,7 @@ jobs:
           [ "$(hostname)" = "$HP" ] || { echo "this job is for the HP ($HP), not $(hostname): refusing"; exit 1; }
           case "$MODE" in smoke|full) ;; *) echo "MODE must be smoke or full, got '$MODE'"; exit 1;; esac
           SHA12=${GITHUB_SHA:0:12}
-          SRC_PARENT="$HOME/fe-study/fe"; SRC="$SRC_PARENT/$SHA12"
+          SRC_PARENT="$FE_BASE"; SRC="$SRC_PARENT/$SHA12"
           OUT=/mnt/c/mcsq-collect
           NAME="field_e_B_${SHA12}_${MODE}.tar.gz"
           [ -d "$SRC" ] || { echo "no run tree at $SRC: nothing to move"; exit 1; }
@@ -255,7 +264,7 @@ jobs:
           }
 
   cleanup:
-    name: Remove the run tree from WSL once the share copy is verified
+    name: Remove the run tree from the HP once the share copy is verified
     needs: upload
     if: ${{ always() }}
     runs-on: linux
@@ -266,7 +275,7 @@ jobs:
           set -euo pipefail
           [ "$(hostname)" = "$HP" ] || { echo "this job is for the HP ($HP), not $(hostname): refusing"; exit 1; }
           SHA12=${GITHUB_SHA:0:12}
-          SRC="$HOME/fe-study/fe/$SHA12"
+          SRC="$FE_BASE/$SHA12"
           OUT=/mnt/c/mcsq-collect
           NAME="field_e_B_${SHA12}_${MODE}.tar.gz"
           [ -d "$SRC" ] || { echo "no run tree at $SRC: nothing to remove"; exit 1; }
@@ -276,4 +285,4 @@ jobs:
           [[ "$WANT" =~ ^[0-9a-f]{64}$ ]] && [ "$WANT" = "$GOT" ] || { echo "upload record ($GOT) is not the packed tar ($WANT): the run tree stays"; exit 1; }
           [[ "$SHA12" =~ ^[0-9a-f]{12}$ ]] || { echo "malformed commit '$SHA12': refusing"; exit 1; }
           rm -rf -- "$SRC"
-          echo "removed $SRC; free under $HOME: $(df -Pk "$HOME" | awk 'NR==2 {print int($4 / 1048576)}') GB"
+          echo "removed $SRC; free under $FE_BASE: $(df -Pk "$FE_BASE" | awk 'NR==2 {print int($4 / 1048576)}') GB"
