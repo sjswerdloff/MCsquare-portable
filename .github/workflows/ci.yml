@@ -1,5 +1,5 @@
 # GitHub Actions CI for MCsquare-portable
-# Builds and tests on Linux (gcc) and macOS ARM64 (clang)
+# Everything runs on Linux (gcc). The macOS arm64 job only builds and runs the smoke test.
 
 name: CI
 
@@ -12,60 +12,26 @@ on:
 jobs:
   build-linux:
     name: Build & Test (Linux gcc)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      # Full history and tags: the Makefile reads the version with git describe, and the validation
+      # tests read the frozen run lists with `git show` at their acquisition commits.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
           fetch-depth: 0
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential
-
       - name: Build MCsquare_portable
-        run: make MCsquare_portable
+        run: |
+          gcc --version
+          make MCsquare_portable
 
       - name: Verify binary
         run: |
           ls -la MCsquare_portable
           file MCsquare_portable
 
-      - name: Smoke test (1000 primaries)
-        run: |
-          mkdir -p smoke_test_output
-          ./MCsquare_portable Sample_input_data/smoke_test_config.txt
-
-      - name: Verify output
-        run: |
-          ls -la smoke_test_output/
-          test -f smoke_test_output/Dose.mhd
-          echo "Smoke test passed - Dose.mhd created"
-
-  build-macos-arm64:
-    name: Build & Test (macOS ARM64)
-    runs-on: macos-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-tags: true
-          fetch-depth: 0
-
-      - name: Install libomp
-        run: brew install libomp
-
-      - name: Build MCsquare_arm64
-        run: make MCsquare_arm64
-
-      - name: Verify binary
-        run: |
-          ls -la MCsquare_arm64
-          file MCsquare_arm64
-
-      # The same regression tests the Gitea CI runs. Each builds and runs in a few seconds.
       - name: Regression tests (UBSan)
         run: make test_transport
 
@@ -81,10 +47,55 @@ jobs:
       - name: Smoke test (1000 primaries)
         run: |
           mkdir -p smoke_test_output
-          ./MCsquare_arm64 Sample_input_data/smoke_test_config.txt
+          ./MCsquare_portable Sample_input_data/smoke_test_config.txt
 
       - name: Long output path (issue #5)
-        run: tests/test_long_output_path.sh ./MCsquare_arm64
+        run: tests/test_long_output_path.sh ./MCsquare_portable
+
+      - name: Verify output
+        run: |
+          ls -la smoke_test_output/
+          test -f smoke_test_output/Dose.mhd
+          echo "Smoke test passed - Dose.mhd created"
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      # The validation code's own tests: validation/tests and the three root-level pytest modules, then
+      # test_platform_study_metrics.py, which is a script that exits non-zero on failure. scipy is not in
+      # validation/uv.lock, so it is pinned here.
+      - name: Validation tests
+        run: |
+          RUN=(uv run --project validation --frozen --with scipy==1.18.1 python)
+          "${RUN[@]}" -m pytest validation/tests validation/test_platform_study_analyse.py \
+            validation/test_platform_study_manifest.py validation/test_platform_study_record.py \
+            -q -p no:cacheprovider
+          "${RUN[@]}" validation/test_platform_study_metrics.py
+
+  build-macos-arm64:
+    name: Build & Smoke (macOS ARM64)
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
+          fetch-depth: 0
+
+      - name: Install libomp
+        run: brew install libomp
+
+      - name: Build MCsquare_arm64
+        run: make MCsquare_arm64
+
+      - name: Verify binary
+        run: |
+          ls -la MCsquare_arm64
+          file MCsquare_arm64
+
+      - name: Smoke test (1000 primaries)
+        run: |
+          mkdir -p smoke_test_output
+          ./MCsquare_arm64 Sample_input_data/smoke_test_config.txt
 
       - name: Verify output
         run: |
