@@ -1,21 +1,53 @@
 # MCsquare (portable)
 
 Fast Monte Carlo dose calculation for pencil-beam scanning proton therapy. This is a portable fork of
-[OpenMCsquare](https://gitlab.com/openmcsquare/MCsquare) that builds with open-source compilers and
-runs natively on Apple Silicon.
+[OpenMCsquare](https://gitlab.com/openmcsquare/MCsquare) (from upstream commit `85bf2911`) that builds with
+free compilers on Linux, macOS on Apple Silicon and Windows.
 
-**No Intel software is needed or used.** The Intel compiler and Intel MKL that upstream requires are not
-used here: MKL's random number generator is replaced by PCG, and the MKL vector helpers by standard C.
-The code builds with Apple clang (with Homebrew `libomp`) and with GNU GCC, as described below.
+**No Intel software is needed.** Upstream requires the Intel compiler and Intel MKL. Here Cilk Plus is
+replaced by OpenMP SIMD, MKL's random number generator by PCG, and the MKL vector helpers by standard C.
+The physics models, data tables and beam model are upstream's.
+
+**This is research software. It is not a medical device and is not cleared for clinical use.**
+
+## Status
+
+- **Compared with upstream.** On the same hosts, and with the same fix applied to both (see below),
+  this fork and Intel-built upstream agree within margins fixed in advance on range, spot size, the core
+  and near halo of a pencil beam at 100, 150 and 200 MeV, and every endpoint of a broad field. Of 52
+  endpoints, 46 are equivalent and none is not equivalent. The other six, all in the pencil beam's far halo
+  (40 mm or more from the axis) at 100 and 150 MeV, are inconclusive or not established, so equivalence on
+  all 52 together is not established.
+- **Across platforms.** For one broad field, Windows and macOS are each equivalent to Linux on 13 of 13
+  endpoints.
+- **Compared with TOPAS/Geant4.** A descriptive comparison (no margins) shows a range offset of 0.42 to
+  0.54 mm, most of which depends on the TOPAS step size, and less dose than TOPAS in the far halo at 100
+  and 150 MeV. By inference both are common to this fork and upstream.
+- **Not compared with physical measurements of dose.**
+- **Speed.** Built with gcc, this fork took 2.4 to 2.7 times as long as Intel-built upstream on the two
+  Intel hosts used. Built with the Intel compiler it took about as long as upstream.
+
+The methods, results, limitations and the data behind every number are in the draft report,
+[`docs/validation_report_draft.md`](docs/validation_report_draft.md). It is a draft and has not been
+peer reviewed.
 
 ## Platforms
 
 | Platform | Compiler | Status |
 |---|---|---|
-| **macOS on Apple Silicon (arm64)** | Apple clang + Homebrew `libomp` | Primary target; built and tested in CI on every pull request |
+| Linux x86-64 | GCC with OpenMP | Built and tested in CI on every pull request (Ubuntu 24.04) |
+| macOS on Apple Silicon (arm64) | Apple clang + Homebrew `libomp` | Built and smoke-tested in CI on every pull request |
 | macOS on Apple Silicon (arm64) | Homebrew GCC (`gcc-15`) | Builds and runs the smoke test; not run in CI |
-| Linux x86-64 | GCC with OpenMP | Builds and runs (benchmarked on Ubuntu 24.04); not run in CI |
-| Windows x86-64 | MinGW-w64 GCC (MSYS2 UCRT64) | Builds and runs the smoke test in CI on every pull request |
+| Windows x86-64 | MinGW-w64 GCC (MSYS2 UCRT64) | Built and smoke-tested on the development server's CI; not in the GitHub CI |
+
+## Build on Linux (x86-64)
+
+```
+sudo apt install build-essential    # gcc with OpenMP
+make MCsquare_portable
+```
+
+Plain `make` builds upstream's Intel targets, so always name a target.
 
 ## Build on Apple Silicon
 
@@ -43,15 +75,6 @@ gcc-15 src/*.c -fopenmp -lm -O3 -DVERSION='"portable, gcc-15"' -o MCsquare_arm64
 On macOS, plain `gcc` is Apple clang under another name and does not accept `-fopenmp`, so call the
 versioned Homebrew binary (`gcc-15`, or whichever version `brew` installed).
 
-Plain `make` builds upstream's Intel targets, so always name a target.
-
-## Build on Linux (x86-64)
-
-```
-sudo apt install build-essential    # gcc with OpenMP
-make MCsquare_portable
-```
-
 ## Build on Windows (x86-64)
 
 Install [MSYS2](https://www.msys2.org), then in its **UCRT64** shell:
@@ -69,49 +92,84 @@ OpenMP support stops at version 2.0.
 ## Run
 
 Run the binary directly with a configuration file. Upstream's `MCsquare` launcher script selects the
-Intel builds and is not used here. The binary is `MCsquare_arm64` on Apple Silicon,
-`MCsquare_portable` on Linux and `MCsquare_win_portable.exe` on Windows:
+Intel builds and is not used here. The binary is `MCsquare_portable` on Linux, `MCsquare_arm64` on Apple
+Silicon and `MCsquare_win_portable.exe` on Windows:
 
 ```
-./MCsquare_arm64 Sample_input_data/config.txt       # Apple Silicon
 ./MCsquare_portable Sample_input_data/config.txt    # Linux
+./MCsquare_arm64 Sample_input_data/config.txt       # Apple Silicon
 ./MCsquare_win_portable.exe Sample_input_data/config.txt     # Windows, MSYS2 UCRT64 shell
 .\MCsquare_win_portable.exe Sample_input_data\config.txt     # Windows, PowerShell
 ```
 
 Materials are read from `./Materials` if present, otherwise from the directory in the environment
-variable `MCsquare_Materials_Dir`. A quick check with 1000 primaries (use `./MCsquare_portable` on Linux):
+variable `MCsquare_Materials_Dir`. A quick check with 1000 primaries (use `./MCsquare_arm64` on Apple
+Silicon):
 
 ```
 mkdir -p smoke_test_output
-./MCsquare_arm64 Sample_input_data/smoke_test_config.txt
+./MCsquare_portable Sample_input_data/smoke_test_config.txt
 ```
+
+The configuration file, beam model (`BDL/`), CT calibration (`Scanners/`) and plan formats are
+upstream's and are unchanged.
 
 ## Tests
 
-The C regression tests build with clang + libomp and run with UndefinedBehaviorSanitizer, as CI does:
+The C regression tests run with UndefinedBehaviorSanitizer. They build with gcc on Linux and with clang +
+libomp on macOS:
 
 ```
 make test_transport test_remove_tmp test_material_labels test_angle
+tests/test_long_output_path.sh ./MCsquare_portable
 ```
+
+The validation and analysis tools under `validation/` have their own tests, run with
+[uv](https://docs.astral.sh/uv/):
+
+```
+uv run --project validation --frozen --with scipy==1.18.1 python -m pytest validation/tests
+```
+
+CI (`.github/workflows/ci.yml`) runs all of these on Ubuntu 24.04, and the build and smoke test on macOS.
+The workflows under `.gitea/` belong to the development server that produced the validation runs; they
+are kept as the record of how each result was made and do not run here.
 
 ## Differences from upstream
 
-Apart from portability, this fork fixes defects found while porting. Each is recorded in an issue here:
+Apart from portability, this fork fixes defects found while porting. Each has a regression test.
 
-- **Secondary emission angles (#16).** Upstream interpolates the angular table of nuclear-inelastic
-  secondaries at an energy in eV between brackets in MeV, so the sampled angles do not follow the
-  ICRU data. It reads past the end of the angle table for about one sample in four. The measured
-  effect is that dose just outside a large field is underestimated. Not yet reported upstream.
-- **Out-of-range emission angle (#24).** An angle index outside the table now aborts with a message
-  instead of producing an angle.
-- Other upstream defects fixed:
-  - #5: a buffer overflow in beamlet mode, because path buffers were too short.
-  - #8: a ray that misses the CT read uninitialised data in `Transport_to_CT`.
-  - #12: temporary folders were removed through `system()` with a path from the configuration; they are
-    now removed without a shell.
-  - #20: an inner loop in `CT_Transport_SPR` reused the outer lane index. That code is not reached in
-    default builds, because `define.h` sets `InterfaceCrossing` to `VoxelInterface`.
+- **Secondary emission angles** (`make test_angle`). Upstream interpolates the angular table of
+  nuclear-inelastic secondaries at an energy in eV between brackets in MeV, so the sampled angles do not
+  follow the ICRU data, and the angle index can run one past the end of the table. The measured effect,
+  for a 200 MeV, 15 × 15 cm field, is that upstream computes 13 to 18% less dose than the corrected code
+  between 5 and 30 mm outside the field edge. Reported upstream as
+  [OpenMCsquare work item 42](https://gitlab.com/openmcsquare/MCsquare/-/work_items/42), with the patch
+  (`validation/topas/openmcsquare/fix_secondary_angle_energy.patch`). Whether the corrected dose is closer
+  to physical dose has not been shown.
+- **Out-of-range emission angle.** An angle index outside the table now aborts with a message instead
+  of producing an angle.
+- **Path buffers** (`tests/test_long_output_path.sh`). A buffer overflow in beamlet mode, because path
+  buffers were too short.
+- **Rays that miss the CT** (`make test_transport`). `Transport_to_CT` read uninitialised data.
+- **Temporary folders** (`make test_remove_tmp`). They were removed through `system()` with a path from
+  the configuration; they are now removed without a shell.
+- **Material labels** (`make test_material_labels`). An inner loop in `CT_Transport_SPR` reused the
+  outer lane index. That code is not reached in default builds, because `define.h` sets
+  `InterfaceCrossing` to `VoxelInterface`.
 
-The physics of the corrected sampling has not yet been validated against measurement or a TOPAS/Geant4
-reference.
+## Licence and attribution
+
+MCsquare was developed by Kevin Souris at Université catholique de Louvain (UCLouvain, Louvain-la-Neuve,
+Belgium) in a collaboration with IBA s.a., and is released under the Apache 2.0 licence; see
+[`LICENSE`](LICENSE), which also states upstream's attribution requirement. This fork keeps that licence.
+Please cite the original work when using it:
+
+- K. Souris, J. A. Lee, E. Sterpin, "Fast multipurpose Monte Carlo simulation for proton therapy using
+  multi- and many-core CPU architectures", *Medical Physics* 43(4), 1700–1712, 2016.
+  [doi:10.1118/1.4943377](https://doi.org/10.1118/1.4943377)
+
+PCG random number generation is from the [PCG](https://www.pcg-random.org) minimal C implementation
+(`src/pcg_basic.c`), Apache 2.0.
+
+Contributors to this fork and to the validation are listed in section 9 of the draft report.
