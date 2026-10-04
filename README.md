@@ -23,7 +23,7 @@ The physics models, data tables and beam model are upstream's.
 - **Compared with TOPAS/Geant4.** A descriptive comparison (no margins) shows a range offset of 0.42 to
   0.54 mm, most of which depends on the TOPAS step size, and less dose than TOPAS in the far halo at 100
   and 150 MeV. By inference both are common to this fork and upstream.
-- **Not compared with measurement.**
+- **Not compared with physical measurements of dose.**
 - **Speed.** Built with gcc, this fork took 2.4 to 2.7 times as long as Intel-built upstream on the two
   Intel hosts used. Built with the Intel compiler it took about as long as upstream.
 
@@ -166,7 +166,8 @@ Belgium) in a collaboration with IBA s.a., and is released under the Apache 2.0 
 Please cite the original work when using it:
 
 - K. Souris, J. A. Lee, E. Sterpin, "Fast multipurpose Monte Carlo simulation for proton therapy using
-  multi- and many-core CPU architectures", *Medical Physics* 43(4), 2016.
+  multi- and many-core CPU architectures", *Medical Physics* 43(4), 1700–1712, 2016.
+  [doi:10.1118/1.4943377](https://doi.org/10.1118/1.4943377)
 
 PCG random number generation is from the [PCG](https://www.pcg-random.org) minimal C implementation
 (`src/pcg_basic.c`), Apache 2.0.
