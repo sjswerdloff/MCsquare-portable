@@ -90,7 +90,7 @@ carries the same correction.
 | B-up | upstream `85bf2911` + fix | Intel icc 2021.1.2 + MKL 2021.1.1, upstream's AVX2 flags | HP EliteDesk 800 G2 (i5-6500T), Ubuntu on WSL2, 3 |
 | B-pgcc | Portable MCsquare | gcc 13 | same HP, 3 |
 | B-picc | Portable MCsquare | icc 2021.1.2, upstream's flags | same HP, 3 |
-| — | Portable MCsquare | Apple clang + libomp | Mac Studio M3 Ultra, macOS (platform study, TOPAS stage) |
+| — | Portable MCsquare | Apple clang + libomp | Mac Studio M3 Ultra, macOS: 3 in the platform study, 24 in the TOPAS-stage MCsquare runs |
 
 Each contrast compares two arms on the **same host** (AP), so build, compiler and code line are not confounded with
 hardware.
