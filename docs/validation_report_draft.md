@@ -692,8 +692,10 @@ by clement-7074f29f. The HU-to-density curve (`Scanners/default`) and the beam m
 run; MCsquare reports a statistical uncertainty of 1.8% for the Studio run.
 
 **Arms.** Upstream OpenMCsquare `85bf2911` with the fix, icl, on the Lenovo (4 threads; the A-up binary of §3.3),
-against Portable MCsquare, Apple clang, on the Mac Studio (12 threads). Both runs read the same input files, each
-checked against the package's recorded sha256. Differences are upstream − Portable; ratios are upstream / Portable.
+against Portable MCsquare, Apple clang, on the Mac Studio (12 threads). The Lenovo run read the Studio package and
+checked every file against its sha256. The package was assembled from the Studio run's inputs after that run, and its
+config re-runs it (tumour mean within 0.3% of the stored dose at 1e6). Differences are upstream − Portable; ratios are
+upstream / Portable.
 
 **Table 10. Lungman pencil beam, upstream with the fix (Lenovo) against Portable (Mac Studio). Dose in Gy per MU
 from the same normalisation in both. Descriptive: no margin, no outcome.**
