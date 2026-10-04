@@ -5,7 +5,7 @@ a publication.** The confirmatory same-host acquisition (commit `2f9dab40`, §4)
 are in §5.0–§5.2, with figures and gamma tables made from the dose files. The TOPAS comparison
 (§5.4) is a pre-specified descriptive comparison at 100, 150 and 200 MeV; it is not confirmatory and carries no
 margin or outcome. The broad field at 100 and 150 MeV (part E, §5.5) is a confirmatory follow-up acquisition and is
-complete.
+complete. One heterogeneous case with a range shifter (the Lungman phantom, §5.6) is reported descriptively.
 
 Sources are cited compactly: `#N` = an issue or PR on MCsquare-portable; `UR` = the upstream report,
 [OpenMCsquare work item 42](https://gitlab.com/openmcsquare/MCsquare/-/work_items/42); `TD` = `validation/topas_design.md`;
@@ -679,6 +679,49 @@ mm outside the field edge at D mm depth, as a difference in percentage points of
   analysis assumes that runs are independent draws, as it does throughout; the run lists' seed screen
   (`field_followup_runs.py`) is a screen, not a proof of independence.
 
+### 5.6 One heterogeneous case with a range shifter (Lungman, descriptive)
+
+Every case above is a homogeneous phantom with no beam-line device (§7). This subsection reports one case that has
+both. **It is descriptive.** It was not pre-specified and has no margin and no outcome. It is one beam and one run
+per code, and the two runs are on different hosts with different compilers.
+
+**Case.** The Lungman anthropomorphic chest phantom CT (512 × 512 × 426 voxels, 0.625 × 0.625 × 0.7 mm) with a 9 mm
+simulated tumour (`tumours_100HU_1`); CT, mask and geometry by cora-2f1e43dc. One pencil beam at 127 MeV with the
+range shifter in (`BDL_default_UN_RangeShifter`), gantry 135°, one spot aimed at the tumour centroid; plan and inputs
+by clement-7074f29f. The HU-to-density curve (`Scanners/default`) and the beam model are generic. 1e7 primaries per
+run; MCsquare reports a statistical uncertainty of 1.8% for the Studio run.
+
+**Arms.** Upstream OpenMCsquare `85bf2911` with the fix, icl, on the Lenovo (4 threads; the A-up binary of §3.3),
+against Portable MCsquare, Apple clang, on the Mac Studio (12 threads). Both runs read the same input files, each
+checked against the package's recorded sha256. Differences are upstream − Portable; ratios are upstream / Portable.
+
+**Table 10. Lungman pencil beam, upstream with the fix (Lenovo) against Portable (Mac Studio). Dose in Gy per MU
+from the same normalisation in both. Descriptive: no margin, no outcome.**
+
+| quantity | upstream + fix | Portable | comparison |
+|---|---|---|---|
+| tumour mean dose (Gy/MU) | 0.03348 | 0.03354 | ratio 0.998 |
+| tumour minimum (Gy/MU) | 0.02386 | 0.02356 | ratio 1.013 |
+| tumour maximum (Gy/MU) | 0.05164 | 0.05157 | ratio 1.002 |
+| high-dose centroid (voxels above 50% of the body maximum) | | | within 0.05 mm on each axis |
+| body voxels above 10% of the body maximum (n = 277,113) | | | mean difference −0.02% of the maximum; 95th percentile of the absolute difference 2.1% |
+| gamma 2%/2 mm, global, 10% cutoff, body voxels | | | 99.996% of 277,113 points pass |
+
+"Body" is CT above −900 HU. Air voxels are excluded because dose per unit mass in near-massless voxels is noise (the
+hottest voxel of either run is in air at the beam entrance).
+
+- **The two code lines agree on this case to within the statistical noise of the runs.** The body-voxel differences
+  are about what two independent runs at about that uncertainty give.
+- **Both codes place the beam identically.** That includes the convention that the plan's isocentre x is mirrored
+  about the CT width, which the port did not change.
+- **No range comparison is made.** Distal to the tumour the beam is in lung, where the dose along the axis sits on a
+  plateau near 80% of its peak. Where a single-voxel axis profile crosses 80% is therefore set by noise: the two
+  profiles cross 3.4 mm apart, and that is not a range difference. A range comparison would need a laterally
+  integrated depth dose on a water-equivalent axis.
+- **What this does not test.** A single pencil beam does not probe the dose outside a field edge, where the upstream
+  defect acts, and both arms carry the fix. Nothing here is compared with TOPAS or with measurement, and one case
+  does not establish agreement in heterogeneous anatomy in general.
+
 ## 6. Discussion
 
 1. **Agreement between the code lines.** On the same host, and with the same fix in both, upstream OpenMCsquare and
@@ -743,10 +786,12 @@ mm outside the field edge at D mm depth, as a difference in percentage points of
 3. **Homogeneous phantoms only.** Neither case has a density interface. Differences in lateral scattering and in the
    nuclear halo matter most clinically behind low-density tissue and at bone–air interfaces, and none of that is
    tested here. Planned as future work: a lung-density slab; a sinus-like cavity of air in bone; and the same cavity
-   filled in steps, as in congestion.
+   filled in steps, as in congestion. One anthropomorphic lung case has been run descriptively (§5.6); it is one beam
+   and carries no claim.
 4. **Neither confirmatory case has a beam-line device in the beam.** The upstream defect was found with a range
    shifter in, where nuclear secondaries from the shifter reach the phantom, so a range-shifter-in case would test it
-   most directly. No aperture is modelled.
+   most directly. No aperture is modelled. The descriptive lung case of §5.6 has a range shifter in the beam, but
+   it is a single pencil beam with the fix in both arms, so it does not test the defect.
 5. **Energies and fields.** Pencil beams and one 15 × 15 cm field, each at 100, 150 and 200 MeV. Nothing outside
    that range is tested.
 6. The TOPAS comparison is descriptive and covers the pencil beam only (100, 150 and 200 MeV); TOPAS and the
@@ -794,6 +839,11 @@ Portable MCsquare repository.
   `validation/report_data/field_e_analysis_26a93235.json` (and its table, `.md`), written by
   `validation/field_followup_analyse.py` at `26a93235` from all four (dataset fingerprint sha256
   `891933e22ce1e126076f22346a2bdf752e2c4008d60d6877710121d82fab0685`, 24,020 files).
+- **Lungman case (§5.6, Table 10):** inputs in the Studio package `studio_E127_1e7` (each file with its sha256); the
+  Lenovo run by `.gitea/workflows/lungman-lenovo.yml` at `cb740674` (archive sha256
+  `3fcf204b46aef3067063c5c8bf13c2c96e5caec2865c0cd6ad5b2328aa817b9f`); the comparison in
+  `validation/lungman/lenovo_cb740674c38f_vs_studio.json`, written by `validation/lungman_compare.py` (pymedphys 0.41.0
+  for gamma). In that file the key "lenovo" is the upstream run and "studio" the Portable run.
 - **Run times (Table 9):** `validation/report_data/run_times.json`, written by `validation/report_run_times.py` from the
   160 run records of the collected endpoint records above and the run records of part E's 80 analysed runs (the two
   rerun cells at `b4b3bce3`).
