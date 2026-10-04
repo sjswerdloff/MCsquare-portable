@@ -16,10 +16,9 @@ jobs:
 
     steps:
       - name: Checkout repository
-        run: |
-          git clone http://git/The_Kindled/MCsquare-portable.git .
-          git fetch origin ${{ github.ref }}
-          git checkout ${{ github.sha }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Verify build tools
         run: |
@@ -34,16 +33,54 @@ jobs:
           ls -la MCsquare_arm64
           file MCsquare_arm64
 
+      - name: Regression tests (UBSan)
+        run: make test_transport
+
+      - name: Temporary folders removed without a shell (issue #12)
+        run: make test_remove_tmp
+
+      - name: Every lane that changes material is relabelled (issue #20)
+        run: make test_material_labels
+
+      - name: Secondary emission angles follow the angular table (issue #16)
+        run: make test_angle
+
       - name: Smoke test (1000 primaries)
         run: |
           mkdir -p smoke_test_output
           ./MCsquare_arm64 Sample_input_data/smoke_test_config.txt
+
+      - name: Long output path (issue #5)
+        run: tests/test_long_output_path.sh ./MCsquare_arm64
 
       - name: Verify output
         run: |
           ls -la smoke_test_output/
           test -f smoke_test_output/Dose.mhd
           echo "Smoke test passed - Dose.mhd created"
+
+      # The validation code's own tests: validation/tests and the three root-level pytest modules
+      # (test_platform_study_analyse/manifest/record.py), then test_platform_study_metrics.py, which is a script that
+      # exits non-zero on failure, not a pytest module. The tests read the frozen run lists with `git show` at the
+      # acquisition commit, so they need the full history (fetch-depth: 0 above). scipy is not in validation/uv.lock,
+      # so it is pinned here.
+      # This is a persistent runner. pytest's default temporary root is shared per user and prunes older sessions, so
+      # the step makes its own fresh directory: --basetemp is a child that does not exist yet (pytest empties an
+      # existing basetemp), and TMPDIR points tempfile users inside it too. Nothing outside that directory is cleaned.
+      - name: Validation tests
+        shell: bash
+        run: |
+          command -v uv > /dev/null 2>&1 || export PATH="/opt/homebrew/bin:$PATH"
+          uv --version
+          JOB_TMP="$(mktemp -d)"
+          mkdir "$JOB_TMP/tmp"
+          export TMPDIR="$JOB_TMP/tmp"
+          echo "temporary root for this step: $JOB_TMP"
+          RUN=(uv run --project validation --frozen --with scipy==1.18.1 python)
+          "${RUN[@]}" -m pytest validation/tests validation/test_platform_study_analyse.py \
+            validation/test_platform_study_manifest.py validation/test_platform_study_record.py \
+            -q -p no:cacheprovider --basetemp "$JOB_TMP/pytest"
+          "${RUN[@]}" validation/test_platform_study_metrics.py
 
       - name: Test summary
         if: always()

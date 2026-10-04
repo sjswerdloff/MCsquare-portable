@@ -86,12 +86,13 @@ void Total_Hard_Cross_Section(Hadron *hadron, Materials *material, int *v_materi
   cross_section_ionization(hadron, v_N_el, Te_min, v_cross_section);
 
   ALIGNED_(64) VAR_COMPUTE v_tmp_result[VLENGTH];
-    #pragma omp simd
-  for (int i = 0; i < VLENGTH; i++) {
-    if(config->Simulate_Nuclear_Interactions == 1){
-        total_Nuclear_cross_section(hadron, material, v_material_label, v_density, v_tmp_result);
+  // Once for all lanes (issue #10's pattern); it was recomputed inside the lane loop.
+  if(config->Simulate_Nuclear_Interactions == 1){
+    total_Nuclear_cross_section(hadron, material, v_material_label, v_density, v_tmp_result);
+      #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
         v_cross_section[i] += v_tmp_result[i];
-      }
+    }
   }
 
 
@@ -110,12 +111,13 @@ void Total_Hard_Cross_Section(Hadron *hadron, Materials *material, int *v_materi
   ALIGNED_(64) VAR_COMPUTE v_cross_section2[VLENGTH];
   cross_section_ionization(&tmp, v_N_el, Te_min, v_cross_section2);
 
-    #pragma omp simd
-  for (int i = 0; i < VLENGTH; i++) {
-    if(config->Simulate_Nuclear_Interactions == 1){
-        total_Nuclear_cross_section(&tmp, material, v_material_label, v_density, v_tmp_result);
+  // Once for all lanes (issue #10's pattern); it was recomputed inside the lane loop.
+  if(config->Simulate_Nuclear_Interactions == 1){
+    total_Nuclear_cross_section(&tmp, material, v_material_label, v_density, v_tmp_result);
+      #pragma omp simd
+    for (int i = 0; i < VLENGTH; i++) {
         v_cross_section2[i] += v_tmp_result[i];
-      }
+    }
   }
 
     #pragma omp simd
@@ -161,11 +163,16 @@ void get_interaction_type(Hadron *hadron, Materials *material, int *v_material_l
       }
   }
 
+  // Computed once for all lanes (issue #10); it was recomputed inside the lane loop, 16 times
+  // per step, with each lane reading only its own element.
+  ALIGNED_(64) VAR_COMPUTE v_nuclear_section[VLENGTH];
+  if(config->Simulate_Nuclear_Interactions == 1){
+    total_Nuclear_cross_section(hadron, material, v_material_label, v_density, v_nuclear_section);
+  }
+
     #pragma omp simd
   for (int i = 0; i < VLENGTH; i++) {
     if(config->Simulate_Nuclear_Interactions == 1){
-        ALIGNED_(64) VAR_COMPUTE v_nuclear_section[VLENGTH];
-        total_Nuclear_cross_section(hadron, material, v_material_label, v_density, v_nuclear_section);
         v_nuclear_section[i] = (v_nuclear_section[i] / v_tot_section[i]) + v_ionization_section[i];
 
         if(v_rnd[i] <= v_ionization_section[i]){

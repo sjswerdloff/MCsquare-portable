@@ -268,11 +268,11 @@ struct DATA_config{
 	VAR_DATA Te_Min;
 
 	// Input files
-	char CT_File[200];
-	char HU_Density_File[200];
-	char HU_Material_File[200];
-	char BDL_machine[200];
-	char BDL_plan[200];
+	char CT_File[PATH_SIZE];
+	char HU_Density_File[PATH_SIZE];
+	char HU_Material_File[PATH_SIZE];
+	char BDL_machine[PATH_SIZE];
+	char BDL_plan[PATH_SIZE];
 
 	// Physical parameters
 	unsigned int Simulate_Nuclear_Interactions;
@@ -315,7 +315,7 @@ struct DATA_config{
 	unsigned int Max_Simulation_time;
 
 	// Output parameters
-	char Output_Directory[200];
+	char Output_Directory[PATH_SIZE];
 	unsigned int Energy_ASCII_Output;
 	unsigned int Energy_MHD_Output;
 	unsigned int Energy_Sparse_Output;
@@ -356,7 +356,7 @@ struct DATA_config{
 	unsigned int Num_Materials;
 	unsigned int Water_Material_ID;
 	unsigned int Num_Components;
-	char Materials_Dir[200];
+	char Materials_Dir[PATH_SIZE];
 	time_t timestamp;
 	unsigned int RangeShifter_enabled;
 	char output_robustness_suffix[100];

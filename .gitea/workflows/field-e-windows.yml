@@ -1,0 +1,272 @@
+# Same-host comparison, PART E on the Lenovo (docs/field_100_150_plan.md): field edge at 100 and 150 MeV.
+#   A-up    OpenMCsquare 85bf2911 + fix, icl 2021.1      the binary parts A ran, in its write-once build directory
+#   A-port  Portable 2f9dab40, MSYS2 UCRT64 gcc          the binary parts A ran, in its write-once build directory
+# NOTHING IS BUILT. Each job verifies its binary against the build record AND against the sha256 pinned in
+# validation/field_followup_runs.py, and refuses if Portable's source at this commit differs from 2f9dab40's.
+# Case: field_edge_make_cases.py <E> 150 (15 x 15 cm field, HU 0 in Scanners/default), 4 threads.
+# Seeds, histories, threads and binaries come from validation/field_followup_runs.py, the one place they are written.
+# No endpoint is computed here: the analysis computes them from the dose files.
+#
+# THIS FILE IS THE RUN REQUEST: it runs on a push to connor/field-e-run that changes this file. MODE below:
+#   smoke  1 run per arm and energy, 1e5 histories, under a smoke\ subdirectory
+#   full   8 runs per arm and energy, 6e7 histories
+#   run      one job per arm x energy. Every run gets a new directory; nothing is overwritten.
+#   archive  after every run job: gzip tar of C:\mcsq-win\ts\<sha12>, sha256, copy to
+#            \\192.168.1.212\SMBWritable\field_100_150\, hash of the share copy compared. Only then are the run tree
+#            and the local tar removed from this PC (sjswerdloff, 2026-10-02: "move the run data off the pcs, on to
+#            the SMBWritable"). It runs even when a run job failed, so the failure records reach the share.
+# Upstream 85bf2911 reads the MHD ElementDataFile and Materials\ relative to the WORKING directory and has short fixed
+# path buffers: each run directory is the cwd, every config path is relative and short (as part A).
+# Run requests (one line per push that asks for runs):
+#   1  2026-10-02  smoke
+#   2  2026-10-02  full (the acquisition commit)
+#   3  2026-10-04  smoke, acquisition amendment 1: A-port at 150 MeV only
+#   5  2026-10-04  full, acquisition amendment 1: A-port at 150 MeV, 8 runs (the rerun commit)
+
+name: Same-host comparison, part E (Windows, Lenovo)
+
+on:
+  push:
+    branches: [connor/field-e-run]
+    paths: [.gitea/workflows/field-e-windows.yml]
+
+env:
+  MODE: full
+  UPSTREAM: 85bf2911ddadbb40bd41b1a18b4b247536bb33ab
+  PATCH_SHA256: e22990c96942286304f538b844ed2697a917c4e8b235f970731824b90ae8e347
+  TARGET: icl-avx2
+  PORT_TARGET: msys2-gcc
+  SOURCE_COMMIT: 2f9dab404cea02f5072352f7ae5773dca27eb2a1
+  MSYS: C:\mcsq-win\msys64-20260927
+  LENOVO: DESKTOP-SR5GKKA
+
+jobs:
+  run:
+    name: Run ${{ matrix.arm }} at ${{ matrix.energy }} MeV
+    runs-on: lenovo-windows-canary
+    timeout-minutes: 720
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [A-port]
+        energy: ["150"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: MSYS2 + UCRT64 (verified, once per box)
+        shell: powershell
+        run: |
+          & .\.gitea\scripts\ensure-msys2.ps1
+      - name: Verify binary, generate the case, run
+        shell: powershell
+        env:
+          ARM: ${{ matrix.arm }}
+          ENERGY: ${{ matrix.energy }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:COMPUTERNAME -ne $env:LENOVO) { throw "this job is for the Lenovo ($env:LENOVO), not ${env:COMPUTERNAME}: refusing" }
+          switch ($env:MODE) {
+            'full'  { $sub = '' }
+            'smoke' { $sub = 'smoke\' }
+            default { throw "MODE must be smoke or full, got '$env:MODE'" }
+          }
+          $E = $env:ENERGY
+          $sha12 = $env:GITHUB_SHA.Substring(0,12)
+          switch ($env:ARM) {
+            'A-up'   { $B = "C:\mcsq-win\builds\$($env:UPSTREAM.Substring(0,12))+$($env:PATCH_SHA256.Substring(0,12))\$env:TARGET"; $ad = 'aup' }
+            'A-port' { $B = "C:\mcsq-win\builds\portable-$($env:SOURCE_COMMIT.Substring(0,12))\$env:PORT_TARGET"; $ad = 'apt' }
+            default  { throw "unknown arm '$env:ARM'" }
+          }
+          $m = $env:MSYS
+          $ErrorActionPreference = 'Continue'
+          & "$m\usr\bin\bash.exe" -lc 'pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-numpy' 2>&1 | Select-Object -Last 3
+          $rc = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
+          if ($rc) { throw "pacman install failed ($rc)" }
+          $py = "$m\ucrt64\bin\python.exe"
+          & $py -c "import numpy, sys; print('python', sys.version.split()[0], 'numpy', numpy.__version__)"
+          if ($LASTEXITCODE) { throw "numpy not importable" }
+          # The frozen design: seeds, histories, threads and the pinned binary, from the one module that states them.
+          & $py validation\field_followup_runs.py check
+          if ($LASTEXITCODE) { throw "seed check failed: refusing" }
+          $seeds = "$(& $py validation\field_followup_runs.py seeds $env:ARM $E $env:MODE)".Trim()
+          if ($LASTEXITCODE -or -not $seeds) { throw "no seeds for $env:ARM $E $env:MODE: refusing" }
+          $N = "$(& $py validation\field_followup_runs.py histories $env:MODE)".Trim()
+          if ($LASTEXITCODE -or $N -notmatch '^[1-9][0-9]*$') { throw "no history count for $env:MODE: refusing" }
+          $threads = "$(& $py validation\field_followup_runs.py threads $env:ARM)".Trim()
+          if ($LASTEXITCODE -or $threads -notmatch '^[1-9][0-9]*$') { throw "no thread count for $env:ARM: refusing" }
+          $pinned = "$(& $py validation\field_followup_runs.py binary $env:ARM)".Trim()
+          if ($LASTEXITCODE -or $pinned -notmatch '^[0-9a-f]{64}$') { throw "no pinned binary for $env:ARM: refusing" }
+          # The recorded binary or nothing: never compile here.
+          $want = ((Get-Content "$B\sha256.txt") -split '\s+')[0]
+          $have = (Get-FileHash "$B\MCsquare.exe" -Algorithm SHA256).Hash.ToLower()
+          if ($want -ne $have) { throw "binary sha256 $have does not match its build record $want" }
+          if ($have -ne $pinned) { throw "binary sha256 $have is not the one parts A and B ran ($pinned): refusing" }
+          Get-Content "$B\build.txt"
+          $bhost = ((Get-Content "$B\build.txt") | Where-Object { $_ -like 'host *' } | Select-Object -First 1) -replace '^host ', ''
+          if ($bhost -ne $env:COMPUTERNAME) { throw "binary was built on '$bhost', this is '${env:COMPUTERNAME}': refusing" }
+          $cpu = (Get-CimInstance Win32_Processor | Select-Object -First 1).Name.Trim()
+          # Portable's source must be the source the binary was built from: nothing outside validation, docs, .gitea differs.
+          git diff --quiet $env:SOURCE_COMMIT HEAD -- . ':(exclude)validation' ':(exclude)docs' ':(exclude).gitea'
+          if ($LASTEXITCODE) { throw "the source at this commit differs from $($env:SOURCE_COMMIT.Substring(0,12)): refusing" }
+          # Both arms use this commit's data; it must equal upstream's for every file the case reads.
+          git diff --quiet $env:UPSTREAM HEAD -- Materials Scanners/default BDL/BDL_default_DN_RangeShifter.txt
+          if ($LASTEXITCODE) { throw "Materials/Scanners/BDL differ from upstream $($env:UPSTREAM.Substring(0,12)): refusing" }
+          $free = [int]((New-Object System.IO.DriveInfo 'C').AvailableFreeSpace / 1GB)
+          "free on C: $free GB"
+          if ($free -lt 10) { throw "only $free GB free on C: refusing" }
+          $ROOT = "C:\mcsq-win\ts\$sha12\$sub$ad\e$E"
+          New-Item -ItemType Directory -Force (Split-Path $ROOT) | Out-Null
+          New-Item -ItemType Directory $ROOT | Out-Null   # a second run of this arm x energy at this commit fails here
+          "$env:ARM $E MeV mode $env:MODE, commit $env:GITHUB_SHA, run $env:GITHUB_RUN_ID" | Set-Content -Encoding Ascii "$ROOT\run_root.txt"
+          # Snapshot: the committed bytes of every script and data file the runs use, with sha256.
+          $SNAP = "$ROOT\snapshot"; New-Item -ItemType Directory $SNAP | Out-Null
+          git -c core.autocrlf=false archive -o "$ROOT\inputs.tar" HEAD Materials Scanners BDL validation/apples_seeds_check.py `
+            validation/field_followup_runs.py validation/field_edge_make_cases.py
+          if ($LASTEXITCODE) { throw "git archive failed" }
+          tar -xf "$ROOT\inputs.tar" -C $SNAP; if ($LASTEXITCODE) { throw "tar failed" }
+          Copy-Item "$B\build.txt" $SNAP; Copy-Item "$B\sha256.txt" "$SNAP\binary_sha256.txt"
+          $V = "$SNAP\validation"
+          function Hash-Files($dir, $out) {
+            Get-ChildItem $dir -Recurse -File | Sort-Object FullName | Get-FileHash -Algorithm SHA256 |
+              ForEach-Object { "$($_.Hash.ToLower())  $($_.Path.Substring($dir.Length + 1))" } | Set-Content -Encoding Ascii $out
+          }
+          Hash-Files $SNAP "$ROOT\snapshot_sha256.txt"
+          # Runtime DLLs for this arm, and MCsquare reads Materials\ relative to the cwd (no override).
+          if ($env:ARM -eq 'A-up') {
+            $rt  = Split-Path (Get-ChildItem C:\mcsq-win\oneapi -Recurse -Filter libiomp5md.dll | Where-Object FullName -match '\\intel64' | Select-Object -First 1).FullName
+            $mkr = Split-Path (Get-ChildItem C:\mcsq-win\mkl -Recurse -Filter 'mkl_core*.dll' | Select-Object -First 1).FullName
+            $env:PATH = "$rt;$mkr;$env:PATH"
+          } else {
+            $env:PATH = "$m\ucrt64\bin;$env:PATH"
+          }
+          $env:MCsquare_Materials_Dir = $null
+          # The case, generated once from the snapshot; each run directory gets its own copy and is the cwd.
+          $plan = "E$($E)_S150"
+          $FC = "$ROOT\fcase"; New-Item -ItemType Directory $FC | Out-Null
+          Push-Location $FC
+          $names = & $py "$V\field_edge_make_cases.py" $E 150
+          if ($LASTEXITCODE) { throw "case generation failed" }
+          Pop-Location
+          if ("$names".Trim() -ne $plan) { throw "unexpected case name(s): $names" }
+          Hash-Files $FC "$ROOT\fcase_sha256.txt"
+          $req = [int64]$N
+          foreach ($SEED in ($seeds -split '\s+' | Where-Object { $_ })) {
+            if ($SEED -notmatch '^[0-9]{6}$') { throw "seed '$SEED' is not six digits: refusing" }
+            $D = "$ROOT\s$SEED"
+            New-Item -ItemType Directory $D, "$D\Scanners", "$D\BDL", "$D\out_seed" | Out-Null   # fails if it exists
+            Copy-Item "$FC\cube.mhd", "$FC\cube.raw", "$FC\$plan.txt" $D
+            Copy-Item -Recurse "$SNAP\Materials" "$D\Materials"
+            Copy-Item -Recurse "$SNAP\Scanners\default" "$D\Scanners\default"
+            Copy-Item "$SNAP\BDL\BDL_default_DN_RangeShifter.txt" "$D\BDL"
+            @("Num_Threads $threads", "Num_Primaries $N", "RNG_Seed $SEED", "CT_File cube.mhd",
+              "HU_Density_Conversion_File Scanners/default/HU_Density_Conversion.txt",
+              "HU_Material_Conversion_File Scanners/default/HU_Material_Conversion.txt",
+              "BDL_Machine_Parameter_File BDL/BDL_default_DN_RangeShifter.txt",
+              "BDL_Plan_File $plan.txt", "Output_Directory out_seed", "Dose_MHD_Output True") | Set-Content -Encoding Ascii "$D\cfg.txt"
+            $outd = "$D\out_seed"
+            $rec = [ordered]@{ seed = [int64]$SEED; requested = $req; simulated = $null; overshoot = $null; threads = [int]$threads
+              energy_mev = [int]$E; case = 'E'; arm = $env:ARM; mode = $env:MODE; host = $env:COMPUTERNAME; cpu = $cpu
+              binary_sha256 = $have; commit = $env:GITHUB_SHA; start_utc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+              end_utc = $null; wall_s = $null; transport_status = $null }
+            function Write-Run($status) {
+              $rec.transport_status = $status
+              $rec | ConvertTo-Json -Compress | Set-Content -Encoding Ascii "$D\run.json"
+              Get-Content "$D\run.json"
+              if ($status -ne 'ok') { throw "run $SEED ${status}: refusing" }
+            }
+            $t = Get-Date
+            Push-Location $D
+            $ErrorActionPreference = 'Continue'
+            & "$B\MCsquare.exe" cfg.txt *> "$D\log.txt"
+            $rc = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
+            Pop-Location
+            $rec.end_utc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); $rec.wall_s = [int]((Get-Date) - $t).TotalSeconds
+            "RUN $env:ARM E=$E seed=$SEED N=$N rc=$rc wall_s=$($rec.wall_s)"
+            if ($rc -ne 0) { Get-Content "$D\log.txt" -Tail 30; Write-Run "mcsquare_exit_$rc" }
+            if (-not (Test-Path "$outd\Dose.raw") -or -not (Test-Path "$outd\Dose.mhd")) { Get-Content "$D\log.txt" -Tail 30; Write-Run "dose_missing" }
+            $hit = Select-String -Path "$D\log.txt" -Pattern 'Nbr primaries simulated: (\d+)' | Select-Object -First 1
+            if (-not $hit) { Write-Run "no_primaries_line" }
+            $rec.simulated = [int64]$hit.Matches[0].Groups[1].Value; $rec.overshoot = $rec.simulated - $req
+            if ($rec.simulated -lt $req) { Write-Run "simulated_count_below_requested" }
+            if (Select-String -Path "$D\log.txt" -Pattern 'Unknown tag' -Quiet) { Select-String -Path "$D\log.txt" -Pattern 'Unknown tag'; Write-Run "config_tag_not_recognised" }
+            Get-ChildItem "$outd\Dose.raw", "$outd\Dose.mhd" | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content -Encoding Ascii "$outd\sha256.txt"
+            Write-Run "ok"
+          }
+          "outputs: $ROOT"
+
+  archive:
+    name: Move the run tree to SMBWritable
+    needs: run
+    if: ${{ always() }}
+    runs-on: lenovo-windows-canary
+    timeout-minutes: 120
+    steps:
+      - name: Pack, copy, verify, then remove the local tree
+        shell: powershell
+        env:
+          SMB_PW: ${{ secrets.SMB_GITEARUNNER_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          if ($env:COMPUTERNAME -ne $env:LENOVO) { throw "this job is for the Lenovo ($env:LENOVO), not ${env:COMPUTERNAME}: refusing" }
+          if ([string]::IsNullOrEmpty($env:SMB_PW)) { throw 'secret SMB_GITEARUNNER_PASSWORD is not set: refusing' }
+          if ($env:MODE -notin 'smoke', 'full') { throw "MODE must be smoke or full, got '$env:MODE'" }
+          $sha12 = $env:GITHUB_SHA.Substring(0,12)
+          $src = "C:\mcsq-win\ts\$sha12"
+          if (-not (Test-Path -LiteralPath $src)) { throw "no run tree at ${src}: nothing to move" }
+          if (@(Get-Process | Where-Object { $_.ProcessName -match '^MCsquare' }).Count) { throw 'an MCsquare process is running: refusing' }
+          $name = "field_e_A_${sha12}_$($env:MODE).tar.gz"
+          $out = 'C:\mcsq-collect'
+          if (-not (Test-Path -LiteralPath $out)) { New-Item -ItemType Directory -Path $out | Out-Null }
+          if (Test-Path -LiteralPath "$out\$name") { throw "$out\$name exists: refusing to overwrite" }
+          $files = @(Get-ChildItem -LiteralPath $src -Recurse -File -Force)
+          "source: $($files.Count) files, $([int](($files | Measure-Object Length -Sum).Sum / 1MB)) MB"
+          & tar -czf "$out\$name" -C 'C:\mcsq-win\ts' $sha12
+          if ($LASTEXITCODE) { throw "tar failed ($LASTEXITCODE)" }
+          $local = (Get-FileHash -LiteralPath "$out\$name" -Algorithm SHA256).Hash.ToLower()
+          "$local  $name" | Set-Content -Encoding Ascii "$out\$name.sha256"
+          "local tar: $((Get-Item -LiteralPath "$out\$name").Length) bytes, sha256 $local"
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class SmbConn {
+            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+            public class NetResource {
+              public int Scope = 0; public int Type = 1; public int DisplayType = 0; public int Usage = 0;
+              public string LocalName = null; public string RemoteName; public string Comment = null; public string Provider = null;
+            }
+            [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
+            static extern int WNetAddConnection2(NetResource r, string password, string user, int flags);
+            [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
+            static extern int WNetCancelConnection2(string name, int flags, bool force);
+            public static int Add(string remote, string user, string password) {
+              var r = new NetResource(); r.RemoteName = remote; return WNetAddConnection2(r, password, user, 0);
+            }
+            public static int Cancel(string remote) { return WNetCancelConnection2(remote, 0, true); }
+          }
+          '@
+          $rw = '\\192.168.1.212\SMBWritable'
+          $rc = [SmbConn]::Add($rw, 'gitearunner', $env:SMB_PW)
+          if ($rc -ne 0) { throw "SMBWritable: connect failed, error $rc (" + (New-Object ComponentModel.Win32Exception $rc).Message + ')' }
+          $verified = $false
+          try {
+            $dir = Join-Path $rw 'field_100_150'
+            if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
+            foreach ($f in @($name, "$name.sha256")) {
+              if (Test-Path -LiteralPath (Join-Path $dir $f)) { throw "$f already exists on the share: refusing to overwrite" }
+            }
+            Copy-Item -LiteralPath "$out\$name" -Destination $dir
+            Copy-Item -LiteralPath "$out\$name.sha256" -Destination $dir
+            $remote = (Get-FileHash -LiteralPath (Join-Path $dir $name) -Algorithm SHA256).Hash.ToLower()
+            "share copy sha256 $remote"
+            if ($remote -ne $local) { throw "share copy does not match the local tar ($local): nothing is removed" }
+            $verified = $true
+          } finally { "SMBWritable: disconnect rc " + [SmbConn]::Cancel($rw) }
+          if ($verified) {
+            Remove-Item -LiteralPath $src -Recurse -Force
+            Remove-Item -LiteralPath "$out\$name" -Force
+            "moved: field_100_150\$name is on the share and verified; removed $src and the local tar"
+            "free on C: $([int]((New-Object System.IO.DriveInfo 'C').AvailableFreeSpace / 1GB)) GB"
+          }

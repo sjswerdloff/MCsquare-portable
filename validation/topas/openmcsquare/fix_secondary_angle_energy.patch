@@ -1,0 +1,77 @@
+--- a/src/compute_nuclear_interaction.c	2024-09-19 01:12:02
++++ b/src/compute_nuclear_interaction.c	2026-09-29 03:15:47
+@@ -346,6 +346,7 @@
+ 								material->Nuclear_Inelastic[index].P_Energy_list[secondary_index+1]);
+   free(diff_cross_section);
+ 
++  VAR_COMPUTE T_table = secondary_hadron[*Nbr_secondaries].T;	// MeV, on the P_Energy_list grid of this incident energy
+   // scaling de l'énergie
+   secondary_hadron[*Nbr_secondaries].T = ((hadron->v_T[hadron_index]/UMeV) / material->Inelastic_Energy_List[index]) * UMeV * secondary_hadron[*Nbr_secondaries].T;
+   if(secondary_hadron[*Nbr_secondaries].T < config->Ecut_Pro * UMeV) return secondary_hadron[*Nbr_secondaries].M * secondary_hadron[*Nbr_secondaries].T / hadron->v_M[hadron_index];  
+@@ -390,14 +391,14 @@
+ 
+   VAR_DATA dd_cross_section[13];
+ 
+-  dd_cross_section[0] = (VAR_DATA)Linear_Interpolation(	secondary_hadron[*Nbr_secondaries].T, 
++  dd_cross_section[0] = (VAR_DATA)Linear_Interpolation(	T_table, 
+ 							material->Nuclear_Inelastic[index].P_Energy_list[secondary_index],
+ 							material->Nuclear_Inelastic[index].P_Energy_list[secondary_index+1], 
+ 							dd_cross_section1[0],
+ 							dd_cross_section2[0]);
+ 
+   for(i=1; i<13; i++){
+-    dd_cross_section[i] = dd_cross_section[i-1] + (VAR_DATA)Linear_Interpolation(	secondary_hadron[*Nbr_secondaries].T, 
++    dd_cross_section[i] = dd_cross_section[i-1] + (VAR_DATA)Linear_Interpolation(	T_table, 
+ 											material->Nuclear_Inelastic[index].P_Energy_list[secondary_index],
+ 											material->Nuclear_Inelastic[index].P_Energy_list[secondary_index+1], 
+ 											dd_cross_section1[i],
+@@ -466,6 +467,7 @@
+ 								material->Nuclear_Inelastic[index].D_Energy_list[secondary_index+1]);
+   free(diff_cross_section);
+ 
++  VAR_COMPUTE T_table = secondary_hadron[*Nbr_secondaries].T;	// MeV, on the D_Energy_list grid of this incident energy
+   // scaling de l'énergie
+   secondary_hadron[*Nbr_secondaries].T = ((hadron->v_T[hadron_index]/UMeV) / material->Inelastic_Energy_List[index]) * UMeV * secondary_hadron[*Nbr_secondaries].T;
+   if(secondary_hadron[*Nbr_secondaries].T < config->Ecut_Pro * UMeV) return secondary_hadron[*Nbr_secondaries].M * secondary_hadron[*Nbr_secondaries].T / hadron->v_M[hadron_index];
+@@ -511,14 +513,14 @@
+ 
+   VAR_DATA dd_cross_section[13];
+ 
+-  dd_cross_section[0] = (VAR_DATA)Linear_Interpolation(	secondary_hadron[*Nbr_secondaries].T, 
++  dd_cross_section[0] = (VAR_DATA)Linear_Interpolation(	T_table, 
+ 							material->Nuclear_Inelastic[index].D_Energy_list[secondary_index],
+ 							material->Nuclear_Inelastic[index].D_Energy_list[secondary_index+1], 
+ 							dd_cross_section1[0],
+ 							dd_cross_section2[0]);
+ 
+   for(i=1; i<13; i++){
+-    dd_cross_section[i] = dd_cross_section[i-1] + (VAR_DATA)Linear_Interpolation(	secondary_hadron[*Nbr_secondaries].T, 
++    dd_cross_section[i] = dd_cross_section[i-1] + (VAR_DATA)Linear_Interpolation(	T_table, 
+ 											material->Nuclear_Inelastic[index].D_Energy_list[secondary_index],
+ 											material->Nuclear_Inelastic[index].D_Energy_list[secondary_index+1], 
+ 											dd_cross_section1[i],
+@@ -588,6 +590,7 @@
+ 								material->Nuclear_Inelastic[index].A_Energy_list[secondary_index+1]);
+   free(diff_cross_section);
+ 
++  VAR_COMPUTE T_table = secondary_hadron[*Nbr_secondaries].T;	// MeV, on the A_Energy_list grid of this incident energy
+   // scaling de l'énergie
+   secondary_hadron[*Nbr_secondaries].T = ((hadron->v_T[hadron_index]/UMeV) / material->Inelastic_Energy_List[index]) * UMeV * secondary_hadron[*Nbr_secondaries].T;
+   if(secondary_hadron[*Nbr_secondaries].T < config->Ecut_Pro * UMeV) return secondary_hadron[*Nbr_secondaries].M * secondary_hadron[*Nbr_secondaries].T / hadron->v_M[hadron_index];
+@@ -631,14 +634,14 @@
+ 
+   VAR_DATA dd_cross_section[13];
+ 
+-  dd_cross_section[0] = (VAR_DATA)Linear_Interpolation(	secondary_hadron[*Nbr_secondaries].T, 
++  dd_cross_section[0] = (VAR_DATA)Linear_Interpolation(	T_table, 
+ 							material->Nuclear_Inelastic[index].A_Energy_list[secondary_index],
+ 							material->Nuclear_Inelastic[index].A_Energy_list[secondary_index+1], 
+ 							dd_cross_section1[0],
+ 							dd_cross_section2[0]);
+ 
+   for(i=1; i<13; i++){
+-    dd_cross_section[i] = dd_cross_section[i-1] + (VAR_DATA)Linear_Interpolation(	secondary_hadron[*Nbr_secondaries].T, 
++    dd_cross_section[i] = dd_cross_section[i-1] + (VAR_DATA)Linear_Interpolation(	T_table, 
+ 											material->Nuclear_Inelastic[index].A_Energy_list[secondary_index],
+ 											material->Nuclear_Inelastic[index].A_Energy_list[secondary_index+1], 
+ 											dd_cross_section1[i],

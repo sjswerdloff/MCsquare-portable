@@ -15,7 +15,7 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 Materials *Init_materials(unsigned int *Nbr_Materials, unsigned int *Max_Components, DATA_config *config){
 
   FILE *file = NULL;
-  char read[500], file_name[200], *GetEnvValue, *read_token;
+  char read[500], file_name[PATH_SIZE], *GetEnvValue, *read_token;
   int current_component, fail;
 
   GetEnvValue = NULL;
@@ -26,6 +26,10 @@ Materials *Init_materials(unsigned int *Nbr_Materials, unsigned int *Max_Compone
   }
   else if(GetEnvValue == NULL){
       printf("\n\n ERROR: Material database not found! \n\n");
+      return NULL;
+  }
+  else if(strlen(GetEnvValue) > CONFIG_PATH_MAX){
+      printf("\n\n ERROR: MCsquare_Materials_Dir is longer than %d characters \n\n", CONFIG_PATH_MAX);
       return NULL;
   }
   else{
@@ -295,7 +299,7 @@ Materials *Init_materials(unsigned int *Nbr_Materials, unsigned int *Max_Compone
 
 Materials *List_materials(unsigned int *Nbr_Materials, DATA_config *config){
   FILE *file = NULL;
-  char read[500], file_name[200], *read_token;
+  char read[500], file_name[PATH_SIZE], *read_token;
   int label, max_label = 0;
 
   strcpy(file_name, config->Materials_Dir);

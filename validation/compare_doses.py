@@ -146,10 +146,12 @@ def run_gamma(
     """
     import pymedphys
 
+    # build_axes returns (x, y, z); the dose arrays are (z, y, x). pymedphys pairs axes with
+    # array dimensions in order, so hand it the axes reversed.
     gamma = pymedphys.gamma(
-        axes_ref,
+        axes_ref[::-1],
         dose_ref,
-        axes_eval,
+        axes_eval[::-1],
         dose_eval,
         dose_threshold,
         distance_threshold,

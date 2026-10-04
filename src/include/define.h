@@ -74,6 +74,12 @@ typedef pcg32_random_t* RNG_Stream_t;
 
 #define Uamu 931.46e6	// 1 unité de masse atomique = 931.46 MeV
 
+// Path buffers (issue #5). Every buffer holding a file path is PATH_SIZE bytes. A path read from
+// the config is limited to CONFIG_PATH_MAX characters, which leaves room for the longest file
+// name and suffixes appended to Output_Directory, so derived paths cannot overflow.
+#define PATH_SIZE 4096
+#define CONFIG_PATH_MAX 1024
+
 #define WATER_LABEL 17
 
 #if VAR_DATA_PRECISION==1
@@ -106,11 +112,9 @@ typedef pcg32_random_t* RNG_Stream_t;
   #include <BaseTsd.h>
   typedef SSIZE_T ssize_t;
   #define strtok_r strtok_s
-  #define RMDIR_CMD "rd /s /q  %s"
 #else
   #define ALIGNED_(n) __attribute__((aligned(n)))
   #include <math.h>
-  #define RMDIR_CMD "rm -r  %s"
 #endif
 
 #ifndef __INTEL_COMPILER

@@ -10,15 +10,27 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 */
 
 
+#ifdef _WIN32
+  #define WIN32_LEAN_AND_MEAN
+  #define NOMINMAX
+  #include <windows.h>
+#else
+  #ifndef _GNU_SOURCE
+    #define _GNU_SOURCE	// nftw() in glibc's <ftw.h>
+  #endif
+  #include <ftw.h>
+  #include <errno.h>
+#endif
+
 #include "include/data_sparse.h"
 
 void export_Sparse_image(char *file_name, DATA_config *config, DATA_Scoring *scoring, plan_parameters *plan, VAR_SCORING *data, VAR_SCORING threshold){
 
-  char file_path[200];
-  char file_header_name[200];
-  char file_header_path[200];
-  char file_bin_name[200];
-  char file_bin_path[200];
+  char file_path[PATH_SIZE];
+  char file_header_name[PATH_SIZE];
+  char file_header_path[PATH_SIZE];
+  char file_bin_name[PATH_SIZE];
+  char file_bin_path[PATH_SIZE];
 
   char *path_ptr = strrchr(file_name, '/');
   if(path_ptr==NULL){
@@ -234,8 +246,8 @@ VAR_DATA *import_Sparse_image(char *file_name, int *GridSize, VAR_DATA *VoxelLen
 
   
   // Read binary data
-  char file_path_bin[200];
-  char file_path[200];
+  char file_path_bin[PATH_SIZE];
+  char file_path[PATH_SIZE];
 
   char *path_ptr = strrchr(file_name, '/');
   if(path_ptr==NULL) strcpy(file_path, "./");
@@ -501,10 +513,10 @@ DATA_Sparse_Header Init_Sparse_Header(){
 
 int Merge_Sparse_Files(char *InputPath, char *FileName, int NbrDirectories, char *OutputFile){
 
-  char file_header_path[200];
-  char file_bin_path[200];
-  char out_header_path[200];
-  char out_bin_path[200];
+  char file_header_path[PATH_SIZE];
+  char file_bin_path[PATH_SIZE];
+  char out_header_path[PATH_SIZE];
+  char out_bin_path[PATH_SIZE];
 
   char *file_extension = strrchr(FileName, '.');
   if(file_extension==NULL || strcmp(file_extension, ".txt")!=0){
@@ -536,7 +548,7 @@ int Merge_Sparse_Files(char *InputPath, char *FileName, int NbrDirectories, char
     strcat(out_header_path, ".txt");
   }
   
-  char from[200], ID[10];
+  char from[PATH_SIZE], ID[10];
   sprintf(from, "%s1/%s", InputPath, file_header_path);
   myCopyFile(out_header_path, from);
 
@@ -592,15 +604,70 @@ int Merge_Sparse_Files(char *InputPath, char *FileName, int NbrDirectories, char
 }
 
 
+#ifdef _WIN32
+// Windows counterpart of the nftw walk below: delete the contents depth-first, then the folder.
+// A reparse point (symbolic link or junction) is removed itself and never followed, as FTW_PHYS does.
+static void remove_tree_win(const char *dir){
+  char pattern[PATH_SIZE + 3], entry[PATH_SIZE];
+  WIN32_FIND_DATAA fd;
+  if(snprintf(pattern, sizeof pattern, "%s\\*", dir) >= (int)sizeof pattern) return;
+  HANDLE h = FindFirstFileA(pattern, &fd);
+  if(h != INVALID_HANDLE_VALUE){
+    do{
+      if(strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
+      if(snprintf(entry, sizeof entry, "%s\\%s", dir, fd.cFileName) >= (int)sizeof entry){
+        printf("\nWarning: temporary file path too long, not removed: %s\\%s \n", dir, fd.cFileName);
+        continue;
+      }
+      if(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY){
+        if(!(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) remove_tree_win(entry);
+        if(!RemoveDirectoryA(entry)) printf("\nWarning: unable to remove temporary folder %s \n", entry);
+      }
+      else if(!DeleteFileA(entry)) printf("\nWarning: unable to remove temporary file %s \n", entry);
+    } while(FindNextFileA(h, &fd));
+    FindClose(h);
+  }
+}
+#else
+// nftw callback: remove each entry after its contents (FTW_DEPTH). Symbolic links are removed
+// themselves, never followed (FTW_PHYS), as with `rm -r`.
+static int remove_tree_entry(const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf){
+  (void)sb; (void)typeflag; (void)ftwbuf;
+  if(remove(fpath) != 0) printf("\nWarning: unable to remove temporary file %s \n", fpath);
+  return 0;
+}
+#endif
+
+// Deletes the per-beamlet temporary folders InputPath1 .. InputPathN. The path comes from the
+// config, so it is never passed through a shell (issue #12).
 int Remove_temporary_folders(char *InputPath, int NbrDirectories){
-  char path[200], cmd[300];
+  char path[PATH_SIZE];
   int i;
   for(i=0; i<NbrDirectories; i++){
-    // Remove sub folder
-    sprintf(path, "\"%s%d\"", InputPath, i+1);
-    // rmdir(path); // from unistd.h
-    sprintf(cmd, RMDIR_CMD, path); // RMDIR_CMD is defined in define.h according to the OS
-    system(cmd);
+    int len = snprintf(path, sizeof path, "%s%d", InputPath, i+1);
+    if(len < 0 || len >= (int)sizeof path){
+      printf("\nWarning: temporary folder path too long, not removed: %s%d \n", InputPath, i+1);
+      continue;
+    }
+#ifdef _WIN32
+    DWORD attr = GetFileAttributesA(path);
+    if(attr == INVALID_FILE_ATTRIBUTES){
+      DWORD err = GetLastError();
+      // Only "not there" is silent, as ENOENT is below; any other failure is reported.
+      if(err != ERROR_FILE_NOT_FOUND && err != ERROR_PATH_NOT_FOUND)
+        printf("\nWarning: unable to remove temporary folder %s (error %lu) \n", path, (unsigned long)err);
+      continue;
+    }
+    if(!(attr & FILE_ATTRIBUTE_DIRECTORY)){  // a plain file: removed, as nftw does
+      if(!DeleteFileA(path)) printf("\nWarning: unable to remove temporary file %s \n", path);
+      continue;
+    }
+    if(!(attr & FILE_ATTRIBUTE_REPARSE_POINT)) remove_tree_win(path);
+    if(!RemoveDirectoryA(path)) printf("\nWarning: unable to remove temporary folder %s \n", path);
+#else
+    if(nftw(path, remove_tree_entry, 16, FTW_DEPTH | FTW_PHYS) != 0 && errno != ENOENT)
+      printf("\nWarning: unable to remove temporary folder %s \n", path);
+#endif
   }
   return 0;
 }

@@ -14,7 +14,7 @@ The MCsquare software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
 
 DATA_CT **Import_4DCT(DATA_config *config){
 
-  char phase_file_path[200];
+  char phase_file_path[PATH_SIZE];
   config->Num_4DCT_phases = 0;
   int i;
   DATA_CT **CT =  NULL;
@@ -181,7 +181,7 @@ VAR_DATA *Import_Def_Field(char *file_path, int *GridSize, VAR_DATA *Spacing, VA
 DATA_4D_Fields *Import_4D_Fields(DATA_config *config){
 
   int i;
-  char file_path[200];
+  char file_path[PATH_SIZE];
   DATA_4D_Fields *Fields =  NULL;
   int Fields_GridSize[4];
   VAR_DATA Fields_Spacing[3], Fields_Origin[3];

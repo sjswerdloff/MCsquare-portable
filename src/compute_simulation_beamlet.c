@@ -27,7 +27,7 @@ void Run_simulation_beamlet(DATA_config *config, Materials *material, DATA_CT **
   for(spotID=0; spotID<config->TotalNbrSpots; spotID++){
 
     double time_init, time_MC, time_end;
-    char file_path[200], output_beamlet_suffix[200], output_4D_suffix[200];
+    char file_path[PATH_SIZE], output_beamlet_suffix[PATH_SIZE], output_4D_suffix[PATH_SIZE];
 
     int tid = omp_get_thread_num();
 
@@ -96,8 +96,6 @@ void Run_simulation_beamlet(DATA_config *config, Materials *material, DATA_CT **
       // Compute simulation
       while(stop == 0){
         for(i=0; i<VLENGTH; i++){
-	  	  #pragma omp simd
-	  for (int i = 0; i < VLENGTH; i++) {
     if(hadron.v_type[i] == Unknown){
 
     	    if(Nbr_HadronToSimulate > 0){
@@ -125,7 +123,6 @@ void Run_simulation_beamlet(DATA_config *config, Materials *material, DATA_CT **
     	      }
     	      if(count == 0) stop = 1;
     	    }
-    	  }
 	  }
         }
 
@@ -440,7 +437,7 @@ void Run_simulation_beamlet(DATA_config *config, Materials *material, DATA_CT **
 
   if(config->Energy_Sparse_Output == 1 || config->Dose_Sparse_Output == 1){
 
-    char InPath[200], InFile[200], OutPath[200];
+    char InPath[PATH_SIZE], InFile[PATH_SIZE], OutPath[PATH_SIZE];
 
     if(config->Simu_4D_Mode == 0 || config->Dose_4D_Accumulation == 1) tot_phases = 1;
     else tot_phases = config->Num_4DCT_phases;

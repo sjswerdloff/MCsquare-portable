@@ -225,7 +225,7 @@ int main(int argc, char *argv[]){
   Display_RangeShifter_Data(plan, &machine, material);
 
   // Export density map
-  char file_path[200];
+  char file_path[PATH_SIZE];
   int a;
   if(config.Densities_Output == 1){
     if(config.Simu_4D_Mode == 0){

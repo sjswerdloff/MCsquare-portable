@@ -1,0 +1,288 @@
+# Same-host comparison, PART E on the HP, Linux under WSL2 (docs/field_100_150_plan.md): field edge at 100, 150 MeV.
+#   B-up    OpenMCsquare 85bf2911 + fix, icc 2021.1   the binary part B ran, in its write-once build directory
+#   B-pgcc  Portable 2f9dab40, gcc 13                 the binary part B ran
+#   B-picc  Portable 2f9dab40, icc 2021.1             the binary part B ran
+# NOTHING IS BUILT. Each job verifies its binary against the build record AND against the sha256 pinned in
+# validation/field_followup_runs.py, and refuses if Portable's source at this commit differs from 2f9dab40's.
+# Case: field_edge_make_cases.py <E> 150 (15 x 15 cm field, HU 0 in Scanners/default), 3 threads.
+# Seeds, histories, threads and binaries come from validation/field_followup_runs.py, the one place they are written.
+# No endpoint is computed here: the analysis computes them from the dose files.
+#
+# THIS FILE IS THE RUN REQUEST: it runs on a push to connor/field-e-run that changes this file. MODE below:
+#   smoke  1 run per arm and energy, 1e5 histories, under a smoke/ subdirectory
+#   full   8 runs per arm and energy, 6e7 histories
+#   run      linux: one job per arm x energy. Every run gets a new directory; nothing is overwritten.
+#   pack     linux, after every run job (also when one failed): gzip tar of $FE_BASE/<sha12> into
+#            C:\mcsq-collect (from WSL, /mnt/c/mcsq-collect), with its sha256.
+#   upload   windows: copy the tar to \\192.168.1.212\SMBWritable\field_100_150\, hash the share copy, compare, then
+#            write <tar>.uploaded holding the verified hash and remove the local tar. Queued several times because the
+#            'windows' label may be served by more than one PC: a copy that lands off the HP, or after another copy
+#            uploaded, does nothing.
+#   cleanup  linux: removes the run tree only when <tar>.uploaded holds the hash pack recorded
+#            (sjswerdloff, 2026-10-02: "move the run data off the pcs, on to the SMBWritable").
+# Run requests (one line per push that asks for runs):
+#   1  2026-10-02  smoke
+#   2  2026-10-02  full (the acquisition commit)
+#   3  2026-10-04  smoke, acquisition amendment 1: B-pgcc at 150 MeV only; run tree on the Windows drive (FE_BASE)
+#   4  2026-10-04  smoke again: request 3 stopped extracting the snapshot on /mnt/c (tar: Cannot utime); tar -m
+#   5  2026-10-04  full, acquisition amendment 1: B-pgcc at 150 MeV, 8 runs (the rerun commit)
+
+name: Same-host comparison, part E (Linux, HP)
+
+on:
+  push:
+    branches: [connor/field-e-run]
+    paths: [.gitea/workflows/field-e-linux.yml]
+
+env:
+  MODE: full
+  UPSTREAM: 85bf2911ddadbb40bd41b1a18b4b247536bb33ab
+  PATCH_SHA256: e22990c96942286304f538b844ed2697a917c4e8b235f970731824b90ae8e347
+  SOURCE_COMMIT: 2f9dab404cea02f5072352f7ae5773dca27eb2a1
+  HP: DESKTOP-5H86O9N
+  # Run trees on the Windows drive, not in WSL's virtual disk (acquisition amendment 1; sjswerdloff, 2026-10-02).
+  FE_BASE: /mnt/c/fe-study/fe
+
+jobs:
+  run:
+    name: Run ${{ matrix.arm }} at ${{ matrix.energy }} MeV
+    runs-on: linux
+    timeout-minutes: 900
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [B-pgcc]
+        energy: ["150"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Verify binary, generate the case, run
+        env:
+          ARM: ${{ matrix.arm }}
+          E: ${{ matrix.energy }}
+        run: |
+          set -euo pipefail
+          [ "$(hostname)" = "$HP" ] || { echo "this job is for the HP ($HP), not $(hostname): refusing"; exit 1; }
+          case "$MODE" in
+            full)  SUB="";;
+            smoke) SUB="smoke/";;
+            *) echo "MODE must be smoke or full, got '$MODE'"; exit 1;;
+          esac
+          SHA12=${GITHUB_SHA:0:12}; SRC12=${SOURCE_COMMIT:0:12}
+          case "$ARM" in
+            B-up)   B="$HOME/mcsq-builds/${UPSTREAM:0:12}+${PATCH_SHA256:0:12}/icc-avx2"; AD=bup;;
+            B-pgcc) B="$HOME/mcsq-builds/portable-$SRC12/gcc13"; AD=bpg;;
+            B-picc) B="$HOME/mcsq-builds/portable-$SRC12/icc-avx2"; AD=bpi;;
+            *) echo "unknown arm '$ARM'"; exit 1;;
+          esac
+          UV="$(command -v uv || true)"; [ -n "$UV" ] || UV="$HOME/.local/bin/uv"
+          [ -x "$UV" ] || { echo "no uv on this runner"; exit 1; }
+          py() { "$UV" run --no-project --with numpy python "$@"; }
+          py -c "import numpy, sys; print('python', sys.version.split()[0], 'numpy', numpy.__version__)"
+          # The frozen design: seeds, histories, threads and the pinned binary, from the one module that states them.
+          py validation/field_followup_runs.py check || { echo "seed check failed: refusing"; exit 1; }
+          SEEDS=$(py validation/field_followup_runs.py seeds "$ARM" "$E" "$MODE")
+          N=$(py validation/field_followup_runs.py histories "$MODE")
+          THREADS=$(py validation/field_followup_runs.py threads "$ARM")
+          PINNED=$(py validation/field_followup_runs.py binary "$ARM")
+          [ -n "$SEEDS" ] || { echo "no seeds for $ARM $E $MODE: refusing"; exit 1; }
+          [[ "$N" =~ ^[1-9][0-9]*$ && "$THREADS" =~ ^[1-9][0-9]*$ && "$PINNED" =~ ^[0-9a-f]{64}$ ]] \
+            || { echo "malformed design values (N='$N' threads='$THREADS' binary='$PINNED'): refusing"; exit 1; }
+          # The recorded binary or nothing: never compile here.
+          (cd "$B" && sha256sum -c sha256.txt)
+          BINSHA=$(awk '{print $1}' "$B/sha256.txt")
+          [ "$BINSHA" = "$PINNED" ] || { echo "binary sha256 $BINSHA is not the one part B ran ($PINNED): refusing"; exit 1; }
+          cat "$B/build.txt"
+          BHOST=$(sed -n 's/^host //p' "$B/build.txt")
+          [ "$BHOST" = "$(hostname)" ] || { echo "binary was built on '$BHOST', this is '$(hostname)': refusing"; exit 1; }
+          CPU=$(lscpu | sed -n 's/^Model name: *//p' | head -1)
+          # Portable's source must be the source the binary was built from: nothing outside validation, docs, .gitea differs.
+          git diff --quiet "$SOURCE_COMMIT" HEAD -- . ':(exclude)validation' ':(exclude)docs' ':(exclude).gitea' \
+            || { echo "the source at this commit differs from $SRC12: refusing"; exit 1; }
+          # Every arm uses this commit's data; it must equal upstream's for every file the case reads.
+          git diff --quiet "$UPSTREAM" HEAD -- Materials Scanners/default BDL/BDL_default_DN_RangeShifter.txt \
+            || { echo "Materials/Scanners/BDL differ from upstream ${UPSTREAM:0:12}: refusing"; exit 1; }
+          mkdir -p "$FE_BASE"
+          FREE_GB=$(df -Pk "$FE_BASE" | awk 'NR==2 {print int($4 / 1048576)}')
+          echo "free under $FE_BASE: ${FREE_GB} GB"
+          [ "$FREE_GB" -ge 10 ] || { echo "only ${FREE_GB} GB free under $FE_BASE: refusing"; exit 1; }
+          ROOT="$FE_BASE/$SHA12/$SUB$AD/e$E"
+          mkdir -p "$(dirname "$ROOT")"
+          mkdir "$ROOT" || { echo "cannot create $ROOT (exists, or not writable): refusing"; exit 1; }
+          echo "$ARM $E MeV mode $MODE, commit $GITHUB_SHA, run $GITHUB_RUN_ID" > "$ROOT/run_root.txt"
+          # Snapshot: the committed bytes of every script and data file the runs use, with sha256.
+          SNAP="$ROOT/snapshot"; mkdir "$SNAP"
+          git archive HEAD Materials Scanners BDL validation/apples_seeds_check.py validation/field_followup_runs.py \
+            validation/field_edge_make_cases.py | tar -x -m -C "$SNAP"   # -m: drvfs (/mnt/c) refuses utime; bytes are unchanged
+          cp "$B/build.txt" "$SNAP/build.txt"; cp "$B/sha256.txt" "$SNAP/binary_sha256.txt"
+          V="$SNAP/validation"
+          (cd "$SNAP" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$ROOT/snapshot_sha256.txt"
+          unset MCsquare_Materials_Dir   # MCsquare reads Materials/ relative to the cwd
+          # The case, generated once from the snapshot; each run directory gets its own copy and is the cwd.
+          PLAN="E${E}_S150"
+          FC="$ROOT/fcase"; mkdir "$FC"
+          NAMES=$(cd "$FC" && py "$V/field_edge_make_cases.py" "$E" 150)
+          [ "$NAMES" = "$PLAN" ] || { echo "unexpected case name(s): $NAMES"; exit 1; }
+          (cd "$FC" && sha256sum cube.mhd cube.raw "$PLAN.txt") > "$ROOT/fcase_sha256.txt"
+          utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+          for SEED in $SEEDS; do
+            [[ "$SEED" =~ ^[0-9]{6}$ ]] || { echo "seed '$SEED' is not six digits: refusing"; exit 1; }
+            D="$ROOT/s$SEED"
+            mkdir "$D" || { echo "$D exists: refusing"; exit 1; }
+            mkdir "$D/Scanners" "$D/BDL" "$D/out_seed"
+            cp "$FC/cube.mhd" "$FC/cube.raw" "$FC/$PLAN.txt" "$D/"
+            cp -R "$SNAP/Materials" "$D/Materials"
+            cp -R "$SNAP/Scanners/default" "$D/Scanners/default"
+            cp "$SNAP/BDL/BDL_default_DN_RangeShifter.txt" "$D/BDL/"
+            printf '%s\n' "Num_Threads $THREADS" "Num_Primaries $N" "RNG_Seed $SEED" "CT_File cube.mhd" \
+              "HU_Density_Conversion_File Scanners/default/HU_Density_Conversion.txt" \
+              "HU_Material_Conversion_File Scanners/default/HU_Material_Conversion.txt" \
+              "BDL_Machine_Parameter_File BDL/BDL_default_DN_RangeShifter.txt" \
+              "BDL_Plan_File $PLAN.txt" "Output_Directory out_seed" "Dose_MHD_Output True" > "$D/cfg.txt"
+            OUTD="$D/out_seed"
+            SIM=null; OVER=null; START_UTC=$(utc); start=$(date +%s)
+            write_run() {  # write_run <transport_status>; refuses unless ok
+              printf '{"seed": %s, "requested": %s, "simulated": %s, "overshoot": %s, "threads": %s, "energy_mev": %s, "case": "E", "arm": "%s", "mode": "%s", "host": "%s", "cpu": "%s", "binary_sha256": "%s", "commit": "%s", "start_utc": "%s", "end_utc": "%s", "wall_s": %s, "transport_status": "%s"}\n' \
+                "$SEED" "$N" "$SIM" "$OVER" "$THREADS" "$E" "$ARM" "$MODE" "$(hostname)" "$CPU" "$BINSHA" "$GITHUB_SHA" \
+                "$START_UTC" "$END_UTC" "$WALL" "$1" > "$D/run.json"
+              cat "$D/run.json"
+              [ "$1" = ok ] || { echo "run $SEED $1: refusing"; exit 1; }
+            }
+            rc=0; (cd "$D" && "$B/MCsquare" cfg.txt) > "$D/log.txt" 2>&1 || rc=$?
+            END_UTC=$(utc); WALL=$(( $(date +%s) - start ))
+            echo "RUN $ARM E=$E seed=$SEED N=$N rc=$rc wall_s=$WALL"
+            [ "$rc" -eq 0 ] || { tail -30 "$D/log.txt"; write_run "mcsquare_exit_$rc"; }
+            [ -s "$OUTD/Dose.raw" ] && [ -s "$OUTD/Dose.mhd" ] || { tail -30 "$D/log.txt"; write_run dose_missing; }
+            SIM=$(grep -o 'Nbr primaries simulated: [0-9]*' "$D/log.txt" | head -1 | awk '{print $4}' || true)
+            [ -n "$SIM" ] || { SIM=null; write_run no_primaries_line; }
+            OVER=$((SIM - N))
+            [ "$SIM" -ge "$N" ] || write_run simulated_count_below_requested
+            if grep -q 'Unknown tag' "$D/log.txt"; then grep 'Unknown tag' "$D/log.txt"; write_run config_tag_not_recognised; fi
+            (cd "$OUTD" && sha256sum Dose.raw Dose.mhd > sha256.txt)
+            write_run ok
+          done
+          echo "outputs: $ROOT"
+
+  pack:
+    name: Pack the run tree (WSL2)
+    needs: run
+    if: ${{ always() }}
+    runs-on: linux
+    timeout-minutes: 120
+    steps:
+      - name: Pack
+        run: |
+          set -euo pipefail
+          [ "$(hostname)" = "$HP" ] || { echo "this job is for the HP ($HP), not $(hostname): refusing"; exit 1; }
+          case "$MODE" in smoke|full) ;; *) echo "MODE must be smoke or full, got '$MODE'"; exit 1;; esac
+          SHA12=${GITHUB_SHA:0:12}
+          SRC_PARENT="$FE_BASE"; SRC="$SRC_PARENT/$SHA12"
+          OUT=/mnt/c/mcsq-collect
+          NAME="field_e_B_${SHA12}_${MODE}.tar.gz"
+          [ -d "$SRC" ] || { echo "no run tree at $SRC: nothing to move"; exit 1; }
+          if pgrep '^MCsquare' > /dev/null; then echo "an MCsquare process is running: refusing"; pgrep -l '^MCsquare'; exit 1; fi
+          [ -d "$OUT" ] || { echo "no $OUT: refusing"; exit 1; }
+          for f in "$NAME" "$NAME.sha256" "$NAME.uploaded"; do
+            [ ! -e "$OUT/$f" ] || { echo "$OUT/$f exists: refusing to overwrite"; exit 1; }
+          done
+          echo "source: $(find "$SRC" -type f | wc -l) files, $(du -sm "$SRC" | cut -f1) MB"
+          tar -C "$SRC_PARENT" -czf "$OUT/$NAME" "$SHA12"
+          (cd "$OUT" && sha256sum "$NAME" > "$NAME.sha256")
+          cat "$OUT/$NAME.sha256"; ls -l "$OUT/$NAME"
+
+  upload:
+    name: Copy the tar to SMBWritable (replica ${{ matrix.replica }})
+    needs: pack
+    runs-on: windows
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        replica: [1, 2, 3, 4, 5, 6]
+    steps:
+      - name: Copy and verify
+        shell: powershell
+        env:
+          SMB_PW: ${{ secrets.SMB_GITEARUNNER_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          if ($env:COMPUTERNAME -ne $env:HP) { "this copy landed on ${env:COMPUTERNAME}, not the HP ($env:HP): nothing to do"; exit 0 }
+          if ([string]::IsNullOrEmpty($env:SMB_PW)) { throw 'secret SMB_GITEARUNNER_PASSWORD is not set: refusing' }
+          $sha12 = $env:GITHUB_SHA.Substring(0,12)
+          $name = "field_e_B_${sha12}_$($env:MODE).tar.gz"
+          $src = 'C:\mcsq-collect'
+          if (Test-Path -LiteralPath "$src\$name.uploaded") { "already uploaded and verified by another copy of this job: nothing to do"; exit 0 }
+          $want = (Get-Content -LiteralPath "$src\$name.sha256" -Raw).Trim().Split(' ')[0].ToLower()
+          if ($want -notmatch '^[0-9a-f]{64}$') { throw "unreadable sha256 file: '$want'" }
+          $local = (Get-FileHash -LiteralPath "$src\$name" -Algorithm SHA256).Hash.ToLower()
+          "local tar sha256 $local"
+          if ($local -ne $want) { throw "local tar does not match its sha256 file ($want): refusing" }
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class SmbConn {
+            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+            public class NetResource {
+              public int Scope = 0; public int Type = 1; public int DisplayType = 0; public int Usage = 0;
+              public string LocalName = null; public string RemoteName; public string Comment = null; public string Provider = null;
+            }
+            [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
+            static extern int WNetAddConnection2(NetResource r, string password, string user, int flags);
+            [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
+            static extern int WNetCancelConnection2(string name, int flags, bool force);
+            public static int Add(string remote, string user, string password) {
+              var r = new NetResource(); r.RemoteName = remote; return WNetAddConnection2(r, password, user, 0);
+            }
+            public static int Cancel(string remote) { return WNetCancelConnection2(remote, 0, true); }
+          }
+          '@
+          $rw = '\\192.168.1.212\SMBWritable'
+          $rc = [SmbConn]::Add($rw, 'gitearunner', $env:SMB_PW)
+          if ($rc -ne 0) { throw "SMBWritable: connect failed, error $rc (" + (New-Object ComponentModel.Win32Exception $rc).Message + ')' }
+          $verified = $false
+          try {
+            $dir = Join-Path $rw 'field_100_150'
+            if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
+            foreach ($f in @($name, "$name.sha256")) {
+              if (Test-Path -LiteralPath (Join-Path $dir $f)) { throw "$f already exists on the share: refusing to overwrite" }
+            }
+            Copy-Item -LiteralPath "$src\$name" -Destination $dir
+            Copy-Item -LiteralPath "$src\$name.sha256" -Destination $dir
+            $remote = (Get-FileHash -LiteralPath (Join-Path $dir $name) -Algorithm SHA256).Hash.ToLower()
+            "share copy sha256 $remote"
+            if ($remote -ne $want) { throw "share copy does not match ($want): nothing is removed" }
+            $verified = $true
+          } finally { "SMBWritable: disconnect rc " + [SmbConn]::Cancel($rw) }
+          if ($verified) {
+            "$remote  $name" | Set-Content -Encoding Ascii "$src\$name.uploaded"
+            Remove-Item -LiteralPath "$src\$name" -Force
+            "copied and verified: field_100_150\$name; removed the local tar"
+          }
+
+  cleanup:
+    name: Remove the run tree from the HP once the share copy is verified
+    needs: upload
+    if: ${{ always() }}
+    runs-on: linux
+    timeout-minutes: 30
+    steps:
+      - name: Remove
+        run: |
+          set -euo pipefail
+          [ "$(hostname)" = "$HP" ] || { echo "this job is for the HP ($HP), not $(hostname): refusing"; exit 1; }
+          SHA12=${GITHUB_SHA:0:12}
+          SRC="$FE_BASE/$SHA12"
+          OUT=/mnt/c/mcsq-collect
+          NAME="field_e_B_${SHA12}_${MODE}.tar.gz"
+          [ -d "$SRC" ] || { echo "no run tree at $SRC: nothing to remove"; exit 1; }
+          [ -s "$OUT/$NAME.uploaded" ] && [ -s "$OUT/$NAME.sha256" ] || { echo "no verified upload recorded for $NAME: the run tree stays"; exit 1; }
+          WANT=$(awk 'NR==1 {print $1}' "$OUT/$NAME.sha256" | tr -d '\r')
+          GOT=$(awk 'NR==1 {print $1}' "$OUT/$NAME.uploaded" | tr -d '\r')
+          [[ "$WANT" =~ ^[0-9a-f]{64}$ ]] && [ "$WANT" = "$GOT" ] || { echo "upload record ($GOT) is not the packed tar ($WANT): the run tree stays"; exit 1; }
+          [[ "$SHA12" =~ ^[0-9a-f]{12}$ ]] || { echo "malformed commit '$SHA12': refusing"; exit 1; }
+          rm -rf -- "$SRC"
+          echo "removed $SRC; free under $FE_BASE: $(df -Pk "$FE_BASE" | awk 'NR==2 {print int($4 / 1048576)}') GB"

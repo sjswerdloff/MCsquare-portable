@@ -550,6 +550,7 @@ void Transport_to_CT(Hadron_buffer *hadron, VAR_DATA CT_Length[3], DATA_config *
   else 			Translation[2] = (CT_Length[2] - hadron->z) / hadron->w;
 
   int i;
+  int entered = 0;
   for(i=0; i<3; i++){
 
     if(Translation[i] < 0) continue;
@@ -562,8 +563,17 @@ void Transport_to_CT(Hadron_buffer *hadron, VAR_DATA CT_Length[3], DATA_config *
 
 
 
-    if(new_position[0] > 0.0 && new_position[1] > 0.0 && new_position[2] > 0.0 && new_position[0] < CT_Length[0] &&  new_position[1] < CT_Length[1] &&  new_position[2] < CT_Length[2] && !isnan(new_position[0]) && !isnan(new_position[1]) && !isnan(new_position[2])) break;
+    if(new_position[0] > 0.0 && new_position[1] > 0.0 && new_position[2] > 0.0 && new_position[0] < CT_Length[0] &&  new_position[1] < CT_Length[1] &&  new_position[2] < CT_Length[2] && !isnan(new_position[0]) && !isnan(new_position[1]) && !isnan(new_position[2])){
+      entered = 1;
+      break;
+    }
   }
+
+  // The ray never enters the CT. Leave the particle where it is (outside) with its energy
+  // untouched, so the caller counts it as generated outside the geometry and drops it.
+  // Falling through here read Translation[3] and, when no face was tried, an uninitialised
+  // new_position (issue #8).
+  if(!entered) return;
 
   hadron->x = new_position[0];
   hadron->y = new_position[1];

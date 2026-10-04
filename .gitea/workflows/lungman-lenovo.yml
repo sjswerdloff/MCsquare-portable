@@ -1,0 +1,170 @@
+# Lungman tumours_100HU_1, one pencil beam (127 MeV, range shifter in), run on the Lenovo with upstream OpenMCsquare
+# 85bf2911 + the field-edge fix, icl (the validation's A-up binary; sjswerdloff 2026-10-04). Inputs are clement-7074f29f's
+# Studio package (KindledRT/Lungman/mcsquare, cora-2f1e43dc's CT and mask), read from AIDocumentCommons and checked
+# against its SHA256SUMS. Changed for this host only: Num_Threads, Num_Primaries (MODE) and CT_File (flat run root,
+# because upstream reads the MHD data file and Materials\ relative to the cwd and has short path buffers).
+# MODE smoke = 1e6 primaries, to check where the beam lands before a full run; full = 1e7 as on the Studio.
+# The run tree is packed, copied to SMBWritable\lungman\, verified there, then removed from the Lenovo.
+# THIS FILE IS THE RUN REQUEST: it runs on a push to connor/lungman-lenovo that changes this file.
+
+name: Lungman pencil beam on the Lenovo (upstream + fix, icl)
+
+on:
+  push:
+    branches: [connor/lungman-lenovo]
+    paths: [.gitea/workflows/lungman-lenovo.yml]
+
+env:
+  MODE: full
+  LENOVO: DESKTOP-SR5GKKA
+  UPSTREAM: 85bf2911ddadbb40bd41b1a18b4b247536bb33ab
+  PATCH_SHA256: e22990c96942286304f538b844ed2697a917c4e8b235f970731824b90ae8e347
+  TARGET: icl-avx2
+  THREADS: "4"
+  SEED: "1234"
+
+jobs:
+  run:
+    name: Run, pack, move to SMBWritable
+    runs-on: lenovo-windows-canary
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Copy and verify inputs, run, record, move
+        shell: powershell
+        env:
+          SMB_PW: ${{ secrets.SMB_GITEARUNNER_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          if ($env:COMPUTERNAME -ne $env:LENOVO) { throw "this job is for the Lenovo ($env:LENOVO), not ${env:COMPUTERNAME}: refusing" }
+          if ([string]::IsNullOrEmpty($env:SMB_PW)) { throw 'secret SMB_GITEARUNNER_PASSWORD is not set: refusing' }
+          $N = switch ($env:MODE) { 'smoke' { '1e6' } 'full' { '1e7' } default { throw "MODE must be smoke or full, got '$env:MODE'" } }
+          if (@(Get-Process | Where-Object { $_.ProcessName -match '^MCsquare' }).Count) { throw 'an MCsquare process is running: refusing' }
+
+          # The recorded binary or nothing.
+          $B = "C:\mcsq-win\builds\$($env:UPSTREAM.Substring(0,12))+$($env:PATCH_SHA256.Substring(0,12))\$env:TARGET"
+          $want = ((Get-Content "$B\sha256.txt") -split '\s+')[0]
+          $have = (Get-FileHash "$B\MCsquare.exe" -Algorithm SHA256).Hash.ToLower()
+          if ($want -ne $have) { throw "binary sha256 $have does not match recorded $want" }
+          git diff --quiet $env:UPSTREAM HEAD -- Materials
+          if ($LASTEXITCODE) { throw "Materials differ from upstream $($env:UPSTREAM.Substring(0,12)): refusing" }
+
+          $sha12 = $env:GITHUB_SHA.Substring(0,12)
+          $D = "C:\mcsq-win\lg\$sha12"
+          if (Test-Path -LiteralPath $D) { throw "$D exists: refusing to overwrite" }
+          New-Item -ItemType Directory -Path "$D\Scanner" | Out-Null
+
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class SmbConn {
+            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+            public class NetResource {
+              public int Scope = 0; public int Type = 1; public int DisplayType = 0; public int Usage = 0;
+              public string LocalName = null; public string RemoteName; public string Comment = null; public string Provider = null;
+            }
+            [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
+            static extern int WNetAddConnection2(NetResource r, string password, string user, int flags);
+            [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
+            static extern int WNetCancelConnection2(string name, int flags, bool force);
+            public static int Add(string remote, string user, string password) {
+              var r = new NetResource(); r.RemoteName = remote; return WNetAddConnection2(r, password, user, 0);
+            }
+            public static int Cancel(string remote) { return WNetCancelConnection2(remote, 0, true); }
+          }
+          '@
+
+          # Inputs: copy from AIDocumentCommons, then check every file against the package's own SHA256SUMS.
+          $ro = '\\192.168.1.212\AIDocumentCommons'
+          $rc = [SmbConn]::Add($ro, 'gitearunner', $env:SMB_PW)
+          if ($rc -ne 0) { throw "AIDocumentCommons: connect failed, error $rc" }
+          try {
+            $src = Join-Path $ro 'KindledRT\Lungman\mcsquare'
+            $pkg = Join-Path $src 'studio_E127_1e7'
+            Copy-Item (Join-Path $src 'SHA256SUMS') "$D\ct_SHA256SUMS"
+            Copy-Item (Join-Path $pkg 'SHA256SUMS') "$D\pkg_SHA256SUMS"
+            foreach ($f in 'CT.mhd', 'CT.raw') { Copy-Item (Join-Path $src $f) "$D\$f" }
+            foreach ($f in 'plan.txt', 'BDL.txt', 'config.txt', 'README.md', 'results.json') { Copy-Item (Join-Path $pkg $f) "$D\$f" }
+            foreach ($f in 'HU_Density_Conversion.txt', 'HU_Material_Conversion.txt') { Copy-Item (Join-Path $pkg "Scanner\$f") "$D\Scanner\$f" }
+          } finally { "AIDocumentCommons: disconnect rc " + [SmbConn]::Cancel($ro) }
+          function Check-Sums($sums, $names) {
+            $map = @{}
+            foreach ($line in Get-Content $sums) { if ($line -match '^([0-9a-f]{64})\s+(\S+)$') { $map[$Matches[2]] = $Matches[1] } }
+            foreach ($n in $names) {
+              if (-not $map.ContainsKey($n)) { throw "$n is not in $sums" }
+              $h = (Get-FileHash (Join-Path $D ($n -replace '/', '\')) -Algorithm SHA256).Hash.ToLower()
+              if ($h -ne $map[$n]) { throw "$n sha256 $h does not match $($map[$n]) in $sums" }
+              "ok  $n"
+            }
+          }
+          Check-Sums "$D\ct_SHA256SUMS" @('CT.mhd', 'CT.raw')
+          Check-Sums "$D\pkg_SHA256SUMS" @('plan.txt', 'BDL.txt', 'config.txt', 'README.md', 'results.json',
+                                           'Scanner/HU_Density_Conversion.txt', 'Scanner/HU_Material_Conversion.txt')
+          Copy-Item -Recurse Materials "$D\Materials"
+
+          # The Studio config with only threads, primaries and the CT path changed; everything else is checked unchanged.
+          $studio = Get-Content "$D\config.txt" | Where-Object { $_.Trim() }
+          $cfg = foreach ($l in $studio) {
+            switch -regex ($l) {
+              '^Num_Threads\s' { "Num_Threads $env:THREADS" }
+              '^Num_Primaries\s' { "Num_Primaries $N" }
+              '^RNG_Seed\s' { "RNG_Seed $env:SEED" }
+              '^CT_File\s' { 'CT_File CT.mhd' }
+              default { $l }
+            }
+          }
+          $changed = @(Compare-Object $studio $cfg | Where-Object SideIndicator -eq '=>' | ForEach-Object InputObject)
+          if (@($changed | Where-Object { $_ -notmatch '^(Num_Threads|Num_Primaries|RNG_Seed|CT_File)\s' }).Count) { throw "unexpected config change: $changed" }
+          $cfg | Set-Content -Encoding Ascii "$D\run_config.txt"
+          "config for this host:"; Get-Content "$D\run_config.txt"
+
+          $rt  = Split-Path (Get-ChildItem C:\mcsq-win\oneapi -Recurse -Filter libiomp5md.dll | Where-Object FullName -match '\\intel64' | Select-Object -First 1).FullName
+          $mkr = Split-Path (Get-ChildItem C:\mcsq-win\mkl -Recurse -Filter 'mkl_core*.dll' | Select-Object -First 1).FullName
+          $env:PATH = "$rt;$mkr;$env:PATH"
+          $env:MCsquare_Materials_Dir = $null
+          Push-Location $D
+          $t0 = Get-Date
+          & "$B\MCsquare.exe" run_config.txt *> "$D\log.txt"
+          $code = $LASTEXITCODE
+          $wall = [int]((Get-Date) - $t0).TotalSeconds
+          Pop-Location
+          @{ mode = $env:MODE; primaries = $N; threads = [int]$env:THREADS; seed = [int]$env:SEED; exit_code = $code; wall_s = $wall
+             host = $env:COMPUTERNAME; binary_sha256 = $have; binary = "upstream $env:UPSTREAM + fix $env:PATCH_SHA256, $env:TARGET"
+             commit = $env:GITHUB_SHA } | ConvertTo-Json | Set-Content -Encoding Ascii "$D\run.json"
+          Get-Content "$D\log.txt" -Tail 15
+          "exit $code, wall $wall s"
+          if ($code -ne 0 -or -not (Test-Path "$D\Outputs\Dose.raw")) { "run failed: the tree is still moved, for the record" }
+
+          # Move: pack everything except the CT and Materials (inputs already on the share), copy, verify, remove.
+          $name = "lungman_lenovo_${sha12}_$($env:MODE).tar.gz"
+          $out = 'C:\mcsq-collect'
+          if (-not (Test-Path -LiteralPath $out)) { New-Item -ItemType Directory -Path $out | Out-Null }
+          if (Test-Path -LiteralPath "$out\$name") { throw "$out\$name exists: refusing to overwrite" }
+          & tar -czf "$out\$name" -C 'C:\mcsq-win\lg' --exclude "$sha12/CT.raw" --exclude "$sha12/Materials" $sha12
+          if ($LASTEXITCODE) { throw "tar failed ($LASTEXITCODE)" }
+          $local = (Get-FileHash -LiteralPath "$out\$name" -Algorithm SHA256).Hash.ToLower()
+          "$local  $name" | Set-Content -Encoding Ascii "$out\$name.sha256"
+          $rw = '\\192.168.1.212\SMBWritable'
+          $rc = [SmbConn]::Add($rw, 'gitearunner', $env:SMB_PW)
+          if ($rc -ne 0) { throw "SMBWritable: connect failed, error $rc" }
+          $verified = $false
+          try {
+            $dir = Join-Path $rw 'lungman'
+            if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
+            foreach ($f in @($name, "$name.sha256")) { if (Test-Path -LiteralPath (Join-Path $dir $f)) { throw "$f already exists on the share" } }
+            Copy-Item -LiteralPath "$out\$name" -Destination $dir
+            Copy-Item -LiteralPath "$out\$name.sha256" -Destination $dir
+            $remote = (Get-FileHash -LiteralPath (Join-Path $dir $name) -Algorithm SHA256).Hash.ToLower()
+            if ($remote -ne $local) { throw "share copy does not match the local tar ($local): nothing is removed" }
+            $verified = $true
+          } finally { "SMBWritable: disconnect rc " + [SmbConn]::Cancel($rw) }
+          if ($verified) {
+            Remove-Item -LiteralPath $D -Recurse -Force
+            Remove-Item -LiteralPath "$out\$name" -Force
+            "moved: lungman\$name is on the share and verified (sha256 $local); removed $D and the local tar"
+          }
+          if ($code -ne 0) { throw "MCsquare exited $code" }

@@ -1,78 +1,117 @@
-# MCsquare
+# MCsquare (portable)
 
-Fast Monte Carlo dose calculation algorithm for the simulation of PBS proton therapy.
+Fast Monte Carlo dose calculation for pencil-beam scanning proton therapy. This is a portable fork of
+[OpenMCsquare](https://gitlab.com/openmcsquare/MCsquare) that builds with open-source compilers and
+runs natively on Apple Silicon.
 
-## Compile the code (Linux)
+**No Intel software is needed or used.** The Intel compiler and Intel MKL that upstream requires are not
+used here: MKL's random number generator is replaced by PCG, and the MKL vector helpers by standard C.
+The code builds with Apple clang (with Homebrew `libomp`) and with GNU GCC, as described below.
 
-The following instructions were tested on Ubuntu 20.04.2 LTS 64-bit.
+## Platforms
 
-**1. Install the Intel OneAPI compiler suite:**
-To install the Intel toolkit, use these commands in your terminal:
+| Platform | Compiler | Status |
+|---|---|---|
+| **macOS on Apple Silicon (arm64)** | Apple clang + Homebrew `libomp` | Primary target; built and tested in CI on every pull request |
+| macOS on Apple Silicon (arm64) | Homebrew GCC (`gcc-15`) | Builds and runs the smoke test; not run in CI |
+| Linux x86-64 | GCC with OpenMP | Builds and runs (benchmarked on Ubuntu 24.04); not run in CI |
+| Windows x86-64 | MinGW-w64 GCC (MSYS2 UCRT64) | Builds and runs the smoke test in CI on every pull request |
 
-```
-sudo apt autoremove 'intel-*kit'  'intel-oneapi*'
-cd /tmp
-wget https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
-sudo apt-key add GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
-rm GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
-echo "deb https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-sudo apt update
-sudo apt install intel-basekit intel-hpckit
-```
+## Build on Apple Silicon
 
-More details available on: 
-https://software.intel.com/content/www/us/en/develop/articles/installing-intel-oneapi-toolkits-via-apt.html
-
-**2. download the source code of MCsquare:**
-If git is not installed on your system yet, use these commands in your terminal:
+**Xcode is not needed.** The Apple Command Line Tools are, for either compiler: they supply the macOS
+SDK headers and the linker, which Homebrew's GCC also uses.
 
 ```
-sudo apt update
-sudo apt install git
+xcode-select --install          # Command Line Tools (skip if already installed)
 ```
 
-Then, clone the git repository on your computer:
+**Option 1: Apple clang + libomp** (what CI uses):
 
 ```
-git clone https://gitlab.com/openmcsquare/MCsquare.git
+brew install libomp
+make MCsquare_arm64
 ```
 
-**3. Compile the code:**
-Initialize the Intel compiler toolkit:
+**Option 2: GNU GCC** (uses GCC's own OpenMP runtime, `libgomp`):
+
 ```
-source /opt/intel/oneapi/setvars.sh
+brew install gcc
+gcc-15 src/*.c -fopenmp -lm -O3 -DVERSION='"portable, gcc-15"' -o MCsquare_arm64
 ```
 
-Move to the MCsquare folder and compile:
+On macOS, plain `gcc` is Apple clang under another name and does not accept `-fopenmp`, so call the
+versioned Homebrew binary (`gcc-15`, or whichever version `brew` installed).
+
+Plain `make` builds upstream's Intel targets, so always name a target.
+
+## Build on Linux (x86-64)
+
 ```
-cd MCsquare
-make all
+sudo apt install build-essential    # gcc with OpenMP
+make MCsquare_portable
 ```
 
-## Run MCsquare (Linux)
-You can test your executable by printing the version using this command in your terminal:
-```
-./MCsquare_linux -v
-```
-Configure your simulation in the config.txt file.
-Then, run the MCsquare launcher from your terminal:
-```
-./MCsquare
-```
-The launcher will automatically call the executable that correspond to your computer hardware.
+## Build on Windows (x86-64)
 
-You can try to run MCsquare with the sample input data:
+Install [MSYS2](https://www.msys2.org), then in its **UCRT64** shell:
+
 ```
-./MCsquare Sample_input_data/config.txt 
+pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libgomp make
+make MCsquare_win_portable
 ```
 
+This produces `MCsquare_win_portable.exe`. It uses GCC's OpenMP runtime, `libgomp-1.dll`, which MSYS2
+provides only as a DLL. So run it from the UCRT64 shell, add `C:\msys64\ucrt64\bin` to `PATH`, or copy
+the DLLs it needs from there next to the `.exe`. Microsoft's compiler (MSVC) is not supported: its C
+OpenMP support stops at version 2.0.
 
+## Run
 
-## Instructions for Windows
-Install the Windows version of the Intel OneAPI toolkit (with the HPC module).
+Run the binary directly with a configuration file. Upstream's `MCsquare` launcher script selects the
+Intel builds and is not used here. The binary is `MCsquare_arm64` on Apple Silicon,
+`MCsquare_portable` on Linux and `MCsquare_win_portable.exe` on Windows:
 
-Compile MCsquare by running Makefile.bat
-(You may need to adapt the path to librarary directories in Makefile.bat)
+```
+./MCsquare_arm64 Sample_input_data/config.txt       # Apple Silicon
+./MCsquare_portable Sample_input_data/config.txt    # Linux
+./MCsquare_win_portable.exe Sample_input_data/config.txt     # Windows, MSYS2 UCRT64 shell
+.\MCsquare_win_portable.exe Sample_input_data\config.txt     # Windows, PowerShell
+```
 
-Configure the simulation in config.txt
-Then, run MCsquare with the launcher: MCsquare.bat
+Materials are read from `./Materials` if present, otherwise from the directory in the environment
+variable `MCsquare_Materials_Dir`. A quick check with 1000 primaries (use `./MCsquare_portable` on Linux):
+
+```
+mkdir -p smoke_test_output
+./MCsquare_arm64 Sample_input_data/smoke_test_config.txt
+```
+
+## Tests
+
+The C regression tests build with clang + libomp and run with UndefinedBehaviorSanitizer, as CI does:
+
+```
+make test_transport test_remove_tmp test_material_labels test_angle
+```
+
+## Differences from upstream
+
+Apart from portability, this fork fixes defects found while porting. Each is recorded in an issue here:
+
+- **Secondary emission angles (#16).** Upstream interpolates the angular table of nuclear-inelastic
+  secondaries at an energy in eV between brackets in MeV, so the sampled angles do not follow the
+  ICRU data. It reads past the end of the angle table for about one sample in four. The measured
+  effect is that dose just outside a large field is underestimated. Not yet reported upstream.
+- **Out-of-range emission angle (#24).** An angle index outside the table now aborts with a message
+  instead of producing an angle.
+- Other upstream defects fixed:
+  - #5: a buffer overflow in beamlet mode, because path buffers were too short.
+  - #8: a ray that misses the CT read uninitialised data in `Transport_to_CT`.
+  - #12: temporary folders were removed through `system()` with a path from the configuration; they are
+    now removed without a shell.
+  - #20: an inner loop in `CT_Transport_SPR` reused the outer lane index. That code is not reached in
+    default builds, because `define.h` sets `InterfaceCrossing` to `VoxelInterface`.
+
+The physics of the corrected sampling has not yet been validated against measurement or a TOPAS/Geant4
+reference.

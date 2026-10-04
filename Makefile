@@ -64,13 +64,57 @@ MC2_gcc_UMCG : $(SRC)
 	gcc $(SRC) -fcilkplus -fopenmp -lmkl_intel_lp64 -lmkl_core -lmkl_gnu_thread -lm -ldl $(OPTIONS) $(LIB_PATH) -static -m64 -march=corei7-avx  -I/opt/intel/compilers_and_libraries_2018.2.199/linux/mkl/include/ -L/opt/intel/compilers_and_libraries_2018.2.199/linux/mkl/lib/intel64_lin -o MC2_gcc
 
 # Portable builds - no Intel MKL dependency (uses PCG random number generator)
+# EXTRA_CFLAGS (empty by default) adds host tuning, e.g. make MCsquare_arm64 EXTRA_CFLAGS=-mcpu=native (issue #36).
 # Requires: mkl-to-pcg64 branch changes (PCG replaces MKL VSL, floorf replaces vsFloor)
 
 MCsquare_portable : $(SRC)
-	gcc $(SRC) -fopenmp -lgomp -lpthread -lm -ldl -O3 $(FULL_VERSION) -m64 -o MCsquare_portable
+	gcc $(SRC) -fopenmp -lgomp -lpthread -lm -ldl -O3 $(EXTRA_CFLAGS) $(FULL_VERSION) -m64 -o MCsquare_portable
 
 MCsquare_arm64 : $(SRC)
-	clang $(SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O3 $(FULL_VERSION) -o MCsquare_arm64
+	clang $(SRC) -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp -lpthread -lm -O3 $(EXTRA_CFLAGS) $(FULL_VERSION) -o MCsquare_arm64
+
+# Windows x86-64 with MinGW-w64 GCC (MSYS2 UCRT64 shell): make MCsquare_win_portable
+# Uses its own source list: on Windows COMSPEC is set, so $(SRC) above is the Intel `src\*.c` form.
+# MSYS2 ships no static libgomp, so the .exe needs libgomp-1.dll and its companions from ucrt64\bin
+# at run time: run it in the UCRT64 shell, put ucrt64\bin on PATH, or copy those DLLs next to it.
+WIN_SRC = $(wildcard src/*.c)
+MCsquare_win_portable : $(WIN_SRC)
+	gcc $(WIN_SRC) -fopenmp -lm -O3 $(EXTRA_CFLAGS) $(FULL_VERSION) -o MCsquare_win_portable.exe
+
+# Windows regression test for the temporary-folder removal (#12, #28). CI runs it with a fresh root.
+test_remove_tmp_win : tests/test_remove_temporary_folders_win.c $(WIN_SRC)
+	gcc -Isrc tests/test_remove_temporary_folders_win.c $(filter-out src/main.c, $(WIN_SRC)) -fopenmp -lm -O1 -DVERSION='"test"' -o test_remove_temporary_folders_win.exe
+
+# C regression tests. UBSan with no recovery, so an out-of-bounds read fails deterministically
+# instead of depending on what is on the stack.
+# macOS: clang with Homebrew's libomp. Elsewhere (Linux): gcc with its own OpenMP runtime.
+TEST_SRC = $(filter-out src/main.c, $(SRC))
+ifeq ($(shell uname -s 2>/dev/null),Darwin)
+  TEST_CC = clang
+  TEST_OMP = -Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include -L/opt/homebrew/opt/libomp/lib -lomp
+else
+  TEST_CC = gcc
+  TEST_OMP = -fopenmp
+endif
+TEST_FLAGS = $(TEST_OMP) -lpthread -lm -O1 -g -fsanitize=undefined -fno-sanitize-recover=all -DVERSION='"test"'
+test_transport : tests/test_transport_to_ct.c $(TEST_SRC)
+	$(TEST_CC) -Isrc tests/test_transport_to_ct.c $(TEST_SRC) $(TEST_FLAGS) -o test_transport_to_ct
+	./test_transport_to_ct
+
+# Regression test for issue #12: the temporary folders are removed without a shell.
+test_remove_tmp : tests/test_remove_temporary_folders.c $(TEST_SRC)
+	$(TEST_CC) -Isrc tests/test_remove_temporary_folders.c $(TEST_SRC) $(TEST_FLAGS) -o test_remove_temporary_folders
+	./test_remove_temporary_folders
+
+# Regression test for issue #20: every lane that changes material is relabelled (SPR transport).
+test_material_labels : tests/test_update_material_labels.c $(TEST_SRC)
+	$(TEST_CC) -Isrc tests/test_update_material_labels.c $(TEST_SRC) $(TEST_FLAGS) -o test_update_material_labels
+	./test_update_material_labels
+
+# Regression test for issue #16: secondary emission angles are sampled from the angular table.
+test_angle : tests/test_secondary_angle.c $(TEST_SRC)
+	$(TEST_CC) -Isrc tests/test_secondary_angle.c $(TEST_SRC) $(TEST_FLAGS) -o test_secondary_angle
+	./test_secondary_angle
 
 
 

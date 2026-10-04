@@ -364,6 +364,28 @@ void CT_Transport(Hadron *hadron, DATA_CT *ct, VAR_COMPUTE *v_s, VAR_COMPUTE *v_
 }
 
 
+// Masked update of every lane's material label from its current voxel; if any label changed,
+// the stopping power of every lane is recomputed from the new labels, as upstream 85bf291 does.
+// Returns the number of lanes whose material changed. (Issue #20: the converted loop reused the
+// lane index in an inner loop and stopped after the first changed lane.)
+int Update_material_labels(DATA_CT *ct, Materials *material, int *v_index, int *v_data_index, int *v_material_label, VAR_COMPUTE *v_stop_pow){
+  int changed = 0;
+  #pragma omp simd reduction(+:changed)
+  for (int i = 0; i < VLENGTH; i++) {
+    if(v_material_label[i] != ct->material[v_index[i]]){
+      v_material_label[i] = ct->material[v_index[i]];
+      changed++;
+    }
+  }
+  if(changed > 0){
+    for (int i = 0; i < VLENGTH; i++) {
+      v_stop_pow[i] = (VAR_COMPUTE)material[v_material_label[i]].Stop_Pow[v_data_index[i]];
+    }
+  }
+  return changed;
+}
+
+
 void CT_Transport_SPR(Hadron *hadron, DATA_CT *ct, Materials *material, VAR_COMPUTE *v_s, VAR_COMPUTE *v_tau, int *v_init_index, int *v_hinge_index, VAR_COMPUTE *v_init_density){
 
   __assume_aligned(v_s, 64);
@@ -479,16 +501,7 @@ void CT_Transport_SPR(Hadron *hadron, DATA_CT *ct, Materials *material, VAR_COMP
     }
     Dist_To_Interface(hadron, ct, v_step);
 
-        #pragma omp simd
-    for (int i = 0; i < VLENGTH; i++) {
-    if(v_material_label[i] != ct->material[v_index[i]]){
-    	v_material_label[i] = ct->material[v_index[i]];
-    //	Total_Stop_Pow(hadron, material, v_material_label, v_stop_pow);
-      	for(i=0; i<VLENGTH; i++){
-      	  v_stop_pow[i] = (VAR_COMPUTE)material[v_material_label[i]].Stop_Pow[v_data_index[i]];
-      	}
-        }
-    }
+    Update_material_labels(ct, material, v_index, v_data_index, v_material_label, v_stop_pow);
 
         #pragma omp simd
     for (int i = 0; i < VLENGTH; i++) {

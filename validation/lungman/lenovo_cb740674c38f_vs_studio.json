@@ -1,0 +1,73 @@
+{
+ "lenovo": {
+  "tumour_mean_gy_per_mu": 0.033477991819381714,
+  "tumour_min": 0.023860139772295952,
+  "tumour_max": 0.05164344608783722,
+  "high_dose_centroid_zyx_mm": [
+   94.37,
+   110.12,
+   113.38
+  ],
+  "high_dose_voxels": 16716
+ },
+ "studio": {
+  "tumour_mean_gy_per_mu": 0.03354492783546448,
+  "tumour_min": 0.023558294400572777,
+  "tumour_max": 0.05156523361802101,
+  "high_dose_centroid_zyx_mm": [
+   94.38,
+   110.17,
+   113.43
+  ],
+  "high_dose_voxels": 17039
+ },
+ "tumour_centroid_zyx_mm": [
+  94.56,
+  117.07,
+  118.19
+ ],
+ "centroid_shift_lenovo_minus_studio_mm": [
+  -0.01,
+  -0.05,
+  -0.05
+ ],
+ "tumour_mean_ratio_lenovo_over_studio": 0.998004586075991,
+ "body_above_10pct_dose_diff_pct_of_studio_max": {
+  "n": 277113,
+  "mean": -0.021560784429311752,
+  "p95_abs": 2.0652825832366943
+ },
+ "tumour_voxels_with_lenovo_dose_zero": 0,
+ "axis_profile": {
+  "step_mm": 0.5,
+  "from_mm": -80.0,
+  "to_mm": 60.0,
+  "max_abs_diff_pct_of_studio_axis_max": 5.298373222351074,
+  "peak_mm": {
+   "lenovo": 4.0,
+   "studio": 3.0
+  },
+  "distal_r80_mm_from_centroid": {
+   "lenovo": 10.892061322927475,
+   "studio": 7.490980684757233
+  }
+ },
+ "gamma_2pct_2mm_body": {
+  "points": 277113,
+  "pass_rate_pct": 99.99603050019307,
+  "box_zyx": [
+   [
+    91,
+    181
+   ],
+   [
+    0,
+    330
+   ],
+   [
+    0,
+    309
+   ]
+  ]
+ }
+}

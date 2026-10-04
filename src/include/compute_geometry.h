@@ -26,6 +26,7 @@ void Update_position(Hadron *hadron, VAR_COMPUTE *v_step);
 void Update_direction(Hadron *hadron, VAR_COMPUTE *v_theta, VAR_COMPUTE *v_phi);
 void Update_buffer_direction(Hadron_buffer *secondary_hadron, VAR_COMPUTE theta, VAR_COMPUTE phi);
 void CT_Transport(Hadron *hadron, DATA_CT *ct, VAR_COMPUTE *v_s, VAR_COMPUTE *v_tau, int *v_init_index, int *v_hinge_index, VAR_COMPUTE *v_init_density);
+int Update_material_labels(DATA_CT *ct, Materials *material, int *v_index, int *v_data_index, int *v_material_label, VAR_COMPUTE *v_stop_pow);
 void CT_Transport_SPR(Hadron *hadron, DATA_CT *ct, Materials *material, VAR_COMPUTE *v_s, VAR_COMPUTE *v_tau, int *v_init_index, int *v_hinge_index, VAR_COMPUTE *v_init_density);
 void CT_Transport_Random_Hinge(Hadron *hadron, DATA_CT *ct, VAR_COMPUTE *v_s, VAR_COMPUTE *v_tau, int *v_init_index, int *v_hinge_index, VAR_COMPUTE *v_init_density, VAR_COMPUTE *v_mask);
 

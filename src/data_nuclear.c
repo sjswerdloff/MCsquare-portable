@@ -52,7 +52,7 @@ int Init_Nuclear_Data(Materials *material, int Nbr_Materials, DATA_config *confi
 
 int read_Nuclear_Elastic_ICRU(Materials *material, DATA_config *config){
   FILE *file = NULL;
-  char read[500], file_name[100], *read_token;
+  char read[500], file_name[PATH_SIZE], *read_token;
   int i, Nbr_Energy = 0;
 
   strcpy(file_name, config->Materials_Dir);
@@ -163,7 +163,7 @@ int read_Nuclear_Inelastic_ICRU(Materials *material, DATA_config *config){
   static const double ICRU_angles[13] = { 0, 10, 20, 30, 40, 50, 60, 70, 90, 110, 130, 150, 180 };
 
   FILE *file = NULL;
-  char read[500], file_name[100], *read_token, secondary[25];
+  char read[500], file_name[PATH_SIZE], *read_token, secondary[25];
   int Nbr_Energy = 0, Nbr_rows, i, j;
   VAR_DATA *pt_Energy, *pt_cross_section, *pt_diff_cross_section;
 
@@ -395,7 +395,7 @@ int read_Nuclear_Inelastic_ICRU(Materials *material, DATA_config *config){
 
 int read_PromptGamma_ICRU(Materials *material, DATA_config *config){
   FILE *file = NULL;
-  char read[500], file_name[100], *read_token, secondary[25];
+  char read[500], file_name[PATH_SIZE], *read_token, secondary[25];
   int i, Nbr_Energy = 0, Nbr_rows;
   VAR_DATA *pt_Energy, *pt_diff_cross_section;
 
