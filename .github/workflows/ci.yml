@@ -65,10 +65,26 @@ jobs:
           ls -la MCsquare_arm64
           file MCsquare_arm64
 
+      # The same regression tests the Gitea CI runs. Each builds and runs in a few seconds.
+      - name: Regression tests (UBSan)
+        run: make test_transport
+
+      - name: Temporary folders removed without a shell (issue #12)
+        run: make test_remove_tmp
+
+      - name: Every lane that changes material is relabelled (issue #20)
+        run: make test_material_labels
+
+      - name: Secondary emission angles follow the angular table (issue #16)
+        run: make test_angle
+
       - name: Smoke test (1000 primaries)
         run: |
           mkdir -p smoke_test_output
           ./MCsquare_arm64 Sample_input_data/smoke_test_config.txt
+
+      - name: Long output path (issue #5)
+        run: tests/test_long_output_path.sh ./MCsquare_arm64
 
       - name: Verify output
         run: |
